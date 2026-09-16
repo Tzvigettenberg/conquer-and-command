@@ -1,0 +1,3 @@
+root = true
+[*.gd]
+indent_style = tab

@@ -1,0 +1,4 @@
+.godot/
+*.tmp
+# Synty assets are licensed, not redistributable - keep them out of any public repo
+Assets/

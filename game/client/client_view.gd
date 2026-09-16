@@ -1,0 +1,392 @@
+class_name ClientView
+extends Node3D
+## Everything the local player sees: replicated puppets, map, fog, camera, HUD, FX.
+
+var map: Dictionary
+var my_index := 0
+var puppets: Dictionary = {}       # id -> Puppet
+var pstate: Dictionary = {}
+var map_view: MapView
+var fx: Fx
+var camera: RtsCamera
+var ctl: Controller
+var hud: Hud
+var grid := PathGrid.new()         # client-side copy for placement previews
+var alerts: Array = []
+var game_over := false
+var args: Dictionary = {}
+var names: Array = []
+var last_snapshot_tick := 0
+var session: Session
+
+func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
+	map = m
+	my_index = index
+	args = _args
+	session = get_parent().session
+	for p in lobby:
+		names.append(p["name"])
+	grid.setup(float(m["size"]))
+	for pr in m["props"]:
+		var fp: Vector2i = pr["fp"]
+		if fp != Vector2i.ZERO:
+			grid.set_cells(PathGrid.footprint_cells(pr["p"], fp), true)
+	map_view = MapView.new()
+	map_view.name = "MapView"
+	add_child(map_view)
+	map_view.setup(m)
+	fx = Fx.new()
+	fx.name = "Fx"
+	add_child(fx)
+	camera = RtsCamera.new()
+	camera.name = "Camera"
+	add_child(camera)
+	var start: Vector2 = m["starts"][index]
+	camera.setup(float(m["size"]), start + Vector2(0, 10))
+	camera.yaw = float(m["start_yaw"][index])
+	camera._apply()
+	ctl = Controller.new()
+	ctl.name = "Controller"
+	add_child(ctl)
+	ctl.setup(self)
+	hud = Hud.new()
+	hud.name = "Hud"
+	add_child(hud)
+	hud.setup(self, ctl)
+	_warm_animations()
+	if Visuals.missing_assets:
+		on_msg("Synty assets not found - using placeholder shapes")
+	on_msg("Welcome, %s. You are %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index]])
+	if args.has("test"):
+		_run_test(str(args["test"]))
+	if args.has("screenshot"):
+		_screenshots(str(args["screenshot"]))
+	if args.has("exit_after"):
+		get_tree().create_timer(float(args["exit_after"])).timeout.connect(func() -> void:
+			print("[Test] exiting")
+			get_tree().quit())
+
+func _screenshots(dir: String) -> void:
+	var n := 0
+	while is_inside_tree():
+		await get_tree().create_timer(8.0).timeout
+		if not is_inside_tree():
+			return
+		await RenderingServer.frame_post_draw
+		var img := get_viewport().get_texture().get_image()
+		var path := "%s/shot_%02d.png" % [dir, n]
+		img.save_png(path)
+		print("[Shot] saved ", path)
+		n += 1
+
+func _warm_animations() -> void:
+	# Build the retargeted animation library once up front so the first infantry
+	# spawn doesn't hitch.
+	var ps := Visuals.prefab(Data.UNITS["ranger"]["model"])
+	if ps == null:
+		return
+	var inst := ps.instantiate()
+	Visuals.strip_physics(inst)
+	add_child(inst)
+	var skels := inst.find_children("*", "Skeleton3D", true, false)
+	if not skels.is_empty():
+		AnimRetarget.build_libraries(skels[0])
+	inst.queue_free()
+
+func send(c: Dictionary) -> void:
+	session.send_cmd(c)
+
+# ---------------------------------------------------------------------------
+# Replication callbacks
+# ---------------------------------------------------------------------------
+func on_spawn(id: int, type: String, owner: int, pos: Vector2, alt: float, yaw: float, extra: Dictionary) -> void:
+	var p: Puppet = puppets.get(id)
+	if p != null:
+		if p.team != owner:
+			# captured: rebuild the visual with the new colours
+			p.queue_free()
+			puppets.erase(id)
+			_unblock(p)
+		else:
+			p.complete = extra.get("complete", p.complete)
+			p.boxes = extra.get("boxes", p.boxes)
+			return
+	p = Puppet.new()
+	p.name = "E%d" % id
+	add_child(p)
+	p.setup(id, type, owner, pos, alt, yaw, extra, owner == my_index)
+	puppets[id] = p
+	if p.is_building:
+		grid.set_cells(PathGrid.footprint_cells(pos, Data.BUILDINGS[type]["fp"]), true)
+
+func _unblock(p: Puppet) -> void:
+	if p.is_building:
+		grid.set_cells(PathGrid.footprint_cells(Vector2(p.cur_pos.x, p.cur_pos.z), Data.BUILDINGS[p.type]["fp"]), false)
+
+func on_despawn(id: int, reason: String) -> void:
+	var p: Puppet = puppets.get(id)
+	if p == null:
+		return
+	puppets.erase(id)
+	_unblock(p)
+	if reason == "killed":
+		if p.cat == "inf":
+			fx.death(p.type, p.cur_pos, p.cur_yaw, p.detach_model())
+		else:
+			fx.death(p.type, p.cur_pos, p.cur_yaw)
+	ctl.selected.erase(id)
+	p.queue_free()
+	ctl._refresh_sig()
+
+func on_state(bytes: PackedByteArray) -> void:
+	var buf := StreamPeerBuffer.new()
+	buf.data_array = bytes
+	var tick := buf.get_u32()
+	if tick < last_snapshot_tick:
+		return
+	last_snapshot_tick = tick
+	var n := buf.get_u16()
+	var now := Time.get_ticks_msec() / 1000.0
+	for i in range(n):
+		var id := buf.get_u16()
+		var x := buf.get_16() / 20.0
+		var y := buf.get_16() / 20.0
+		var alt := buf.get_u16() / 20.0
+		var yaw := buf.get_u8() / 255.0 * TAU
+		var tyaw := buf.get_u8() / 255.0 * TAU
+		var hpf := buf.get_u8() / 255.0
+		var flags := buf.get_u8()
+		var aux := buf.get_u8()
+		var p: Puppet = puppets.get(id)
+		if p == null:
+			continue
+		p.apply_state(Vector2(x, y), alt, yaw, tyaw, hpf, flags, aux, now)
+	# hide units that stopped being replicated (left our vision)
+	for p in puppets.values():
+		if not p.is_building and not p.ghost and p.is_stale(now):
+			p.ghost = true
+			p.visible = false
+			if p.selected:
+				ctl.selected.erase(p.id)
+				p.selected = false
+				ctl._refresh_sig()
+		elif not p.is_building and p.ghost and not p.is_stale(now):
+			p.ghost = false
+			p.visible = true
+
+func on_events(evs: Array) -> void:
+	for ev in evs:
+		var k: String = ev[0]
+		var d: Array = ev[1]
+		match k:
+			"shot":
+				var a: Puppet = puppets.get(int(d[0]))
+				var from := Vector3(0, 0, 0)
+				if a != null:
+					from = a.cur_pos + Vector3(0, 1.2 if a.cat == "inf" else (1.8 if not a.is_building else 3.0), 0)
+					if a.cat == "air":
+						from = a.cur_pos + Vector3(0, -0.5, 0)
+				else:
+					continue
+				fx.shot(from, Vector3(d[2], float(d[4]) + 0.8, d[3]), str(d[1]))
+			"hit":
+				var wd: Dictionary = Data.WEAPONS.get(str(d[0]), {})
+				fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"))
+			"die":
+				pass   # despawn carries the visual death
+			"cash":
+				pass
+			"alert":
+				alerts.append({"p": Vector2(d[0], d[1]), "t": Time.get_ticks_msec() / 1000.0})
+				while alerts.size() > 8:
+					alerts.pop_front()
+			"beam":
+				fx.particle_beam(Vector3(d[0], 0, d[1]))
+			"strike":
+				fx.strike(str(d[0]), Vector3(d[1], 0, d[2]), float(d[3]), int(d[4]) if d.size() > 4 else 1)
+			"place":
+				pass
+			"built":
+				var b: Puppet = puppets.get(int(d[0]))
+				if b != null:
+					fx.placed(b.cur_pos, Data.footprint_size(b.type))
+
+func on_fog(bytes: PackedByteArray) -> void:
+	map_view.update_fog(bytes)
+
+func on_pstate(st: Dictionary) -> void:
+	pstate = st
+
+func on_msg(text: String) -> void:
+	print("[MSG p%d] %s" % [my_index, text])
+	if hud:
+		hud.add_message(text)
+
+func on_gameover(winner: int) -> void:
+	game_over = true
+	var text := "DEFEAT"
+	if winner == -2:
+		text = "DISCONNECTED"
+	elif winner == my_index:
+		text = "VICTORY"
+	elif winner == -1:
+		text = "GAME OVER"
+	hud.show_gameover(text)
+	map_view.reveal_all()
+	ctl.cancel_mode()
+
+# ---------------------------------------------------------------------------
+# Helpers for HUD / controller
+# ---------------------------------------------------------------------------
+func can_afford(cost: int) -> bool:
+	return int(pstate.get("cash", 0)) >= cost
+
+func has_building(type: String) -> bool:
+	for p in puppets.values():
+		if p.team == my_index and p.type == type and p.complete:
+			return true
+	return false
+
+func count_own(type: String) -> int:
+	var n := 0
+	for p in puppets.values():
+		if p.team == my_index and p.type == type:
+			n += 1
+	return n
+
+func has_upgrade(uid: String, bid := -1) -> bool:
+	if pstate.get("upgrades", []).has(uid):
+		return true
+	if bid >= 0:
+		var ud: Dictionary = pstate.get("upg_done", {})
+		if ud.has(bid) and ud[bid].has(uid):
+			return true
+	return false
+
+func building_prereq_text(type: String) -> String:
+	var d: Dictionary = Data.BUILDINGS[type]
+	for r in d.get("prereq", []):
+		if not has_building(r):
+			return "Requires %s" % Data.BUILDINGS[r]["name"]
+	if d.has("prereq_any"):
+		var ok := false
+		for r in d["prereq_any"]:
+			if has_building(r):
+				ok = true
+		if not ok:
+			return "Requires %s" % Data.BUILDINGS[d["prereq_any"][0]]["name"]
+	return ""
+
+func unit_prereq_text(type: String) -> String:
+	var d: Dictionary = Data.UNITS[type]
+	for r in d.get("prereq", []):
+		if not has_building(r):
+			return "Requires %s" % Data.BUILDINGS[r]["name"]
+	if d.has("needs_power"):
+		if int(pstate.get("powers", {}).get(d["needs_power"], 0)) <= 0:
+			return "Requires promotion: %s" % Data.POWERS[d["needs_power"]]["name"]
+	if d.has("limit") and count_own(type) >= int(d["limit"]):
+		return "Limit reached"
+	return ""
+
+func sw_ready(owner: int) -> bool:
+	var sw: Dictionary = pstate.get("sw", {})
+	return sw.has(owner) and float(sw[owner]) <= 0.0
+
+func placement_ok(type: String, pos: Vector2) -> bool:
+	var d: Dictionary = Data.BUILDINGS[type]
+	var fp: Vector2i = d["fp"]
+	var half := Vector2(fp) * 1.0
+	var size := float(map["size"])
+	if pos.x - half.x < 6.0 or pos.y - half.y < 6.0 or pos.x + half.x > size - 6.0 or pos.y + half.y > size - 6.0:
+		return false
+	if not grid.footprint_free(pos, fp, 1):
+		return false
+	if not map_view.is_explored(pos):
+		return false
+	return true
+
+# ---------------------------------------------------------------------------
+# Scripted smoke test (headless verification): --test=smoke
+# ---------------------------------------------------------------------------
+func _own(type: String) -> Puppet:
+	for p in puppets.values():
+		if p.team == my_index and p.type == type:
+			return p
+	return null
+
+func _own_ids(filter: Callable) -> Array:
+	var out := []
+	for p in puppets.values():
+		if p.team == my_index and filter.call(p):
+			out.append(p.id)
+	return out
+
+func _run_test(kind: String) -> void:
+	print("[Test] scenario %s as player %d" % [kind, my_index])
+	await get_tree().create_timer(1.5).timeout
+	var cc := _own("command_center")
+	var dz := _own("dozer")
+	if cc == null or dz == null:
+		print("[Test] FAIL: no command center / dozer")
+		return
+	var base := Vector2(cc.cur_pos.x, cc.cur_pos.z)
+	var dir := 1.0 if my_index == 0 else -1.0
+	var plan := [
+		["power_plant", base + Vector2(22, 0) * dir],
+		["barracks", base + Vector2(0, 22) * dir],
+		["supply_center", base + Vector2(24, 24) * dir],
+		["war_factory", base + Vector2(-22, 24) * dir],
+		["patriot", base + Vector2(30, -12) * dir],
+	]
+	for step in plan:
+		var pos: Vector2 = PathGrid.snap_center(step[1], Data.BUILDINGS[step[0]]["fp"])
+		send({"t": "build", "id": dz.id, "type": step[0], "x": pos.x, "y": pos.y})
+		print("[Test] ordered %s at %s" % [step[0], pos])
+		var waited := 0.0
+		while waited < 90.0:
+			await get_tree().create_timer(1.0).timeout
+			waited += 1.0
+			var b := _own(step[0])
+			if b != null and b.complete:
+				print("[Test] %s complete after %.0fs (cash %d)" % [step[0], waited, pstate.get("cash", 0)])
+				break
+			if b == null and waited > 6.0:
+				print("[Test] WARN %s never placed" % step[0])
+				break
+	# production
+	var bar := _own("barracks")
+	if bar:
+		for i in range(4):
+			send({"t": "produce", "id": bar.id, "type": "ranger"})
+		send({"t": "produce", "id": bar.id, "type": "missile_defender"})
+	var wf := _own("war_factory")
+	if wf:
+		for i in range(3):
+			send({"t": "produce", "id": wf.id, "type": "crusader"})
+		send({"t": "produce", "id": wf.id, "type": "humvee"})
+		send({"t": "upgrade", "id": wf.id, "uid": "tow"})
+	var sc := _own("supply_center")
+	if sc:
+		send({"t": "produce", "id": sc.id, "type": "chinook"})
+	await get_tree().create_timer(40.0).timeout
+	_report()
+	# send the army toward the enemy base
+	var enemy_base: Vector2 = map["starts"][1 - my_index] if map["starts"].size() > 1 else Vector2(200, 200)
+	var army := _own_ids(func(p: Puppet) -> bool: return not p.is_building and p.cat != "air" and not p.def.get("builder", false))
+	print("[Test] attack-moving %d units to %s" % [army.size(), enemy_base])
+	send({"t": "amove", "ids": army, "x": enemy_base.x, "y": enemy_base.y, "q": false})
+	for i in range(6):
+		await get_tree().create_timer(15.0).timeout
+		_report()
+	print("[Test] done")
+
+func _report() -> void:
+	var counts := {}
+	var enemy := 0
+	for p in puppets.values():
+		if p.team == my_index:
+			counts[p.type] = counts.get(p.type, 0) + 1
+		elif p.team >= 0 and not p.ghost:
+			enemy += 1
+	print("[Test p%d] t=%.0f cash=%d power=%s/%s own=%s enemies_visible=%d" % [my_index, pstate.get("time", 0.0), pstate.get("cash", 0), str(pstate.get("pp", 0)), str(pstate.get("pu", 0)), str(counts), enemy])
