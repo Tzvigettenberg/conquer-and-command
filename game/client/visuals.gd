@@ -111,6 +111,8 @@ static func make_model(type: String, owner: int) -> Node3D:
 			var sz := (fp.y * 0.92) / maxf(size.z, 0.01)
 			var sy := float(def.get("height", 8.0)) / maxf(size.y, 0.01)
 			s = minf(minf(sx, sz), sy * 1.4)
+		elif def.get("cat", "") == "inf":
+			s = float(def.get("length", 1.8)) / maxf(size.y, 0.01)   # infantry: fit by height
 		else:
 			var l := float(def.get("length", 4.0))
 			s = l / maxf(maxf(size.x, size.z), 0.01)
