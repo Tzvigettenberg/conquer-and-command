@@ -16,7 +16,7 @@
 - `jet_flyby.ogg` — "Jet.ogg" by egomassive — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/536809/
 - `jet_loop.ogg` — "Jet Engine" by m_cel — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/534856/
 - `metal_hit.ogg` — "hit - metallic - trailer - metal fender 02.wav" by Anthousai — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/406559/
-- `place_building.ogg` — "GROSS IMPACT" by magnuswaker — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/641040/
+- `place_building.ogg` — "Kladivo_hrebik.wav" by 13GPanska_Tatar_Filip — http://creativecommons.org/licenses/by/3.0/ — https://freesound.org/s/378590/
 - `plane_pass.ogg` — "Propeller plane flyby.flac" by YuriNikolai — https://creativecommons.org/licenses/by/4.0/ — https://freesound.org/s/347973/
 - `power_down.ogg` — "power-down-03.wav" by newagesoup — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/348250/
 - `power_up.ogg` — "Sci-Fi Gateway" by Bachsambora — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/752034/

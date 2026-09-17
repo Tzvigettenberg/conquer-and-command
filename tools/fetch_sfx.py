@@ -41,7 +41,7 @@ MANIFEST = {
     "chinook_loop":     ("helicopter hovering", 2.0, 20.0, True, ""),
     # base
     "construction":     ("construction site hammering", 2.0, 12.0, True, ""),
-    "place_building":   ("heavy thud impact", 0.3, 3.0, False, ""),
+    "place_building":   ("hammering nails wood construction", 0.6, 4.0, False, ""),
     "sell":             ("cash register", 0.3, 3.0, False, ""),
     "cash":             ("coins money", 0.2, 2.0, False, ""),
     "power_down":       ("power down", 0.5, 5.0, False, ""),

@@ -127,7 +127,7 @@ const UNITS := {
 		"vision": 30.0, "radius": 1.2, "length": 4.0, "cat": "veh", "from": "war_factory", "weapons": ["avenger_laser"], "prereq": ["strategy_center"], "turret": true,
 		"model": "Vehicles/SM_Veh_Radar_Tank_01.tscn", "wreck": "Vehicles/Destroyed/SM_Veh_Radar_Tank_01_Destroyed.tscn", "desc": "Anti-air laser platform."},
 	"chinook": {"name": "Chinook", "cost": 1200, "time": 10.0, "hp": 300.0, "armor": "ChinookArmor", "speed": 30.0, "turn": 180.0,
-		"vision": 60.0, "radius": 2.4, "length": 9.0, "cat": "air", "alt": 14.0, "from": "supply_center", "weapons": [], "gatherer": 8,
+		"vision": 60.0, "radius": 2.4, "length": 7.2, "cat": "air", "alt": 14.0, "from": "supply_center", "weapons": [], "gatherer": 8,
 		"model": "Vehicles/SM_Veh_Helicopter_Transport_01.tscn", "wreck": "Vehicles/Destroyed/SM_Veh_Helicopter_Transport_01_Destroyed.tscn", "desc": "Collects supplies ($600 per load)."},
 	"comanche": {"name": "Comanche", "cost": 1500, "time": 20.0, "hp": 220.0, "armor": "ComancheArmor", "speed": 24.0, "turn": 180.0,
 		"vision": 40.0, "radius": 2.0, "length": 7.0, "cat": "air", "alt": 16.0, "from": "airfield", "weapons": ["comanche_cannon", "comanche_rockets"],

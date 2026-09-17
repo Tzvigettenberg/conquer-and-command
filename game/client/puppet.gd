@@ -127,7 +127,7 @@ func _build_visual(mine: bool) -> void:
 		var limb := model.find_child(nm, true, false)
 		if limb != null:
 			limbs[nm] = limb
-	for n in model.find_children("*", "MeshInstance3D", true, false):
+	for n in model.find_children("*", "Node3D", true, false):
 		var nm: String = n.name
 		if "Rotor" in nm or "Blade" in nm or "Propeller" in nm:
 			rotors.append(n)
@@ -173,46 +173,41 @@ func _setup_loop() -> void:
 			name = "chinook_loop"
 		"raptor", "stealth_fighter", "aurora":
 			name = "jet_loop"
+	if cat == "inf":
+		name = "footsteps"
 	if is_building and not complete:
 		name = "construction"
 	if name == "":
 		return
-	loop = Audio.I.make_loop(name, -10.0)
+	loop = Audio.I.make_loop(name, -6.0)
 	if loop != null:
-		loop_base_db = -10.0
+		loop_base_db = -6.0 if cat != "inf" else -9.0
 		add_child(loop)
 
 ## Supply dock: a grid of crate stacks that empties as boxes are hauled away.
 func _build_crates() -> void:
-	# hide the placeholder model; the crates ARE the dock
-	model.visible = false
-	var ps := Visuals.prefab("Props/Military/SM_Prop_Crate_Stack_01.tscn")
+	# our own crate stacks on the dock pad; they disappear as the supplies run out
 	var fp: Vector2 = Data.footprint_size(type)
-	var cols := 4
-	var rows := 4
+	var cols := 3
+	var rows := 3
 	for r in range(rows):
 		for c in range(cols):
-			var n: Node3D
-			if ps != null:
-				n = Node3D.new()
-				var inst := ps.instantiate()
-				Visuals.strip_physics(inst)
-				var a := Visuals.local_aabb(inst)
-				var s := 1.7 / maxf(maxf(a.size.x, a.size.z), 0.01)
-				inst.scale = Vector3.ONE * s
-				var cen := a.get_center()
-				inst.position = Vector3(-cen.x * s, -a.position.y * s, -cen.z * s)
-				n.add_child(inst)
-			else:
-				n = Visuals.box(Vector3(1.5, 1.4, 1.5), Color(0.75, 0.6, 0.3))
-				n.position.y = 0.7
-				var holder := Node3D.new()
-				holder.add_child(n)
-				n = holder
-			n.position = Vector3(-fp.x * 0.5 + 1.2 + c * (fp.x - 2.4) / (cols - 1), 0.12, -fp.y * 0.5 + 1.2 + r * (fp.y - 2.4) / (rows - 1))
-			n.rotation.y = (r * 3 + c) * 0.4
-			add_child(n)
-			crates.append(n)
+			var stack := Node3D.new()
+			var n := 2 + ((r * 3 + c) % 3)
+			for k in range(n):
+				var sz := 1.25 - k * 0.12
+				var crate := Visuals.box(Vector3(sz, 1.0, sz), Color(0.78, 0.62, 0.3) if (k + c) % 2 == 0 else Color(0.62, 0.5, 0.26))
+				crate.position = Vector3(0, 0.5 + k * 1.0, 0)
+				crate.rotation.y = k * 0.35
+				stack.add_child(crate)
+				var strap := Visuals.box(Vector3(sz + 0.04, 0.12, 0.2), Color(0.25, 0.25, 0.28))
+				strap.position = Vector3(0, 0.5 + k * 1.0, 0)
+				strap.rotation.y = k * 0.35
+				stack.add_child(strap)
+			stack.position = Vector3(-fp.x * 0.5 + 1.9 + c * (fp.x - 3.8) / (cols - 1) - 0.6, 0.14, -fp.y * 0.5 + 1.6 + r * (fp.y - 3.2) / (rows - 1))
+			stack.rotation.y = (r * 3 + c) * 0.4
+			add_child(stack)
+			crates.append(stack)
 	set_crates(boxes)
 
 func set_crates(count: int) -> void:
@@ -603,6 +598,8 @@ func _process_unit(dt: float, now: float) -> void:
 			loop.pitch_scale = 1.0 + (0.25 if airborne else 0.0)
 		elif cat == "air":
 			loop.volume_db = loop_base_db + 2.0
+		elif cat == "inf":
+			loop.volume_db = loop_base_db if mv else -80.0   # footsteps only while walking
 		else:
 			loop.volume_db = loop_base_db + (0.0 if mv else -9.0) + rev_t * 5.0
 			loop.pitch_scale = 0.9 + minf(speed / 8.0, 1.0) * 0.25 + rev_t * 0.1

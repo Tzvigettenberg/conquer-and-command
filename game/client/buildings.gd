@@ -339,6 +339,23 @@ static func make(type: String, team: int) -> Node3D:
 			anim(root, dish, "spin", 0.3)
 			for i in range(4):
 				box(root, Vector3(1.0, 1.4, 1.0), Vector3(3.0 + (i % 2) * 2.5, 2.3, -2.5 + (i / 2) * 5.0), METAL_DARK)
+		"supply_dock":
+			# supply depot: concrete pad, fuel drums, a forklift-sized shed and a loading crane.
+			# The crates themselves are added by Puppet (they vanish as the dock empties).
+			box(root, Vector3(8.2, 0.14, 8.2), Vector3(0, 0.07, 0), CONCRETE_DARK)
+			box(root, Vector3(8.2, 0.03, 0.3), Vector3(0, 0.16, 3.9), WARN)
+			box(root, Vector3(8.2, 0.03, 0.3), Vector3(0, 0.16, -3.9), WARN)
+			for i in range(3):
+				cyl(root, 0.45, 0.45, 1.1, Vector3(-3.4, 0.7, -2.6 + i * 1.1), Color(0.75, 0.25, 0.2), 10)
+				box(root, Vector3(0.95, 0.06, 0.95), Vector3(-3.4, 1.28, -2.6 + i * 1.1), Color(0.5, 0.18, 0.15))
+			box(root, Vector3(0.18, 4.0, 0.18), Vector3(3.6, 2.0, -3.4), METAL)
+			var arm := Node3D.new()
+			arm.position = Vector3(3.6, 4.0, -3.4)
+			root.add_child(arm)
+			box(arm, Vector3(0.2, 0.2, 4.0), Vector3(0, 0, -1.8), METAL)
+			box(arm, Vector3(0.06, 1.6, 0.06), Vector3(0, -0.8, -3.4), METAL_DARK)
+			box(arm, Vector3(0.7, 0.5, 0.7), Vector3(0, -1.8, -3.4), Color(0.75, 0.6, 0.3))
+			anim(root, arm, "sweep", 0.25)
 		"oil_derrick":
 			# pump-jack that nods, tank, gantry
 			box(root, Vector3(3.6, 0.3, 5.6), Vector3(0, 0.15, 0), CONCRETE_DARK)

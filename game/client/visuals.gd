@@ -196,6 +196,67 @@ static func make_model(type: String, owner: int) -> Node3D:
 		Buildings.dozer_kit(root, owner, float(def.get("length", 4.4)))
 	return root
 
+## Boulder cluster filling an axis-aligned footprint (w x d cells of 2 m).
+static func _rock(root: Node3D, fp: Vector2i, seed_yaw: float) -> void:
+	var w := fp.x * 2.0 - 0.6
+	var d := fp.y * 2.0 - 0.6
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(seed_yaw * 1000.0) + fp.x * 31 + fp.y * 7
+	var base := Color(0.45, 0.4, 0.34)
+	var n := 3 + rng.randi() % 3
+	for i in range(n):
+		var sx := rng.randf_range(0.35, 0.7) * w
+		var sz := rng.randf_range(0.35, 0.7) * d
+		var sy := rng.randf_range(1.6, 2.6 + minf(w, d) * 0.35)
+		var mi := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.5
+		sm.height = 1.0
+		sm.radial_segments = 7
+		sm.rings = 4
+		mi.mesh = sm
+		mi.scale = Vector3(sx, sy, sz)
+		mi.position = Vector3(rng.randf_range(-(w - sx) * 0.5, (w - sx) * 0.5), sy * 0.35, rng.randf_range(-(d - sz) * 0.5, (d - sz) * 0.5))
+		mi.rotation = Vector3(rng.randf_range(-0.2, 0.2), rng.randf() * TAU, rng.randf_range(-0.2, 0.2))
+		mi.material_override = flat_mat(base.lightened(rng.randf_range(-0.12, 0.12)), false)
+		root.add_child(mi)
+	var slab := box(Vector3(w, 0.5, d), base.darkened(0.15))
+	slab.position.y = 0.25
+	root.add_child(slab)
+
+## Blocky tree in one cell: trunk + two or three canopy blocks (cactus in the desert).
+static func _tree(root: Node3D, yaw: float, rel: String) -> void:
+	root.rotation.y = yaw
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(yaw * 1000.0)
+	if "Cactus" in rel:
+		var g := Color(0.3, 0.5, 0.25)
+		var trunk := box(Vector3(0.5, 3.0 + rng.randf() * 1.5, 0.5), g)
+		trunk.position.y = trunk.mesh.size.y * 0.5
+		root.add_child(trunk)
+		for sx in [-1.0, 1.0]:
+			var arm := box(Vector3(0.4, 1.4, 0.4), g)
+			arm.position = Vector3(sx * 0.7, 2.0 + rng.randf(), 0)
+			root.add_child(arm)
+			var stub := box(Vector3(0.95, 0.4, 0.4), g)
+			stub.position = Vector3(sx * 0.45, arm.position.y - 0.5, 0)
+			root.add_child(stub)
+		return
+	var h := 2.2 + rng.randf() * 1.6
+	var trunk := box(Vector3(0.5, h, 0.5), Color(0.4, 0.28, 0.18))
+	trunk.position.y = h * 0.5
+	root.add_child(trunk)
+	var green := Color(0.2, 0.45, 0.2).lightened(rng.randf_range(-0.08, 0.1))
+	if "Snow" in rel or "Big" in rel:
+		green = Color(0.18, 0.35, 0.22)
+	var layers := 2 + rng.randi() % 2
+	for i in range(layers):
+		var sz := 2.2 - i * 0.55
+		var c := box(Vector3(sz, 1.1, sz), green.lightened(i * 0.06))
+		c.position.y = h + 0.4 + i * 0.85
+		c.rotation.y = i * 0.6
+		root.add_child(c)
+
 ## Subtle team tint over every mesh of a unit so ownership reads at a glance.
 static func tint_unit(model: Node3D, owner: int) -> void:
 	if owner < 0:
@@ -303,6 +364,13 @@ static func sphere(r: float, color: Color) -> MeshInstance3D:
 ## The model is rotated first and then fitted, so the art covers the blocked cells.
 static func make_prop(rel: String, fp: Vector2i, yaw: float, kind: String) -> Node3D:
 	var root := Node3D.new()
+	# rocks and trees are our own blocky props, sized exactly to the cells they block
+	if kind == "rock" and fp != Vector2i.ZERO:
+		_rock(root, fp, yaw)
+		return root
+	if kind == "tree":
+		_tree(root, yaw, rel)
+		return root
 	var ps := prefab(rel)
 	if ps != null:
 		var inst := ps.instantiate()
