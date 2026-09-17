@@ -27,7 +27,8 @@ var preview_name: Label
 var preview_id := ""
 const PREVIEW_PX := 240
 ## Host-owned lobby state, mirrored to clients. slots[i] = {kind: open|closed|ai|human, peer, name, level, team}
-var lobby_opts := {"map": "desert2", "cash": 10000, "superweapons": true, "slots": []}
+## observers = [{peer, name}]: humans watching the match without a slot (see everything, command nothing).
+var lobby_opts := {"map": "desert2", "cash": 10000, "superweapons": true, "slots": [], "observers": []}
 var menu_box: VBoxContainer
 var menu_scene: Node3D = null
 var args: Dictionary = {}
@@ -220,7 +221,7 @@ func _build_menu() -> void:
 	preview_name.modulate = Color(0.7, 0.7, 0.7)
 	right.add_child(preview_name)
 	var invite := Label.new()
-	invite.text = "Invite: send friends your IP (port %d). Each map has its own number of spawn slots; set any slot to an AI (Easy / Medium / Hard) or close it." % PORT
+	invite.text = "Invite: send friends your IP (UDP port %d - forward it on your router for internet play). Each map has its own number of spawn slots; set any slot to an AI (Easy / Medium / Hard) or close it. Observe = watch the match with everything revealed (e.g. AI vs AI)." % PORT
 	invite.add_theme_font_size_override("font_size", 12)
 	invite.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	invite.modulate = Color(0.6, 0.6, 0.6)
@@ -285,8 +286,11 @@ func _host() -> void:
 	lobby_opts["slots"] = []
 	if args.has("map"):
 		lobby_opts["map"] = MapGen.map_id(str(args["map"]))
+	lobby_opts["observers"] = []
 	_ensure_slots()
 	lobby_opts["slots"][0] = {"kind": "human", "peer": 1, "name": my_name, "level": "", "team": 0}
+	if args.has("observe"):
+		_set_observer(1, true)
 	_apply_opts_ui()
 	_show_lobby(true)
 	_set_status("Hosting on port %d. Waiting for players... (or start with AI opponents)" % port)
@@ -360,10 +364,7 @@ func _ensure_slots() -> void:
 					placed = true
 					break
 			if not placed:
-				if int(sl["peer"]) == 1:
-					slots[0] = sl
-				else:
-					_kick(int(sl["peer"]), "The host picked a smaller map")
+				lobby_opts["observers"].append({"peer": int(sl["peer"]), "name": str(sl["name"])})
 	for i in range(slots.size()):
 		if int(slots[i]["team"]) < 0 or int(slots[i]["team"]) >= MAX_PLAYERS:
 			slots[i]["team"] = i
@@ -378,6 +379,45 @@ func _find_slot(peer: int) -> int:
 		if slots[i]["kind"] == "human" and int(slots[i]["peer"]) == peer:
 			return i
 	return -1
+
+func _is_observer(peer: int) -> bool:
+	for ob in lobby_opts.get("observers", []):
+		if int(ob["peer"]) == peer:
+			return true
+	return false
+
+func peer_name(peer: int) -> String:
+	for lp in lobby_players:
+		if int(lp["peer"]) == peer:
+			return str(lp["name"])
+	return "?"
+
+## Move a human between the slot list and the observer list (host only).
+func _set_observer(peer: int, on: bool) -> void:
+	var slots: Array = lobby_opts["slots"]
+	if on:
+		var k := _find_slot(peer)
+		if k < 0 or _is_observer(peer):
+			return
+		var t: int = slots[k]["team"]
+		lobby_opts["observers"].append({"peer": peer, "name": str(slots[k]["name"])})
+		slots[k] = _empty_slot()
+		slots[k]["team"] = t
+	else:
+		var open := _first_open()
+		if open < 0 or not _is_observer(peer):
+			return
+		_seat(peer, open)
+
+## Take an observer out of the observer list and into slot k (must be open).
+func _seat(peer: int, k: int) -> void:
+	var obs: Array = lobby_opts["observers"]
+	for i in range(obs.size()):
+		if int(obs[i]["peer"]) == peer:
+			var nm: String = str(obs[i]["name"])
+			obs.remove_at(i)
+			lobby_opts["slots"][k] = {"kind": "human", "peer": peer, "name": nm, "level": "", "team": lobby_opts["slots"][k]["team"]}
+			return
 
 func _first_open() -> int:
 	var slots: Array = lobby_opts.get("slots", [])
@@ -441,9 +481,18 @@ func on_lobby_cmd(peer: int, c: Dictionary) -> void:
 		return
 	var slots: Array = lobby_opts["slots"]
 	var slot := int(c.get("slot", -1))
+	var t := str(c.get("t", ""))
+	if t == "observe":
+		# a player steps out to watch (themselves, or anyone by the host)
+		var who := int(c.get("peer", peer))
+		if peer != 1 and who != peer:
+			return
+		_set_observer(who, bool(c.get("on", true)))
+		_refresh_lobby()
+		return
 	if slot < 0 or slot >= slots.size():
 		return
-	match str(c.get("t", "")):
+	match t:
 		"kind":
 			if peer != 1:
 				return
@@ -463,7 +512,12 @@ func on_lobby_cmd(peer: int, c: Dictionary) -> void:
 			slots[slot]["team"] = clampi(int(c["team"]), 0, MAX_PLAYERS - 1)
 		"move":
 			var from := _find_slot(peer)
-			if from < 0 or slots[slot]["kind"] != "open":
+			if slots[slot]["kind"] != "open":
+				return
+			if from < 0:
+				if _is_observer(peer):
+					_seat(peer, slot)
+					_refresh_lobby()
 				return
 			var me: Dictionary = slots[from]
 			slots[from] = _empty_slot()
@@ -508,6 +562,12 @@ func _refresh_lobby() -> void:
 			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			h.add_child(l)
 			h.add_child(_team_picker(i, is_host))
+			if is_host or int(sl["peer"]) == multiplayer.get_unique_id():
+				var ob := Button.new()
+				ob.text = "Observe"
+				ob.tooltip_text = "Step out of the match and watch it with everything revealed"
+				ob.pressed.connect(func() -> void: _lobby_cmd({"t": "observe", "peer": int(sl["peer"]), "on": true}))
+				h.add_child(ob)
 			if is_host and int(sl["peer"]) != 1:
 				var kick := Button.new()
 				kick.text = "Kick"
@@ -527,12 +587,56 @@ func _refresh_lobby() -> void:
 			if sl["kind"] == "ai":
 				h.add_child(_team_picker(i, is_host))
 		lobby_rows.add_child(h)
+	var observers: Array = lobby_opts.get("observers", [])
+	if not observers.is_empty():
+		var ol := Label.new()
+		ol.text = "Observers"
+		ol.modulate = Color(0.7, 0.7, 0.75)
+		lobby_rows.add_child(ol)
+		for ob in observers:
+			var h := HBoxContainer.new()
+			h.add_theme_constant_override("separation", 6)
+			var eye := Label.new()
+			eye.text = "  •"
+			eye.custom_minimum_size = Vector2(36, 0)
+			eye.modulate = Color(0.6, 0.6, 0.65)
+			h.add_child(eye)
+			var l := Label.new()
+			l.text = "%s%s  (watching)" % [str(ob["name"]), "  (host)" if int(ob["peer"]) == 1 else ""]
+			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			l.modulate = Color(0.85, 0.85, 0.9)
+			h.add_child(l)
+			if (is_host or int(ob["peer"]) == multiplayer.get_unique_id()) and _first_open() >= 0:
+				var jb := Button.new()
+				jb.text = "Play"
+				jb.tooltip_text = "Take the first open slot (or click a spawn point on the map)"
+				jb.pressed.connect(func() -> void: _lobby_cmd({"t": "observe", "peer": int(ob["peer"]), "on": false}))
+				h.add_child(jb)
+			if is_host and int(ob["peer"]) != 1:
+				var kick := Button.new()
+				kick.text = "Kick"
+				kick.pressed.connect(func() -> void: _kick(int(ob["peer"]), "You were removed from the lobby by the host"))
+				h.add_child(kick)
+			lobby_rows.add_child(h)
 	_update_preview()
 	if is_host:
-		start_btn.text = "Start game" if players_n >= 2 else "Start solo (sandbox)"
+		var humans := 0
+		for sl in slots:
+			if sl["kind"] == "human":
+				humans += 1
+		if players_n == 0:
+			start_btn.text = "Add a player or an AI to start"
+		elif humans == 0:
+			start_btn.text = "Watch the AIs fight" if players_n >= 2 else "Watch AI (sandbox)"
+		else:
+			start_btn.text = "Start game" if players_n >= 2 else "Start solo (sandbox)"
+		start_btn.disabled = players_n == 0
 		for sl in slots:
 			if sl["kind"] == "human" and int(sl["peer"]) != 1:
 				session.rpc_id(int(sl["peer"]), "cl_lobby", [], lobby_opts)
+		for ob in observers:
+			if int(ob["peer"]) != 1:
+				session.rpc_id(int(ob["peer"]), "cl_lobby", [], lobby_opts)
 		if args.has("autostart") and players_n >= 2 and not game_started and not (args.has("ai") or args.has("bot") or args.has("solo")):
 			_start_game()
 
@@ -570,6 +674,12 @@ func _draw_preview_marks() -> void:
 		if i < slots.size() and slots[i]["kind"] == "human":
 			var nm: String = slots[i]["name"]
 			preview_marks.draw_string(font, p + Vector2(-nm.length() * 3.2, 26), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.WHITE)
+	var obs: Array = lobby_opts.get("observers", [])
+	if not obs.is_empty():
+		var names := []
+		for ob in obs:
+			names.append(str(ob["name"]))
+		preview_marks.draw_string(font, Vector2(6, preview_marks.size.y - 6), "Watching: " + ", ".join(names), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.9, 1.0))
 
 func _preview_input(ev: InputEvent) -> void:
 	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT and preview_id != "":
@@ -597,6 +707,11 @@ func _remove_peer(peer: int) -> void:
 		var t: int = lobby_opts["slots"][k]["team"]
 		lobby_opts["slots"][k] = _empty_slot()
 		lobby_opts["slots"][k]["team"] = t
+	var obs: Array = lobby_opts.get("observers", [])
+	for i in range(obs.size()):
+		if int(obs[i]["peer"]) == peer:
+			obs.remove_at(i)
+			break
 
 func on_lobby(players: Array, opts: Dictionary) -> void:
 	if not players.is_empty():
@@ -622,12 +737,16 @@ func on_client_hello(peer: int, pname: String, version: String) -> void:
 		session.rpc_id(peer, "cl_kick", "Version mismatch: host %s, you %s" % [GAME_VERSION, version])
 		return
 	var open := _first_open()
-	if game_started or open < 0:
-		session.rpc_id(peer, "cl_kick", "Game is full or already started")
+	if game_started:
+		session.rpc_id(peer, "cl_kick", "Game already started")
 		return
 	lobby_players.append({"peer": peer, "name": pname})
-	lobby_opts["slots"][open] = {"kind": "human", "peer": peer, "name": pname, "level": "", "team": lobby_opts["slots"][open]["team"]}
-	_set_status("%s joined." % pname)
+	if open < 0:
+		lobby_opts["observers"].append({"peer": peer, "name": pname})
+		_set_status("%s joined as an observer (no open slot)." % pname)
+	else:
+		lobby_opts["slots"][open] = {"kind": "human", "peer": peer, "name": pname, "level": "", "team": lobby_opts["slots"][open]["team"]}
+		_set_status("%s joined." % pname)
 	_refresh_lobby()
 
 func _on_peer_disconnected(id: int) -> void:
@@ -709,11 +828,14 @@ func _start_game() -> void:
 			teams.append(int(t))
 	if peers.is_empty():
 		return
+	var observers := []
+	for ob in lobby_opts.get("observers", []):
+		observers.append(int(ob["peer"]))
 	game_started = true
 	var w := World.new()
 	w.debug = args.has("debug") or args.has("simdebug")
 	session.world = w
-	w.start(session, peers, names, {"map": lobby_opts["map"], "cash": lobby_opts["cash"], "superweapons": lobby_opts["superweapons"], "teams": teams, "levels": levels, "slots": starts})
+	w.start(session, peers, names, {"map": lobby_opts["map"], "cash": lobby_opts["cash"], "superweapons": lobby_opts["superweapons"], "teams": teams, "levels": levels, "slots": starts, "observers": observers})
 	if args.has("simtest"):
 		if str(args["simtest"]) == "load":
 			w.probe_load()

@@ -18,6 +18,17 @@ host rejects mismatched versions.
 
 Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0.1.
 
+### Shareable build (no Godot needed)
+`build/Frontline.exe` is a single-file Windows build (everything embedded, ~350 MB). Zip it, send it to a
+friend, they double-click it. Rebuild after code changes with the editor (Project → Export → Windows Desktop,
+templates installed once via Editor → Manage Export Templates) or headless:
+```
+godot --headless --path . --export-release "Windows Desktop" build/Frontline.exe
+```
+Both sides must run the same version (`GAME_VERSION` in `game/main.gd`); the host rejects mismatches.
+Internet play: the host forwards **UDP 7788** on their router and shares their public IP, or everybody joins a
+free mesh VPN (Tailscale / ZeroTier / Radmin) and uses the VPN IP - no router setup at all.
+
 ## Controls
 | | |
 |---|---|
@@ -48,12 +59,22 @@ Other options: starting cash, superweapons on/off, kick buttons. Teammates share
 without force-fire (X / Ctrl+RMB), can capture/repair each other's stuff, and win or lose together.
 Easy: slow, small waves, no powers for 8 min · Medium · Hard: bigger waves, earlier powers, +$150 every 10 s.
 Everyone starts at rank 1 with one promotion point (as in Generals).
+**Observer**: press *Observe* next to your name to step out of the match and watch it - the whole map is revealed,
+every unit is replicated, and a scoreboard shows each general's cash, units, structures, kills and battle plan.
+Set every slot to AI and hit *Watch the AIs fight* for an AI-vs-AI match; a late joiner with no open slot
+becomes an observer automatically (*Play* takes them back into a slot). Observers can chat but never command.
 
 ## Audio
 `audio/sfx` — 50 CC0 / CC-BY effects from Freesound (`audio/sfx/CREDITS.md`, re-fetch with `tools/fetch_sfx.py`).
 `audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
 `audio/music` — 14 Kevin MacLeod tracks (menu, game, victory, defeat), CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M6.2)
+- Observer mode: humans can step out of the slot list and watch (AI vs AI works with nobody playing). Observers get every entity, no fog, all events and a live scoreboard; commands from observers are dropped by the sim. Lobby: Observe / Play buttons, "Watching:" on the map preview, full lobby → auto-observer.
+- Composite Armor is stat-only again (no bolt-on plates).
+- Fixed a particle burst being added to the FX tree twice (console spam during big fights).
+- `export_presets.cfg` + `build/Frontline.exe`: single-file Windows build to share with friends.
 
 ## What's in (M6.1)
 - Transports (Generals rules): Humvee carries 5 infantry who fire from inside; Chinook has 8 slots (infantry 1, vehicles 3) and lands to load; Firebase garrisons 4 infantry who fire from the sandbags (you see them). Right-click the transport with units selected to load, U / "Unload" to let them out.

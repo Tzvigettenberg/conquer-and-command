@@ -67,10 +67,14 @@ func s_msg(peer: int, text: String) -> void:
 func s_gameover(winner: int, rep: Array) -> void:
 	for p in world.players:
 		_to(p["peer"], "cl_gameover", [winner, rep])
+	for ob in world.observers:
+		_to(ob["peer"], "cl_gameover", [winner, rep])
 
 func s_paused(on: bool) -> void:
 	for p in world.players:
 		_to(p["peer"], "cl_paused", [on])
+	for ob in world.observers:
+		_to(ob["peer"], "cl_paused", [on])
 
 # ---------------------------------------------------------------------------
 # server -> client RPCs
@@ -140,19 +144,28 @@ func srv_lobby(c: Dictionary) -> void:
 func srv_chat(text: String, allies: bool) -> void:
 	if world == null:
 		return
-	var from := world.player_of_peer(multiplayer.get_remote_sender_id())
+	var sender := multiplayer.get_remote_sender_id()
+	var from := world.player_of_peer(sender)
+	if from < 0 and world.is_observer(sender):
+		relay_chat(-1, "[%s] %s" % [get_parent().peer_name(sender), text], false)
+		return
 	relay_chat(from, text, allies)
 
+## from == -1 is an observer (name folded into the text), heard by everyone.
 func relay_chat(from: int, text: String, allies: bool) -> void:
-	if world == null or from < 0:
+	if world == null:
 		return
 	for i in range(world.players.size()):
 		var p: Dictionary = world.players[i]
 		if int(p["peer"]) < 0:
 			continue
-		if allies and not world.allied(from, i):
+		if allies and from >= 0 and not world.allied(from, i):
 			continue
 		_to(int(p["peer"]), "cl_chat", [from, text, allies])
+	for ob in world.observers:
+		if allies and from >= 0:
+			continue
+		_to(int(ob["peer"]), "cl_chat", [from, text, allies])
 
 @rpc("authority", "call_remote", "reliable")
 func cl_chat(from: int, text: String, allies: bool) -> void:

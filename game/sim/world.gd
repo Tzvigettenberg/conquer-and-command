@@ -44,6 +44,7 @@ var winner := -1
 var solo := false
 var debug := false
 var bots: Array = []             # Bot instances (server-side AI players)
+var observers: Array = []        # [{peer, known: {id -> tick}}] spectators: see everything, command nothing
 var options: Dictionary = {}
 var paused := false
 
@@ -119,7 +120,16 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 			bots.append(b)
 		else:
 			session.s_map(players[i]["peer"], map, i)
+	for op in opts.get("observers", []):
+		observers.append({"peer": int(op), "known": {}})
+		session.s_map(int(op), map, -1)
 	_update_vision()
+
+func is_observer(peer: int) -> bool:
+	for ob in observers:
+		if ob["peer"] == peer:
+			return true
+	return false
 
 ## Same player or same lobby team. Neutral (-1) is never allied.
 func allied(a: int, b: int) -> bool:
@@ -219,6 +229,10 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 				known[p].erase(e.id)
 			else:
 				pending_despawn[p][e.id] = e.pos
+	for ob in observers:
+		if ob["known"].has(e.id):
+			session.s_despawn(ob["peer"], e.id, reason)
+			ob["known"].erase(e.id)
 	if e.owner >= 0:
 		if e.is_building:
 			_recompute_power(e.owner)
@@ -1461,6 +1475,10 @@ func _do_board(e: Ent, dt: float) -> void:
 			if known[p].has(e.id):
 				session.s_despawn(players[p]["peer"], e.id, "loaded")
 				known[p].erase(e.id)
+		for ob in observers:
+			if ob["known"].has(e.id):
+				session.s_despawn(ob["peer"], e.id, "loaded")
+				ob["known"].erase(e.id)
 		events.append({"k": "load", "p": t.pos, "d": [t.id], "o": t.owner})
 		return
 	e.repath_t -= dt
@@ -1725,6 +1743,9 @@ func _do_capture(e: Ent, dt: float) -> void:
 		for p in range(players.size()):
 			if known[p].has(b.id):
 				_send_spawn(p, b)
+		for ob in observers:
+			if ob["known"].has(b.id):
+				_send_spawn_to(ob["peer"], ob["known"], b)
 		_next_order(e)
 
 # ---------------------------------------------------------------------------
@@ -2034,99 +2055,117 @@ func _visible_to(p: int, e: Ent) -> bool:
 # Replication
 # ---------------------------------------------------------------------------
 func _send_spawn(p: int, e: Ent) -> void:
+	_send_spawn_to(players[p]["peer"], known[p], e)
+
+func _send_spawn_to(peer: int, kn: Dictionary, e: Ent) -> void:
 	var extra := {"complete": e.complete}
 	if e.is_building:
 		extra["boxes"] = e.boxes
-	session.s_spawn(players[p]["peer"], e.id, e.type, e.owner, e.pos.x, e.pos.y, e.alt, e.yaw, extra)
-	known[p][e.id] = tick
+	session.s_spawn(peer, e.id, e.type, e.owner, e.pos.x, e.pos.y, e.alt, e.yaw, extra)
+	kn[e.id] = tick
 
 func _send_snapshots() -> void:
 	for p in range(players.size()):
 		if players[p]["peer"] < 0:
 			events_seen_by_bot(p)
 			continue
-		var buf := StreamPeerBuffer.new()
-		buf.put_u32(tick)
-		var count_pos := buf.get_position()
-		buf.put_u16(0)
-		var n := 0
-		for e: Ent in ents.values():
-			if not e.alive:
-				continue
-			if not _visible_to(p, e):
-				continue
-			if not known[p].has(e.id):
-				_send_spawn(p, e)
-			known[p][e.id] = tick
-			buf.put_u16(e.id)
-			buf.put_16(int(clampf(e.pos.x * 20.0, -32000, 32000)))
-			buf.put_16(int(clampf(e.pos.y * 20.0, -32000, 32000)))
-			buf.put_u16(int(clampf(e.alt * 20.0, 0, 65000)))
-			buf.put_u8(int(wrapf(e.yaw, 0.0, TAU) / TAU * 255.0) & 255)
-			buf.put_u8(int(wrapf(e.turret_yaw, 0.0, TAU) / TAU * 255.0) & 255)
-			buf.put_u8(int(clampf(e.hp / e.max_hp, 0.0, 1.0) * 255.0))
-			var flags := 0
-			if e.pos != e.last_pos and not e.is_building:
-				flags |= 1
-			if time - e.last_fire_t < 0.3:
-				flags |= 2
-			if e.owner == p and _is_stealthed(e):
-				flags |= 4
-			if e.is_building and not e.complete:
-				flags |= 8
-			if e.is_building and not e.powered and e.owner >= 0 and players[e.owner]["low"]:
-				flags |= 16
-			if e.carry > 0:
-				flags |= 32
-			flags |= (e.level & 3) << 6
-			buf.put_u8(flags)
-			var aux := 0
-			if e.is_building:
-				if not e.complete:
-					aux = int(clampf(e.progress, 0.0, 1.0) * 100.0)
-				elif e.capture_by >= 0:
-					aux = 100 + int(clampf(e.capture_t / CAPTURE_TIME, 0.0, 1.0) * 100.0)
-			elif e.is_jet():
-				aux = e.clip[0] if e.clip.size() > 0 else 0
-			elif e.carry > 0:
-				aux = e.carry
-			buf.put_u8(aux)
-			var aux2 := 0
-			if e.is_building and not e.complete:
-				var bd: Ent = ents.get(e.builder_id)
-				aux2 = 1 if (bd != null and bd.alive and bd.state == "build" and bd.target_id == e.id) else 0
-			elif e.is_building:
-				aux2 = e.capture_by + 1 if e.capture_by >= 0 and e.capture_t > 0.0 else 0
-			elif e.clip.size() > 1:
-				aux2 = e.clip[1]
-			buf.put_u8(aux2)
-			n += 1
-		var end := buf.get_position()
-		buf.seek(count_pos)
-		buf.put_u16(n)
-		buf.seek(end)
-		session.s_state(players[p]["peer"], buf.data_array)
-		# forget units that left view so they respawn cleanly later
-		var forget := []
-		for id in known[p]:
-			if tick - known[p][id] > GHOST_TIMEOUT_TICKS:
-				var e: Ent = ents.get(id)
-				if e == null or not e.is_building:
-					forget.append(id)
-		for id in forget:
-			known[p].erase(id)
-		# events
-		var evs := []
-		for ev in events:
-			if ev.has("only") and ev["only"] != p:
-				continue
-			if ev.get("ally_only", false) and not allied(ev.get("o", -1), p):
-				continue
-			if ev.get("all", false) or allied(ev.get("o", -1), p) or team_visible(p, ev["p"]) or ev.has("only"):
-				evs.append([ev["k"], ev["d"]])
-		if not evs.is_empty():
-			session.s_events(players[p]["peer"], evs)
+		_snapshot_to(players[p]["peer"], p, known[p])
+	for ob in observers:
+		_snapshot_to(ob["peer"], -1, ob["known"])
 	events.clear()
+
+## One replication packet (spawns, state, events) for a player (p >= 0) or an observer (p == -1).
+func _snapshot_to(peer: int, p: int, kn: Dictionary) -> void:
+	var buf := StreamPeerBuffer.new()
+	buf.put_u32(tick)
+	var count_pos := buf.get_position()
+	buf.put_u16(0)
+	var n := 0
+	for e: Ent in ents.values():
+		if not e.alive:
+			continue
+		if p < 0:
+			if e.inside_id >= 0:
+				continue
+		elif not _visible_to(p, e):
+			continue
+		if not kn.has(e.id):
+			_send_spawn_to(peer, kn, e)
+		kn[e.id] = tick
+		buf.put_u16(e.id)
+		buf.put_16(int(clampf(e.pos.x * 20.0, -32000, 32000)))
+		buf.put_16(int(clampf(e.pos.y * 20.0, -32000, 32000)))
+		buf.put_u16(int(clampf(e.alt * 20.0, 0, 65000)))
+		buf.put_u8(int(wrapf(e.yaw, 0.0, TAU) / TAU * 255.0) & 255)
+		buf.put_u8(int(wrapf(e.turret_yaw, 0.0, TAU) / TAU * 255.0) & 255)
+		buf.put_u8(int(clampf(e.hp / e.max_hp, 0.0, 1.0) * 255.0))
+		var flags := 0
+		if e.pos != e.last_pos and not e.is_building:
+			flags |= 1
+		if time - e.last_fire_t < 0.3:
+			flags |= 2
+		if (e.owner == p or p < 0) and _is_stealthed(e):
+			flags |= 4
+		if e.is_building and not e.complete:
+			flags |= 8
+		if e.is_building and not e.powered and e.owner >= 0 and players[e.owner]["low"]:
+			flags |= 16
+		if e.carry > 0:
+			flags |= 32
+		flags |= (e.level & 3) << 6
+		buf.put_u8(flags)
+		var aux := 0
+		if e.is_building:
+			if not e.complete:
+				aux = int(clampf(e.progress, 0.0, 1.0) * 100.0)
+			elif e.capture_by >= 0:
+				aux = 100 + int(clampf(e.capture_t / CAPTURE_TIME, 0.0, 1.0) * 100.0)
+		elif e.is_jet():
+			aux = e.clip[0] if e.clip.size() > 0 else 0
+		elif e.carry > 0:
+			aux = e.carry
+		buf.put_u8(aux)
+		var aux2 := 0
+		if e.is_building and not e.complete:
+			var bd: Ent = ents.get(e.builder_id)
+			aux2 = 1 if (bd != null and bd.alive and bd.state == "build" and bd.target_id == e.id) else 0
+		elif e.is_building:
+			aux2 = e.capture_by + 1 if e.capture_by >= 0 and e.capture_t > 0.0 else 0
+		elif e.clip.size() > 1:
+			aux2 = e.clip[1]
+		buf.put_u8(aux2)
+		n += 1
+	var end := buf.get_position()
+	buf.seek(count_pos)
+	buf.put_u16(n)
+	buf.seek(end)
+	session.s_state(peer, buf.data_array)
+	# forget units that left view so they respawn cleanly later
+	var forget := []
+	for id in kn:
+		if tick - kn[id] > GHOST_TIMEOUT_TICKS:
+			var e: Ent = ents.get(id)
+			if e == null or not e.is_building:
+				forget.append(id)
+	for id in forget:
+		kn.erase(id)
+	# events
+	var evs := []
+	for ev in events:
+		if p < 0:
+			# observers: everything that happens in the world, minus private notices
+			if ev.has("only") or ev.get("ally_only", false):
+				continue
+			evs.append([ev["k"], ev["d"]])
+			continue
+		if ev.has("only") and ev["only"] != p:
+			continue
+		if ev.get("ally_only", false) and not allied(ev.get("o", -1), p):
+			continue
+		if ev.get("all", false) or allied(ev.get("o", -1), p) or team_visible(p, ev["p"]) or ev.has("only"):
+			evs.append([ev["k"], ev["d"]])
+	if not evs.is_empty():
+		session.s_events(peer, evs)
 
 func events_seen_by_bot(_p: int) -> void:
 	pass
@@ -2168,6 +2207,10 @@ func _send_pstates() -> void:
 	for e: Ent in ents.values():
 		if e.alive and e.type == "supply_dock":
 			docks[e.id] = e.boxes
+	if not observers.is_empty():
+		var ost := _observer_state(sw, sw_bld, docks)
+		for ob in observers:
+			session.s_pstate(ob["peer"], ost)
 	for p in range(players.size()):
 		var pl: Dictionary = players[p]
 		if pl["peer"] < 0:
@@ -2215,6 +2258,66 @@ func _send_pstates() -> void:
 			if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
 				st["guard"][e.id] = [e.guard_pos.x, e.guard_pos.y, e.guard_radius]
 		session.s_pstate(pl["peer"], st)
+
+## Everything an observer's HUD needs: per-entity data for every player plus a scoreboard.
+func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> Dictionary:
+	var st := {
+		"observer": true, "cash": 0, "pp": 0, "pu": 0, "low": false, "rank": 1, "xp": 0, "next": -1, "points": 0, "powers": {},
+		"cds": {}, "upgrades": [], "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
+		"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": false, "sw_bld": sw_bld,
+		"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": false, "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
+		"board": [],
+	}
+	var units := []
+	var blds := []
+	for pl in players:
+		units.append(0)
+		blds.append(0)
+	for e: Ent in ents.values():
+		if not e.alive:
+			continue
+		if e.owner >= 0:
+			if e.is_building:
+				if e.complete:
+					blds[e.owner] += 1
+			else:
+				units[e.owner] += 1
+		if e.is_building:
+			if not e.prod.is_empty():
+				var q := []
+				for it in e.prod:
+					q.append([it["type"], it["t"] / it["total"]])
+				st["queues"][e.id] = q
+			if not e.research.is_empty():
+				st["research"][e.id] = [e.research[0]["id"], e.research[0]["t"] / e.research[0]["total"]]
+				var rq := []
+				for r in e.research:
+					rq.append(r["id"])
+				st["research_q"][e.id] = rq
+			if not e.upg_done.is_empty():
+				st["upg_done"][e.id] = e.upg_done.keys()
+			if e.def.get("plans", false):
+				st["plan_bld"][e.id] = [e.plan, clampf(1.0 - e.plan_t / Data.PLAN_SWITCH, 0.0, 1.0)]
+			if e.def.get("runway", false):
+				st["air_load"][e.id] = [_airfield_load(e), int(e.def.get("pads", 4))]
+		st["hp"][e.id] = [int(e.hp), int(e.max_hp)]
+		if not e.cargo.is_empty():
+			var types := []
+			for cid in e.cargo:
+				var cu: Ent = ents.get(cid)
+				if cu != null and cu.alive:
+					types.append(cu.type)
+			st["cargo"][e.id] = types
+		if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
+			st["guard"][e.id] = [e.guard_pos.x, e.guard_pos.y, e.guard_radius]
+	for p in range(players.size()):
+		var pl: Dictionary = players[p]
+		st["board"].append({
+			"name": pl["name"], "team": pl["team"], "cash": int(pl["cash"]), "units": units[p], "blds": blds[p], "rank": pl["rank"],
+			"defeated": pl["defeated"], "plan": pl["plan"], "pp": pl["pp"], "pu": pl["pu"], "low": pl["low"], "killed": pl["stats"]["units_killed"],
+			"ai": pl["peer"] < 0,
+		})
+	return st
 
 func _check_victory() -> void:
 	if game_over or time < 5.0:

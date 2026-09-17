@@ -58,6 +58,8 @@ var msgs: Array = []
 var minimap_t := 0.0
 var sel_cache: Array = []
 var last_sel_sig := ""
+var board_panel: PanelContainer     # observer scoreboard (top left)
+var board_label: RichTextLabel
 
 func setup(_view: ClientView, _ctl: Controller) -> void:
 	view = _view
@@ -139,6 +141,21 @@ func _build() -> void:
 	pp.add_child(powers_box)
 	pp.visible = false
 	powers_panel = pp
+
+	# ---- observer scoreboard (top left, under the top bar) ----
+	board_panel = _panel(Color(0.07, 0.08, 0.1, 0.85))
+	board_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	board_panel.position = Vector2(8, 52)
+	board_panel.visible = false
+	add_child(board_panel)
+	board_label = RichTextLabel.new()
+	board_label.bbcode_enabled = true
+	board_label.fit_content = true
+	board_label.scroll_active = false
+	board_label.custom_minimum_size = Vector2(560, 0)
+	board_label.add_theme_font_size_override("normal_font_size", 14)
+	board_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	board_panel.add_child(board_label)
 
 	# ---- promotion / tech tree modal ----
 	promo_backdrop = ColorRect.new()
@@ -420,6 +437,9 @@ func is_mouse_over_ui(p: Vector2) -> bool:
 # ---------------------------------------------------------------------------
 func _process(dt: float) -> void:
 	var st: Dictionary = view.pstate
+	if view.observer:
+		_process_observer(dt, st)
+		return
 	if not st.is_empty():
 		cash_label.text = "$ %d" % int(st.get("cash", 0))
 		if cash_flash_t > 0.0:
@@ -454,6 +474,64 @@ func _process(dt: float) -> void:
 	overlay.queue_redraw()
 	hint_label.text = ctl.hint_text()
 	# expire messages
+	var now := Time.get_ticks_msec() / 1000.0
+	for m in msgs.duplicate():
+		if now > m["until"]:
+			m["label"].queue_free()
+			msgs.erase(m)
+		elif now > m["until"] - 1.0:
+			m["label"].modulate.a = m["until"] - now
+	if last_sel_sig != ctl.selection_signature():
+		refresh_selection()
+
+## Observer HUD: no economy of our own; a scoreboard of every general instead.
+func _process_observer(dt: float, st: Dictionary) -> void:
+	cash_label.text = "OBSERVER"
+	cash_label.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	power_label.visible = false
+	rank_label.visible = false
+	promo_btn.visible = false
+	powers_panel.visible = false
+	if surrender_btn:
+		surrender_btn.visible = false
+	if not st.is_empty():
+		var t := int(st.get("time", 0.0))
+		time_label.text = "%d:%02d" % [t / 60, t % 60]
+		var sw: Dictionary = st.get("sw", {})
+		var parts := []
+		for p in sw:
+			var rem := float(sw[p])
+			var who: String = view.names[int(p)] if int(p) < view.names.size() else "P%d" % (int(p) + 1)
+			parts.append("%s Particle Cannon: %s" % [who, "READY" if rem <= 0.0 else "%d:%02d" % [int(rem) / 60, int(rem) % 60]])
+		sw_label.text = "   ".join(parts)
+		var board: Array = st.get("board", [])
+		if not board.is_empty():
+			board_panel.visible = true
+			var lines := []
+			for i in range(board.size()):
+				var b: Dictionary = board[i]
+				var col: Color = Data.TEAM_COLORS[i % Data.TEAM_COLORS.size()]
+				var plan := ""
+				match str(b.get("plan", "")):
+					"bombardment": plan = "  · Bombardment"
+					"hold": plan = "  · Hold the Line"
+					"search": plan = "  · Search & Destroy"
+				var pow := ""
+				if bool(b.get("low", false)):
+					pow = "  [color=#ff6a55]LOW POWER[/color]"
+				var line := "[color=#%s]■[/color] [b]%s[/b]  (team %d)  [color=#ffe066]$%d[/color]   %d units   %d structures   %d kills%s%s" % [
+					col.to_html(false), str(b["name"]), int(b["team"]) + 1, int(b["cash"]), int(b["units"]), int(b["blds"]), int(b.get("killed", 0)), plan, pow]
+				if bool(b.get("defeated", false)):
+					line = "[s]%s[/s]  [color=#ff6a55]DEFEATED[/color]" % line
+				lines.append(line)
+			board_label.text = "\n".join(lines)
+	_update_queue()
+	minimap_t -= dt
+	if minimap_t <= 0.0:
+		minimap_t = 0.1
+		minimap.queue_redraw()
+	overlay.queue_redraw()
+	hint_label.text = ctl.hint_text()
 	var now := Time.get_ticks_msec() / 1000.0
 	for m in msgs.duplicate():
 		if now > m["until"]:
@@ -624,13 +702,19 @@ func refresh_selection() -> void:
 	_update_queue()
 	if sel.is_empty():
 		info_title.text = ""
+		if view.observer:
+			info_body.text = "[color=#889]OBSERVER - you see the whole map and every general's cash, units and production. Click any unit or building for its details.\nArrows / edge / right-drag: scroll   Wheel: zoom   Middle-drag or Q / E: rotate camera   Enter: chat   Esc: menu[/color]"
+			return
 		info_body.text = "[color=#889]Left-drag: select   Right-click: move / attack   Ctrl+right-click or X: force attack   A: attack-move   S: stop   G: guard area (drag to size)\nN: next Dozer   B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center   Ctrl+1-9: groups   H: home   Ctrl+B: beacon   Enter: chat\nArrows / edge / right-drag: scroll   Wheel: zoom   Middle-drag or Q / E: rotate camera[/color]"
 		return
-	var mine: bool = sel[0].team == view.my_index
+	var mine: bool = sel[0].team == view.my_index and not view.observer
 	if sel.size() == 1:
 		var p: Puppet = sel[0]
 		var d := p.def
-		info_title.text = "%s%s" % [d["name"], "" if mine else "  (%s)" % (Data.TEAM_NAMES[p.team] if p.team >= 0 else "neutral")]
+		var owner_name := "neutral"
+		if p.team >= 0:
+			owner_name = str(view.names[p.team]) if (view.observer and p.team < view.names.size()) else Data.TEAM_NAMES[p.team]
+		info_title.text = "%s%s" % [d["name"], "" if mine else "  (%s)" % owner_name]
 		var hp := ""
 		var hpd: Dictionary = view.pstate.get("hp", {})
 		if hpd.has(p.id):
@@ -791,7 +875,7 @@ func flash_cash() -> void:
 
 func _update_queue() -> void:
 	var sel: Array = ctl.selected_puppets()
-	var show: bool = sel.size() == 1 and sel[0].is_building and sel[0].team == view.my_index
+	var show: bool = sel.size() == 1 and sel[0].is_building and (sel[0].team == view.my_index or view.observer) and sel[0].team >= 0
 	var q: Array = []
 	var bid := -1
 	var research: Dictionary = view.pstate.get("research", {})
@@ -879,7 +963,7 @@ func _submit_chat(text: String) -> void:
 	view.send_chat(text, chat_allies)
 
 func chat_line(from: int, text: String, allies: bool) -> void:
-	var nm: String = view.names[from] if from >= 0 and from < view.names.size() else "?"
+	var nm: String = view.names[from] if from >= 0 and from < view.names.size() else "Observer"
 	var l := Label.new()
 	l.text = "%s%s: %s" % [nm, " (team)" if allies else "", text]
 	l.add_theme_font_size_override("font_size", 15)
@@ -1178,8 +1262,9 @@ func _draw_overlay() -> void:
 		var p: Puppet = pu
 		if p.ghost and not p.is_building:
 			continue
-		var has_ammo: bool = p.team == view.my_index and ((p.cat == "air" and p.def.get("jet", false)) or p.type == "comanche")
-		var show: bool = p.selected or p.hovered or (p.hp_frac < 0.999 and (p.team == view.my_index or p.selected)) or (p.is_building and not p.complete) or has_ammo
+		var vis_all: bool = view.observer or p.team == view.my_index
+		var has_ammo: bool = vis_all and ((p.cat == "air" and p.def.get("jet", false)) or p.type == "comanche")
+		var show: bool = p.selected or p.hovered or (p.hp_frac < 0.999 and (vis_all or p.selected)) or (p.is_building and not p.complete) or has_ammo
 		if not show:
 			continue
 		var top := p.cur_pos + Vector3(0, float(p.def.get("height", 3.0)) if p.is_building else float(p.def.get("length", 2.0)) * 0.5 + 1.0, 0)
@@ -1213,7 +1298,7 @@ func _draw_overlay() -> void:
 		elif p.type == "comanche" and view.has_upgrade("rocket_pods"):
 			pips = p.aux2
 			pip_max = int(Data.WEAPONS["comanche_rockets"].get("clip", 0))
-		if pips >= 0 and pip_max > 0 and p.team == view.my_index:
+		if pips >= 0 and pip_max > 0 and (p.team == view.my_index or view.observer):
 			var shown := mini(pip_max, 20)
 			var pw := (w - 2.0) / shown
 			for k in range(shown):

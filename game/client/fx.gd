@@ -303,7 +303,6 @@ static func _curve(vals: Array) -> Curve:
 ## Fire-and-forget burst: node frees itself after lifetime.
 func burst(kind: String, pos: Vector3, size := 1.0) -> void:
 	var p := particles(kind, pos, size, true)
-	add_child(p)
 	_add(p, "particles", p.lifetime + 0.3)
 
 func _on_finish(it: Dictionary) -> void:

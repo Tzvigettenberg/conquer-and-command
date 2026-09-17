@@ -3,7 +3,8 @@ extends Node3D
 ## Everything the local player sees: replicated puppets, map, fog, camera, HUD, FX.
 
 var map: Dictionary
-var my_index := 0
+var my_index := 0                  # -1 = observer (sees everything, commands nothing)
+var observer := false
 var puppets: Dictionary = {}       # id -> Puppet
 var pstate: Dictionary = {}
 var map_view: MapView
@@ -23,6 +24,7 @@ var session: Session
 func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	map = m
 	my_index = index
+	observer = index < 0
 	args = _args
 	session = get_parent().session
 	names = m.get("player_names", []).duplicate()
@@ -47,9 +49,11 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	camera.name = "Camera"
 	add_child(camera)
 	var slots_arr: Array = m.get("player_slots", [])
-	var start: Vector2 = m["starts"][int(slots_arr[index]) if index < slots_arr.size() else index]
+	var start := Vector2(float(m["size"]) * 0.5, float(m["size"]) * 0.5)
+	if not observer:
+		start = m["starts"][int(slots_arr[index]) if index < slots_arr.size() else index]
 	camera.setup(float(m["size"]), start + Vector2(0, 10))
-	camera.yaw = float(m["start_yaw"][index])
+	camera.yaw = float(m["start_yaw"][index]) if not observer else 0.0
 	camera.edge_scroll = bool(Settings.load_cfg().get("edge_scroll", true))
 	camera._apply()
 	ctl = Controller.new()
@@ -68,7 +72,12 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	Audio.I.eva("welcome", 0.0)
 	if Visuals.missing_assets:
 		on_msg("Synty assets not found - using placeholder shapes")
-	on_msg("Welcome, %s. You are %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index]])
+	if observer:
+		map_view.reveal_all()
+		map_view.disable_fog()
+		on_msg("Observer mode: you see everything and command nothing.  Enter: chat   Esc: menu")
+	else:
+		on_msg("Welcome, %s. You are %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index]])
 	if args.has("test"):
 		_run_test(str(args["test"]))
 	if args.has("zoom"):
@@ -138,6 +147,8 @@ func _warm_animations() -> void:
 	inst.queue_free()
 
 func send(c: Dictionary) -> void:
+	if observer:
+		return   # spectators never touch the sim
 	session.send_cmd(c)
 
 # ---------------------------------------------------------------------------
@@ -340,6 +351,8 @@ func leave_track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void
 		fx.track(pos, yaw, half_w, tracked)
 
 func on_fog(bytes: PackedByteArray) -> void:
+	if observer:
+		return   # never sent to observers anyway; the map is fully revealed
 	if args.has("reveal"):
 		map_view.reveal_all()   # debug: --reveal shows the whole map
 		return
@@ -405,7 +418,10 @@ func _owner_of(id: int) -> int:
 
 func send_chat(text: String, allies: bool) -> void:
 	if session.world != null:
-		session.relay_chat(my_index, text, allies)
+		if observer:
+			session.relay_chat(-1, "[%s] %s" % [Main.I.my_name, text], false)
+		else:
+			session.relay_chat(my_index, text, allies)
 	else:
 		session.rpc_id(1, "srv_chat", text, allies)
 
@@ -442,6 +458,8 @@ func on_gameover(winner: int, rep: Array = []) -> void:
 	var text := "DEFEAT"
 	if winner == -2:
 		text = "DISCONNECTED"
+	elif observer:
+		text = "GAME OVER" if winner < 0 else "TEAM %d WINS" % (winner + 1)
 	elif winner == my_team:
 		text = "VICTORY"
 	elif winner == -1:
@@ -449,7 +467,10 @@ func on_gameover(winner: int, rep: Array = []) -> void:
 	hud.show_gameover(text, rep)
 	map_view.reveal_all()
 	ctl.cancel_mode()
-	if winner == my_team:
+	if observer:
+		if winner != -2:
+			Audio.I.play_music("victory")
+	elif winner == my_team:
 		Audio.I.ui("victory")
 		Audio.I.eva("victory", 0.0)
 		Audio.I.play_music("victory")
@@ -462,6 +483,8 @@ func on_paused(on: bool) -> void:
 	hud.set_paused(on)
 
 func is_ally(team_idx: int) -> bool:
+	if observer:
+		return false
 	if team_idx == my_index:
 		return true
 	if team_idx < 0:
@@ -591,6 +614,22 @@ func _enemy_start() -> Vector2:
 
 func _run_test(kind: String) -> void:
 	print("[Test] scenario %s as player %d" % [kind, my_index])
+	if kind == "observe":
+		# spectator probe: everything replicated, scoreboard populated, commands ignored
+		while is_inside_tree():
+			await get_tree().create_timer(10.0).timeout
+			if not is_inside_tree():
+				return
+			var per_team := {}
+			for p in puppets.values():
+				per_team[p.team] = per_team.get(p.team, 0) + 1
+			var board: Array = pstate.get("board", [])
+			var bl := []
+			for b in board:
+				bl.append("%s $%d u%d b%d%s" % [b["name"], b["cash"], b["units"], b["blds"], " DEFEATED" if b["defeated"] else ""])
+			print("[Test obs] t=%.0f puppets=%s board=[%s]" % [pstate.get("time", 0.0), str(per_team), " | ".join(bl)])
+			send({"t": "surrender"})   # must be a no-op for spectators
+		return
 	await get_tree().create_timer(1.5).timeout
 	var cc := _own("command_center")
 	var dz := _own("dozer")
