@@ -1,33 +1,36 @@
 class_name RoomList
 extends Node
-## Public room list: hosts announce a named (optionally password-locked) room, everyone else sees
-## it in the menu and joins with one click - no IPs to send around.
+## The games list. Matches run on dedicated servers (tools/server/), so players only ever make
+## outgoing connections - there is nothing to forward and no address to type.
 ##
-## Talks to a small JSON API of our own (see tools/room-api/), which is the only thing that ever
-## sees a host's address: the list hands out names and player counts, and the address only comes
-## back from /join once the password checks out. The API reads the host's public address from the
-## request itself, so the game never has to ask a what-is-my-IP service. Hosts heartbeat every
-## 10 s and a room that goes quiet for 45 s disappears by itself.
+## Two roles use this:
+##   a match server  - serve(port) registers it and keeps saying what it is doing
+##   a player        - claim() asks for a free server to create a game on, refresh() lists the
+##                     games that are up, and each row already carries the address to connect to
 ##
-## SERVICE empty = this build has no room list: the menu says so and everyone joins by IP.
-## Override at runtime with --room_api=https://host/path (handy for testing a new backend).
+## Room passwords never leave the game: the list only says whether a room has one, and the match
+## server itself checks it when a player connects.
+##
+## SERVICE empty = no list in this build (offline skirmish and LAN still work).
+## Override at runtime with --room_api=https://host/path.
 
 const SERVICE := "https://cc-rooms.zerobudget.workers.dev"
-const HEARTBEAT := 10.0
+const HEARTBEAT := 8.0
 
 signal rooms_changed(rooms: Array)
 signal rooms_failed(message: String)
-signal announced(ok: bool, message: String)
-signal joined(ok: bool, ip: String, port: int, message: String)
-signal unreachable_reported(n: int)   # host: this many people found your room but could not connect
+signal claimed(ok: bool, ip: String, port: int, message: String)
 
-var room_id := ""
-var room_secret := ""
 var rooms: Array = []
+# ---- match-server side ----
+var serving_port := 0
+var secret := ""
+var room_name := ""
+var has_password := false
+var players := 0
+var max_players := 6
+var started := false
 var _hb_due := 0.0
-var _players := 1
-var _started := false
-var _pending_announce: Dictionary = {}
 
 func base_url() -> String:
 	var over := str(Main.I.args.get("room_api", "")) if Main.I != null else ""
@@ -36,59 +39,66 @@ func base_url() -> String:
 func enabled() -> bool:
 	return base_url() != ""
 
-## Heartbeats are scheduled against the clock, not against frame deltas: the menu (and a big
-## battle later) can drop to a few frames a second, and a room that misses two heartbeats
-## disappears from everyone's list.
 func _now() -> float:
 	return Time.get_ticks_msec() / 1000.0
 
+## Heartbeats run off the clock, never off frame deltas: a machine under load can lose most of its
+## process time, and a server that misses two heartbeats drops out of everyone's list.
 func _process(_dt: float) -> void:
-	if room_id == "":
+	if serving_port == 0 or not enabled():
 		return
 	if _now() >= _hb_due:
 		_hb_due = _now() + HEARTBEAT
-		_request("POST", "/rooms/%s/heartbeat" % room_id, {"secret": room_secret, "players": _players, "started": _started},
-			func(ok: bool, body: Variant) -> void:
-				if ok and body is Dictionary and not bool(body.get("ok", true)):
-					# the backend forgot us (long hiccup): announce again
-					room_id = ""
-					if not _pending_announce.is_empty():
-						announce(_pending_announce["name"], _pending_announce["password"], _pending_announce["max"], _pending_announce["port"])
-				elif ok and body is Dictionary and int(body.get("unreachable", 0)) > 0:
-					unreachable_reported.emit(int(body["unreachable"])))
+		_request("POST", "/servers", {
+			"port": serving_port, "version": Main.GAME_VERSION, "secret": secret,
+			"name": room_name, "has_password": has_password,
+			"players": players, "max": max_players, "started": started,
+		}, func(_ok: bool, _body: Variant) -> void: pass)
 
-## Host: put this game on the list.
-func announce(name: String, password: String, max_players: int, port: int) -> void:
-	_pending_announce = {"name": name, "password": password, "max": max_players, "port": port}
+# ---------------------------------------------------------------------------
+# Match server
+# ---------------------------------------------------------------------------
+## Start telling the list about this match server.
+func serve(port: int) -> void:
+	serving_port = port
+	if secret == "":
+		secret = "%d-%d" % [Time.get_unix_time_from_system(), randi()]
+	_hb_due = 0.0
+
+## What this server is doing right now (pushed on the next heartbeat, which is due immediately).
+func set_room(name: String, with_password: bool) -> void:
+	room_name = name
+	has_password = with_password
+	_hb_due = 0.0
+
+func set_players(n: int, in_match: bool) -> void:
+	if n != players or in_match != started:
+		players = n
+		started = in_match
+		_hb_due = 0.0
+
+## Back to an empty server that anyone may claim.
+func free_server() -> void:
+	set_room("", false)
+	set_players(0, false)
+
+# ---------------------------------------------------------------------------
+# Player
+# ---------------------------------------------------------------------------
+## Ask for a free match server to create a game on.
+func claim() -> void:
 	if not enabled():
-		announced.emit(false, "This build has no room list - friends join by IP.")
+		claimed.emit(false, "", 0, "This build has no games list.")
 		return
-	_request("POST", "/rooms", {"name": name, "password": password, "max": max_players, "port": port, "version": Main.GAME_VERSION},
-		func(ok: bool, body: Variant) -> void:
-			if ok and body is Dictionary and body.has("id"):
-				room_id = str(body["id"])
-				room_secret = str(body["secret"])
-				_hb_due = _now() + HEARTBEAT
-				announced.emit(true, "Listed as \"%s\"%s" % [name, " (password)" if password != "" else ""])
-			else:
-				announced.emit(false, "Room list unavailable (%s) - friends can still join by IP." % str(body)))
+	_request("POST", "/claim", {"version": Main.GAME_VERSION}, func(ok: bool, body: Variant) -> void:
+		if ok and body is Dictionary and body.has("ip"):
+			claimed.emit(true, str(body["ip"]), int(body["port"]), "")
+		elif ok and body is Dictionary and str(body.get("error", "")) == "none_free":
+			claimed.emit(false, "", 0, "Every game server is busy right now. Try again in a minute, or play a skirmish against the AI.")
+		else:
+			claimed.emit(false, "", 0, "Could not reach the games list (%s)." % str(body)))
 
-func set_players(n: int, started: bool) -> void:
-	if n != _players or started != _started:
-		_players = n
-		_started = started
-		_hb_due = 0.0   # push the change right away
-
-## Host: take the room down (leaving the lobby / quitting).
-func close() -> void:
-	_pending_announce = {}
-	if room_id == "":
-		return
-	_request("POST", "/rooms/%s/close" % room_id, {"secret": room_secret}, func(_ok: bool, _b: Variant) -> void: pass)
-	room_id = ""
-	room_secret = ""
-
-## Everyone: fetch the rooms running this version.
+## The games that are up right now.
 func refresh() -> void:
 	if not enabled():
 		rooms_failed.emit("off")
@@ -100,37 +110,19 @@ func refresh() -> void:
 		else:
 			rooms_failed.emit(str(body)))
 
-## A joiner whose connection never landed: let the host know it is their port, not the list.
-func report_unreachable(id: String) -> void:
-	if id != "":
-		_request("POST", "/rooms/%s/unreachable" % id, {}, func(_ok: bool, _b: Variant) -> void: pass)
-
-## Everyone: ask for a room's address (password checked by the server).
-func join(id: String, password: String) -> void:
-	_request("POST", "/rooms/%s/join" % id, {"password": password}, func(ok: bool, body: Variant) -> void:
-		if not ok or not (body is Dictionary):
-			joined.emit(false, "", 0, "Room list unavailable")
-		elif body.has("error"):
-			match str(body["error"]):
-				"password":
-					joined.emit(false, "", 0, "Wrong password")
-				"started":
-					joined.emit(false, "", 0, "That game has already started")
-				_:
-					joined.emit(false, "", 0, "That room is gone")
-		else:
-			joined.emit(true, str(body["ip"]), int(body["port"]), str(body.get("name", ""))))
-
-## Honour HTTPS_PROXY / SSL_CERT_FILE so this works behind a corporate proxy or in a sandbox.
+# ---------------------------------------------------------------------------
+# HTTP
+# ---------------------------------------------------------------------------
+## Honour HTTPS_PROXY / SSL_CERT_FILE so this works behind a company proxy or in a sandbox.
 func _new_request(timeout: float) -> HTTPRequest:
 	var req := HTTPRequest.new()
 	req.timeout = timeout
-	req.use_threads = true   # never let a slow frame (a big battle) time a lobby call out
+	req.use_threads = true   # a slow frame must never time a lobby call out
 	var proxy := OS.get_environment("HTTPS_PROXY")
 	if proxy == "":
 		proxy = OS.get_environment("https_proxy")
 	if "127.0.0.1" in base_url() or "localhost" in base_url():
-		proxy = ""   # a room API on this machine / LAN is not reached through a proxy
+		proxy = ""
 	if proxy != "":
 		var hp := proxy.trim_prefix("http://").trim_prefix("https://").trim_suffix("/").split(":")
 		if hp.size() == 2:
@@ -146,13 +138,13 @@ func _new_request(timeout: float) -> HTTPRequest:
 
 func _request(method: String, path: String, params: Dictionary, cb: Callable) -> void:
 	if not enabled():
-		cb.call(false, "no room list in this build")
+		cb.call(false, "no games list in this build")
 		return
 	var req := _new_request(8.0)
 	req.request_completed.connect(func(result: int, code: int, _h: PackedStringArray, body: PackedByteArray) -> void:
 		req.queue_free()
 		if Main.I.args.has("netdebug"):
-			print("[Rooms] t=%.1fs %s %s -> result %d code %d %s" % [Time.get_ticks_msec() / 1000.0, method, path, result, code, body.get_string_from_utf8().left(100)])
+			print("[Rooms] t=%.1fs %s %s -> result %d code %d %s" % [_now(), method, path, result, code, body.get_string_from_utf8().left(100)])
 		if result != HTTPRequest.RESULT_SUCCESS:
 			cb.call(false, "no connection")
 			return

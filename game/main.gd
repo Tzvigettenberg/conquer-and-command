@@ -3,11 +3,11 @@ extends Node3D
 ## Entry point: main menu, host/join lobby, then hands over to Session + ClientView.
 
 const PORT := 7788
-const GAME_VERSION := "0.3.2"
+const GAME_VERSION := "0.4.0"
 const GAME_TITLE := "CONQUER & COMMAND"
 const GAME_SUBTITLE := "ZERO BUDGET"
 const MAX_PLAYERS := 6
-const NO_LIST_TEXT := "The open-games list is not switched on in this build - send your friends your IP and they join below."
+const NO_LIST_TEXT := "Can't reach the games list right now. Check your internet, or play a skirmish against the AI."
 
 static var I: Main = null
 
@@ -37,7 +37,9 @@ var menu_scene: Node3D = null
 var rooms: RoomList
 var room_name_edit: LineEdit
 var room_pw_edit: LineEdit
-var room_public: CheckButton
+var create_btn: Button
+var pending_room_name := ""
+var pending_room_pw := ""
 var room_rows: VBoxContainer
 var room_hint: Label
 var pw_box: VBoxContainer
@@ -50,13 +52,20 @@ var connecting_to := ""
 var connect_t := 0.0
 var lobby_t := 0.0
 var lobby_seen := false
-var joining_room_id := ""
 var args: Dictionary = {}
 var lobby_players: Array = []      # server: [{peer, name}]
 var in_lobby := false
 var game_started := false
 var my_name := "Commander"
 var port := PORT
+## Match servers (tools/server) run the game so players never host from home: they only ever make
+## outgoing connections, which every router allows. The server is peer 1 but has no player of its
+## own - the first person to arrive owns the lobby and gets the host controls.
+var dedicated := false
+var lobby_owner := 0          # peer id running this lobby (0 = nobody yet)
+var room_name := ""
+var room_password := ""
+var reset_at := 0.0           # match server: wipe and go back on the list at this time
 
 func _ready() -> void:
 	I = self
@@ -74,10 +83,7 @@ func _ready() -> void:
 	rooms.rooms_failed.connect(func(msg: String) -> void:
 		if room_rows.get_child_count() == 0:
 			room_hint.text = NO_LIST_TEXT if msg == "off" else "Can't reach the room list (%s). Join by IP below, or try Refresh." % msg)
-	rooms.announced.connect(func(ok: bool, msg: String) -> void: _set_status(("Hosting on port %d. " % port) + msg) if ok else _set_status(msg))
-	rooms.joined.connect(_on_room_joined)
-	rooms.unreachable_reported.connect(func(n: int) -> void:
-		_set_status("%d player%s found your room but could not connect. They need UDP port %d open on your router - forward it, or host from a Tailscale / ZeroTier address instead." % [n, "" if n == 1 else "s", port]))
+	rooms.claimed.connect(_on_claimed)
 	if args.has("port"):
 		port = int(args["port"])
 	Settings.apply()
@@ -95,7 +101,9 @@ func _ready() -> void:
 	if args.has("name"):
 		my_name = args["name"]
 		name_edit.text = my_name
-	if args.has("host"):
+	if args.has("dedicated"):
+		_serve()
+	elif args.has("host"):
 		_host()
 		if args.has("screenshot") and not args.has("autostart"):
 			get_tree().create_timer(float(args.get("shot_delay", 4.0))).timeout.connect(func() -> void:
@@ -104,6 +112,11 @@ func _ready() -> void:
 				print("[Shot] lobby saved")
 				if args.has("exit_after"):
 					get_tree().quit())
+	elif args.has("create"):
+		# test hook: create a game without clicking
+		room_name_edit.text = str(args["create"]) if str(args["create"]) != "true" else ""
+		room_pw_edit.text = str(args.get("pw", ""))
+		get_tree().create_timer(1.0).timeout.connect(_create_game)
 	elif args.has("join"):
 		ip_edit.text = args["join"]
 		_join()
@@ -205,37 +218,30 @@ func _build_menu() -> void:
 	name_edit.text = my_name
 	name_edit.placeholder_text = "Your name"
 	menu_box.add_child(name_edit)
-	# ---- host a room ----
-	menu_box.add_child(MenuTheme.section("Host a game"))
+	# ---- create a game ----
+	menu_box.add_child(MenuTheme.section("Play online"))
 	var hg := GridContainer.new()
 	hg.columns = 2
 	hg.add_theme_constant_override("h_separation", 12)
 	hg.add_theme_constant_override("v_separation", 6)
 	menu_box.add_child(hg)
-	hg.add_child(_label("Room name"))
+	hg.add_child(_label("Game name"))
 	room_name_edit = LineEdit.new()
 	room_name_edit.placeholder_text = "%s's game" % my_name
 	room_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hg.add_child(room_name_edit)
 	hg.add_child(_label("Password"))
 	room_pw_edit = LineEdit.new()
-	room_pw_edit.placeholder_text = "optional - friends only"
+	room_pw_edit.placeholder_text = "optional - only friends who know it can join"
 	room_pw_edit.secret = true
 	room_pw_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hg.add_child(room_pw_edit)
-	hg.add_child(_label("Show in the list"))
-	room_public = CheckButton.new()
-	room_public.button_pressed = true
-	room_public.tooltip_text = "Off: nobody sees the room; friends join by IP as before."
-	if not rooms.enabled():
-		room_public.button_pressed = false
-	hg.add_child(room_public)
-	var host_btn := Button.new()
-	host_btn.text = "HOST GAME"
-	host_btn.custom_minimum_size = Vector2(0, 44)
-	host_btn.pressed.connect(_host)
-	menu_box.add_child(host_btn)
-	# ---- join ----
+	create_btn = Button.new()
+	create_btn.text = "CREATE GAME"
+	create_btn.custom_minimum_size = Vector2(0, 44)
+	create_btn.pressed.connect(_create_game)
+	menu_box.add_child(create_btn)
+	# ---- join one ----
 	var jh := HBoxContainer.new()
 	jh.add_theme_constant_override("separation", 8)
 	var js := MenuTheme.section("Open games")
@@ -246,10 +252,6 @@ func _build_menu() -> void:
 	refresh_btn.pressed.connect(func() -> void: rooms.refresh())
 	jh.add_child(refresh_btn)
 	menu_box.add_child(jh)
-	if not rooms.enabled():
-		# nothing to name or lock without a list: just host, and say so below
-		hg.visible = false
-		jh.visible = false
 	room_rows = VBoxContainer.new()
 	room_rows.add_theme_constant_override("separation", 4)
 	menu_box.add_child(room_rows)
@@ -259,12 +261,12 @@ func _build_menu() -> void:
 	room_hint.add_theme_color_override("font_color", MenuTheme.TEXT_DIM)
 	room_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	menu_box.add_child(room_hint)
+	# a locked game asks for its password right here
 	pw_box = VBoxContainer.new()
 	pw_box.visible = false
 	pw_box.add_theme_constant_override("separation", 6)
 	menu_box.add_child(pw_box)
-	var pwl := _label("This room needs a password")
-	pw_box.add_child(pwl)
+	pw_box.add_child(_label("This game needs a password"))
 	var pwh := HBoxContainer.new()
 	pwh.add_theme_constant_override("separation", 8)
 	pw_box.add_child(pwh)
@@ -282,25 +284,43 @@ func _build_menu() -> void:
 	pwc.text = "Cancel"
 	pwc.pressed.connect(func() -> void: pw_box.visible = false)
 	pwh.add_child(pwc)
+	# ---- offline ----
+	menu_box.add_child(MenuTheme.section("On your own"))
+	var solo_btn := Button.new()
+	solo_btn.text = "SKIRMISH VS AI"
+	solo_btn.tooltip_text = "Play against the computer on this PC - no connection needed"
+	solo_btn.custom_minimum_size = Vector2(0, 40)
+	solo_btn.pressed.connect(_host)
+	menu_box.add_child(solo_btn)
+	# ---- same house / same network ----
+	var adv_btn := Button.new()
+	adv_btn.text = "Same network (advanced)"
+	adv_btn.flat = true
+	adv_btn.add_theme_font_size_override("font_size", 12)
+	menu_box.add_child(adv_btn)
+	var adv := VBoxContainer.new()
+	adv.visible = false
+	adv.add_theme_constant_override("separation", 6)
+	menu_box.add_child(adv)
+	adv_btn.pressed.connect(func() -> void: adv.visible = not adv.visible)
 	var ih := HBoxContainer.new()
 	ih.add_theme_constant_override("separation", 8)
-	menu_box.add_child(ih)
+	adv.add_child(ih)
 	ip_edit = LineEdit.new()
-	ip_edit.text = ""
-	ip_edit.placeholder_text = "...or join by IP / hostname"
+	ip_edit.placeholder_text = "Address of a game on your network"
 	ip_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ip_edit.text_submitted.connect(func(_t: String) -> void: _join())
 	ih.add_child(ip_edit)
 	var join_btn := Button.new()
-	join_btn.text = "JOIN BY IP"
+	join_btn.text = "Connect"
 	join_btn.pressed.connect(_join)
 	ih.add_child(join_btn)
 	var help := Label.new()
-	help.text = "Hosting needs UDP port %d reachable: forward it on your router, or everyone uses a mesh VPN (Tailscale / ZeroTier) and you host from that IP. Same Wi-Fi: it just works." % PORT
+	help.text = "Online games run on our server, so there is nothing to set up. This is only for playing someone in the same house without the internet: one of you picks Skirmish vs AI, the other types their address here."
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.modulate = Color(0.6, 0.6, 0.6)
 	help.add_theme_font_size_override("font_size", 12)
-	menu_box.add_child(help)
+	adv.add_child(help)
 
 	lobby_box = VBoxContainer.new()
 	lobby_box.add_theme_constant_override("separation", 8)
@@ -419,6 +439,58 @@ func _set_status(t: String) -> void:
 # ---------------------------------------------------------------------------
 # Host / join
 # ---------------------------------------------------------------------------
+## May this peer change the lobby and start the match?
+func _may_control(peer: int) -> bool:
+	return peer == lobby_owner or (peer == 1 and not dedicated)
+
+## Do *we* hold those controls (host of a local game, or owner of a lobby on a match server)?
+func _i_control() -> bool:
+	if multiplayer.multiplayer_peer == null or multiplayer.multiplayer_peer is OfflineMultiplayerPeer:
+		return false
+	return multiplayer.get_unique_id() == lobby_owner or (multiplayer.is_server() and not dedicated)
+
+## A match server: no player of its own, just a lobby and a world, waiting to be claimed.
+func _serve() -> void:
+	dedicated = true
+	if args.has("port"):
+		port = int(args["port"])
+	var peer := ENetMultiplayerPeer.new()
+	var err := peer.create_server(port, MAX_PLAYERS + 2)
+	if err != OK:
+		push_error("match server could not open port %d (error %d)" % [port, err])
+		get_tree().quit(1)
+		return
+	multiplayer.multiplayer_peer = peer
+	lobby_players = []
+	lobby_opts["slots"] = []
+	lobby_opts["observers"] = []
+	_ensure_slots()
+	rooms.serve(port)
+	_set_status("Match server ready on port %d" % port)
+
+## Everyone has gone, or the match is over: become an empty server again.
+func _reset_server() -> void:
+	reset_at = 0.0
+	game_started = false
+	session.world = null
+	lobby_players.clear()
+	lobby_owner = 0
+	room_name = ""
+	room_password = ""
+	lobby_opts["slots"] = []
+	lobby_opts["observers"] = []
+	lobby_opts["map"] = "desert2"
+	lobby_opts["cash"] = 10000
+	lobby_opts["superweapons"] = true
+	_ensure_slots()
+	rooms.free_server()
+	_set_status("Match server ready on port %d" % port)
+
+## The world says the match is decided: let the clients read the result, then recycle.
+func on_match_over() -> void:
+	if dedicated:
+		reset_at = Time.get_ticks_msec() / 1000.0 + 25.0
+
 func _host() -> void:
 	my_name = name_edit.text.strip_edges()
 	if my_name == "":
@@ -429,6 +501,7 @@ func _host() -> void:
 		_set_status("Could not open port %d (error %d). Is another copy running?" % [PORT, err])
 		return
 	multiplayer.multiplayer_peer = peer
+	lobby_owner = 1
 	lobby_players = [{"peer": 1, "name": my_name}]
 	lobby_opts["slots"] = []
 	if args.has("map"):
@@ -441,18 +514,47 @@ func _host() -> void:
 	_apply_opts_ui()
 	_show_lobby(true)
 	_set_status("Hosting on port %d. Waiting for players... (or start with AI opponents)" % port)
-	if room_public.button_pressed and rooms.enabled() and not args.has("autostart") and DisplayServer.get_name() != "headless":
-		var rn := room_name_edit.text.strip_edges()
-		if rn == "":
-			rn = "%s's game" % my_name
-		rooms.announce(rn, room_pw_edit.text, MapGen.MAPS[lobby_opts["map"]]["players"], port)
 	_refresh_lobby()
 	if args.has("autostart") and (args.has("solo") or args.has("bot") or args.has("ai")):
 		_start_game.call_deferred()
 
 ## Room list: rebuild the rows.
+## Create a game: ask the list for a free match server, then connect to it as its first player.
+func _create_game() -> void:
+	my_name = name_edit.text.strip_edges()
+	if my_name == "":
+		my_name = "Commander"
+	pending_room_name = room_name_edit.text.strip_edges()
+	pending_room_pw = room_pw_edit.text
+	create_btn.disabled = true
+	_set_status("Creating your game...")
+	rooms.claim()
+
+func _on_claimed(ok: bool, ip: String, cport: int, message: String) -> void:
+	create_btn.disabled = false
+	if not ok:
+		_set_status(message)
+		return
+	_connect_to(ip, cport)
+
+## Everything that joins a game goes through here: no addresses in front of the player.
+func _connect_to(ip: String, p: int) -> void:
+	my_name = name_edit.text.strip_edges()
+	if my_name == "":
+		my_name = "Commander"
+	port = p
+	var peer := ENetMultiplayerPeer.new()
+	if peer.create_client(ip, p) != OK:
+		_set_status("Could not start the connection.")
+		return
+	multiplayer.multiplayer_peer = peer
+	connecting_to = "%s:%d" % [ip, p]
+	connect_t = Time.get_ticks_msec() / 1000.0 + JOIN_TIMEOUT
+	lobby_seen = false
+	_set_status("Connecting...")
+
 func _on_rooms_changed(list: Array) -> void:
-	if args.has("join_first") and not list.is_empty() and joining_room_id == "" and not in_lobby:
+	if args.has("join_first") and not list.is_empty() and not in_lobby and connecting_to == "":
 		# test hook: take the first room in the list without clicking it
 		_join_room(str(list[0]["id"]), str(args.get("pw", "")))
 		return
@@ -464,10 +566,11 @@ func _on_rooms_changed(list: Array) -> void:
 		room_hint.text = "%d open game%s - click one to join." % [list.size(), "" if list.size() == 1 else "s"]
 	for r in list:
 		var b := Button.new()
-		var lock := "  [locked]" if bool(r.get("has_password", false)) else ""
-		var state := "  · in progress" if bool(r.get("started", false)) else ""
-		b.text = "%s    %d / %d players%s%s" % [str(r["name"]), int(r["players"]), int(r["max_players"]), lock, state]
+		var lock := "   locked" if bool(r.get("has_password", false)) else ""
+		var state := "   playing" if bool(r.get("started", false)) else ""
+		b.text = "%s      %d / %d players%s%s" % [str(r["name"]), int(r["players"]), int(r["max_players"]), lock, state]
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.custom_minimum_size = Vector2(0, 34)
 		b.disabled = bool(r.get("started", false))
 		var rid := str(r["id"])
 		var pw := bool(r.get("has_password", false))
@@ -483,21 +586,25 @@ func _on_rooms_changed(list: Array) -> void:
 				_join_room(rid, ""))
 		room_rows.add_child(b)
 
+## Join a game from the list. The row already carries its address - the password is checked by
+## the match server itself when we say hello.
 func _join_room(id: String, password: String) -> void:
 	pw_box.visible = false
-	joining_room_id = id
-	_set_status("Asking for the room address...")
-	rooms.join(id, password)
-
-func _on_room_joined(ok: bool, ip: String, jport: int, message: String) -> void:
-	if not ok:
-		_set_status(message)
-		return
-	ip_edit.text = ip
-	port = jport
-	_join()
+	for r in rooms.rooms:
+		if str(r["id"]) == id:
+			pending_room_name = ""
+			pending_room_pw = password
+			_connect_to(str(r["ip"]), int(r["port"]))
+			return
+	_set_status("That game is no longer there.")
+	rooms.refresh()
 
 func _process(dt: float) -> void:
+	if reset_at > 0.0 and Time.get_ticks_msec() / 1000.0 >= reset_at:
+		for pl in lobby_players:
+			if multiplayer.get_peers().has(int(pl["peer"])):
+				session.rpc_id(int(pl["peer"]), "cl_kick", "The match is over - back to the menu.")
+		_reset_server()
 	var now := Time.get_ticks_msec() / 1000.0
 	if connect_t > 0.0 and now >= connect_t:
 		connect_t = 0.0
@@ -509,7 +616,7 @@ func _process(dt: float) -> void:
 	if menu != null and menu.visible and menu_box != null and menu_box.visible and not in_lobby and not game_started and rooms.enabled():
 		if Time.get_ticks_msec() / 1000.0 >= room_refresh_t:
 			room_refresh_t = Time.get_ticks_msec() / 1000.0 + 6.0
-			if DisplayServer.get_name() != "headless" and not args.has("autostart"):
+			if (DisplayServer.get_name() != "headless" or args.has("join_first")) and not args.has("autostart"):
 				rooms.refresh()
 
 func _join() -> void:
@@ -553,13 +660,14 @@ func _show_lobby(is_host: bool) -> void:
 	start_btn.text = "Start game"
 
 func _opts_changed() -> void:
-	if not multiplayer.is_server():
+	if applying_opts or not _i_control():
 		return
-	lobby_opts["map"] = opt_map.get_item_metadata(opt_map.selected)
-	lobby_opts["cash"] = opt_cash.get_item_metadata(opt_cash.selected)
-	lobby_opts["superweapons"] = opt_sw.button_pressed
-	_ensure_slots()
-	_refresh_lobby()
+	var c := {"t": "opts", "map": opt_map.get_item_metadata(opt_map.selected),
+		"cash": opt_cash.get_item_metadata(opt_cash.selected), "superweapons": opt_sw.button_pressed}
+	if multiplayer.is_server():
+		on_lobby_cmd(1, c)
+	else:
+		session.rpc_id(1, "srv_lobby", c)
 
 ## Make the slot list match the map: keep occupants, drop humans that no longer fit
 ## into open slots, default the rest to Open.
@@ -720,10 +828,24 @@ func on_lobby_cmd(peer: int, c: Dictionary) -> void:
 	var slots: Array = lobby_opts["slots"]
 	var slot := int(c.get("slot", -1))
 	var t := str(c.get("t", ""))
+	if t == "start":
+		if _may_control(peer):
+			_start_game()
+		return
+	if t == "opts":
+		# only the owner sets the map / cash / superweapons
+		if not _may_control(peer):
+			return
+		lobby_opts["map"] = MapGen.map_id(str(c.get("map", lobby_opts["map"])))
+		lobby_opts["cash"] = clampi(int(c.get("cash", lobby_opts["cash"])), 1000, 100000)
+		lobby_opts["superweapons"] = bool(c.get("superweapons", lobby_opts["superweapons"]))
+		_ensure_slots()
+		_refresh_lobby()
+		return
 	if t == "observe":
-		# a player steps out to watch (themselves, or anyone by the host)
+		# a player steps out to watch (themselves, or anyone the owner picks)
 		var who := int(c.get("peer", peer))
-		if peer != 1 and who != peer:
+		if not _may_control(peer) and who != peer:
 			return
 		_set_observer(who, bool(c.get("on", true)))
 		_refresh_lobby()
@@ -732,7 +854,7 @@ func on_lobby_cmd(peer: int, c: Dictionary) -> void:
 		return
 	match t:
 		"kind":
-			if peer != 1:
+			if not _may_control(peer):
 				return
 			var k := str(c["kind"])
 			if slots[slot]["kind"] == "human":
@@ -745,13 +867,13 @@ func on_lobby_cmd(peer: int, c: Dictionary) -> void:
 			else:
 				slots[slot] = {"kind": k, "peer": 0, "name": "", "level": "medium", "team": slots[slot]["team"], "faction": fac}
 		"team":
-			var owner_peer := int(slots[slot]["peer"]) if slots[slot]["kind"] == "human" else 1
-			if peer != 1 and peer != owner_peer:
+			var owner_peer := int(slots[slot]["peer"]) if slots[slot]["kind"] == "human" else lobby_owner
+			if not _may_control(peer) and peer != owner_peer:
 				return
 			slots[slot]["team"] = clampi(int(c["team"]), 0, MAX_PLAYERS - 1)
 		"faction":
-			var owner_peer := int(slots[slot]["peer"]) if slots[slot]["kind"] == "human" else 1
-			if peer != 1 and peer != owner_peer:
+			var owner_peer := int(slots[slot]["peer"]) if slots[slot]["kind"] == "human" else lobby_owner
+			if not _may_control(peer) and peer != owner_peer:
 				return
 			var f := str(c.get("faction", "random"))
 			slots[slot]["faction"] = f if (f == "random" or Data.FACTIONS.has(f)) else "random"
@@ -771,7 +893,9 @@ func on_lobby_cmd(peer: int, c: Dictionary) -> void:
 			slots[slot] = me
 	_refresh_lobby()
 
+var applying_opts := false
 func _apply_opts_ui() -> void:
+	applying_opts = true   # setting the dropdowns must not look like the player changing them
 	for i in range(opt_map.item_count):
 		if opt_map.get_item_metadata(i) == lobby_opts["map"]:
 			opt_map.select(i)
@@ -779,6 +903,7 @@ func _apply_opts_ui() -> void:
 		if int(opt_cash.get_item_metadata(i)) == int(lobby_opts["cash"]):
 			opt_cash.select(i)
 	opt_sw.button_pressed = bool(lobby_opts["superweapons"])
+	applying_opts = false
 
 func _refresh_lobby() -> void:
 	if multiplayer.is_server():
@@ -786,7 +911,7 @@ func _refresh_lobby() -> void:
 	for c in lobby_rows.get_children():
 		lobby_rows.remove_child(c)
 		c.queue_free()
-	var is_host := multiplayer.is_server()
+	var is_host := _i_control()
 	var slots: Array = lobby_opts.get("slots", [])
 	var players_n := 0
 	for i in range(slots.size()):
@@ -868,12 +993,17 @@ func _refresh_lobby() -> void:
 				h.add_child(kick)
 			lobby_rows.add_child(h)
 	_update_preview()
+	start_btn.visible = is_host
+	for c2 in [opt_map, opt_cash, opt_sw]:
+		(c2 as Control).mouse_filter = Control.MOUSE_FILTER_STOP if is_host else Control.MOUSE_FILTER_IGNORE
+		(c2 as Control).modulate = Color.WHITE if is_host else Color(0.7, 0.7, 0.7)
 	if args.has("netdebug"):
 		var dbg := []
 		for sl in slots:
 			dbg.append("%s:%s" % [sl["kind"], sl.get("name", "")])
 		print("[Lobby] %s rows=%s observers=%d map=%s cash=%s" % ["host" if is_host else "client", str(dbg), observers.size(), lobby_opts.get("map", "?"), lobby_opts.get("cash", "?")])
-	if is_host:
+	if multiplayer.is_server():
+		lobby_opts["owner"] = lobby_owner
 		var humans := 0
 		for sl in slots:
 			if sl["kind"] == "human":
@@ -884,7 +1014,7 @@ func _refresh_lobby() -> void:
 			start_btn.text = "Watch the AIs fight" if players_n >= 2 else "Watch AI (sandbox)"
 		else:
 			start_btn.text = "Start game" if players_n >= 2 else "Start solo (sandbox)"
-		start_btn.disabled = players_n == 0
+		start_btn.disabled = players_n < (2 if dedicated else 1)
 		for sl in slots:
 			if sl["kind"] == "human" and int(sl["peer"]) != 1:
 				session.rpc_id(int(sl["peer"]), "cl_lobby", [], lobby_opts)
@@ -968,10 +1098,13 @@ func _remove_peer(peer: int) -> void:
 			break
 
 func on_lobby(players: Array, opts: Dictionary) -> void:
+	lobby_owner = int(opts.get("owner", lobby_owner))
+	if args.has("owner_test") and _i_control() and not owner_test_done:
+		owner_test_done = true
+		_run_owner_test()
 	if not lobby_seen:
 		lobby_seen = true
 		lobby_t = 0.0
-		joining_room_id = ""
 		_set_status("")
 	if not players.is_empty():
 		lobby_players = players
@@ -989,23 +1122,37 @@ func _on_peer_connected(id: int) -> void:
 		return
 	# wait for hello (name/version) before adding
 
-func on_client_hello(peer: int, pname: String, version: String) -> void:
+func on_client_hello(peer: int, pname: String, version: String, rname := "", rpw := "") -> void:
 	if not multiplayer.is_server():
 		return
 	if version != GAME_VERSION:
-		session.rpc_id(peer, "cl_kick", "Version mismatch: host %s, you %s" % [GAME_VERSION, version])
+		session.rpc_id(peer, "cl_kick", "Different version: this game is %s, you have %s. Grab the current build and try again." % [GAME_VERSION, version])
+		return
+	if game_started:
+		session.rpc_id(peer, "cl_kick", "That game has already started")
+		return
+	if dedicated and lobby_owner == 0:
+		# first one in creates the game: they name it and set its password
+		lobby_owner = peer
+		room_name = rname.strip_edges().left(40)
+		if room_name == "":
+			room_name = "%s's game" % pname
+		room_password = rpw
+		rooms.set_room(room_name, room_password != "")
+		_set_status("%s created \"%s\"" % [pname, room_name])
+	elif dedicated and room_password != "" and rpw != room_password:
+		session.rpc_id(peer, "cl_kick", "Wrong password")
 		return
 	var open := _first_open()
-	if game_started:
-		session.rpc_id(peer, "cl_kick", "Game already started")
-		return
 	lobby_players.append({"peer": peer, "name": pname})
 	if open < 0:
 		lobby_opts["observers"].append({"peer": peer, "name": pname})
 		_set_status("%s joined as an observer (no open slot)." % pname)
 	else:
 		lobby_opts["slots"][open] = {"kind": "human", "peer": peer, "name": pname, "level": "", "team": lobby_opts["slots"][open]["team"], "faction": "random"}
-		_set_status("%s joined." % pname)
+		if not dedicated or peer != lobby_owner:
+			_set_status("%s joined." % pname)
+	rooms.set_players(lobby_players.size(), game_started)
 	_refresh_lobby()
 
 func _on_peer_disconnected(id: int) -> void:
@@ -1017,11 +1164,20 @@ func _on_peer_disconnected(id: int) -> void:
 				if game_started:
 					if view:
 						view.on_msg("%s disconnected" % nm)
+					for pl in lobby_players:
+						if int(pl["peer"]) == id:
+							pl["gone"] = true
 				else:
 					_remove_peer(id)
 					_set_status("%s left." % nm)
+					if id == lobby_owner:
+						# hand the lobby to whoever is still here
+						lobby_owner = int(lobby_players[0]["peer"]) if not lobby_players.is_empty() else 0
 					_refresh_lobby()
 				break
+		# a match server with nobody left on it goes straight back on the list, mid-match or not
+		if dedicated and multiplayer.get_peers().is_empty():
+			_reset_server()
 
 func _on_connected() -> void:
 	connecting_to = ""
@@ -1029,26 +1185,22 @@ func _on_connected() -> void:
 	lobby_t = Time.get_ticks_msec() / 1000.0 + LOBBY_TIMEOUT
 	_show_lobby(false)
 	_set_status("Connected. Waiting for the host...")
-	session.rpc_id(1, "srv_hello", my_name, GAME_VERSION)
+	session.rpc_id(1, "srv_hello", my_name, GAME_VERSION, pending_room_name, pending_room_pw)
 
 func _on_conn_failed() -> void:
 	_fail_join()
 
-## Nothing answered, or the host answered but never sent the lobby: say which, and why it happens.
+## Nothing answered, or it answered but never sent the lobby.
 func _fail_join(reason := "") -> void:
-	var where := connecting_to if connecting_to != "" else "the host"
 	connecting_to = ""
 	connect_t = 0.0
 	lobby_t = 0.0
 	_leave()
-	if joining_room_id != "":
-		# the host can see this on their own screen - they are the one who can open the port
-		rooms.report_unreachable(joining_room_id)
-		joining_room_id = ""
 	if reason != "":
 		_set_status(reason)
 	else:
-		_set_status("Could not reach %s. The host has to be reachable on UDP port %d: forward it on their router, or both of you join a mesh VPN (Tailscale / ZeroTier) and host from that address. On the same Wi-Fi, use their local IP." % [where, port])
+		_set_status("Could not reach that game. It may have just closed - hit Refresh and try again.")
+	rooms.refresh()
 
 func _on_server_disconnected() -> void:
 	if view:
@@ -1058,7 +1210,24 @@ func _on_server_disconnected() -> void:
 		_set_status("Host disconnected.")
 		_leave()
 
+## Test hook: the owner changes the map, the cash and a slot, then starts - so a second client can
+## be checked for every one of those changes.
+var owner_test_done := false
+func _run_owner_test() -> void:
+	await get_tree().create_timer(6.0).timeout
+	_lobby_cmd({"t": "opts", "map": "grass6", "cash": 50000, "superweapons": false})
+	print("[Test] owner changed map/cash/superweapons")
+	await get_tree().create_timer(4.0).timeout
+	_lobby_cmd({"t": "kind", "slot": 3, "kind": "hard"})
+	print("[Test] owner set slot 2 to a hard AI")
+	await get_tree().create_timer(4.0).timeout
+	print("[Test] owner starts the match")
+	_on_start_pressed()
+
 func _on_start_pressed() -> void:
+	if not multiplayer.is_server():
+		session.rpc_id(1, "srv_lobby", {"t": "start"})
+		return
 	if multiplayer.is_server():
 		_start_game()
 

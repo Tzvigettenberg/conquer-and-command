@@ -2465,7 +2465,7 @@ func _update_vision() -> void:
 				keep.append(r)
 		v.reveals = keep
 		if players[p]["peer"] >= 0:
-			session.s_fog(players[p]["peer"], _team_fog(p))
+			session.s_fog(players[p]["peer"], _pack_fog(_team_fog(p)))
 		# ghost buildings that died out of sight
 		var done := []
 		for id in pending_despawn[p]:
@@ -2494,6 +2494,17 @@ func _update_vision() -> void:
 					break
 
 ## Bit-packed union of every allied player's vision.
+## Fog is one bit per cell, which on a big map is a couple of kilobytes - over the MTU, so ENet
+## would fragment it and drop the lot whenever one fragment went missing. It is mostly runs of
+## identical bytes, so it compresses to a fraction of that and fits in a single packet.
+func _pack_fog(raw: PackedByteArray) -> PackedByteArray:
+	var packed := raw.compress(FileAccess.COMPRESSION_FASTLZ)
+	var out := PackedByteArray()
+	out.resize(4)
+	out.encode_u32(0, raw.size())
+	out.append_array(packed)
+	return out
+
 func _team_fog(p: int) -> PackedByteArray:
 	var v: Vision = visions[p]
 	var out := PackedByteArray()
@@ -2871,6 +2882,7 @@ func _check_victory() -> void:
 		if alive_players.is_empty():
 			game_over = true
 			session.s_gameover(-1, report())
+			session.get_parent().on_match_over()
 		return
 	var teams_alive := {}
 	for p in alive_players:
@@ -2881,6 +2893,7 @@ func _check_victory() -> void:
 		if teams_alive.size() == 1:
 			winner = int(teams_alive.keys()[0])
 		session.s_gameover(winner, report())
+		session.get_parent().on_match_over()
 
 ## End-of-match statistics for every player.
 func report() -> Array:

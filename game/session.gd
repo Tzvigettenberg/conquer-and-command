@@ -132,8 +132,8 @@ func cl_paused(on: bool) -> void:
 # lobby
 # ---------------------------------------------------------------------------
 @rpc("any_peer", "call_remote", "reliable")
-func srv_hello(name: String, version: String) -> void:
-	get_parent().on_client_hello(multiplayer.get_remote_sender_id(), name, version)
+func srv_hello(name: String, version: String, room_name := "", room_pw := "") -> void:
+	get_parent().on_client_hello(multiplayer.get_remote_sender_id(), name, version, room_name, room_pw)
 
 @rpc("any_peer", "call_remote", "reliable")
 func srv_lobby(c: Dictionary) -> void:

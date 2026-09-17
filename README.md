@@ -94,6 +94,33 @@ becomes an observer automatically (*Play* takes them back into a slot). Observer
 `audio/music` — 14 Kevin MacLeod tracks (menu, game, victory, defeat), CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
 
+## Playing together (how the multiplayer is wired)
+Nobody hosts from home. Matches run on **match servers** - headless copies of this game
+(`--dedicated --port=N`) on a VPS, each holding one lobby and one world. Players only ever make
+*outgoing* connections to them, which every home router allows, so there is no port forwarding, no
+addresses to pass around and no NAT to fight.
+
+```
+player ──create──► games list (Cloudflare Worker, tools/room-api)
+       ◄─address── a free match server
+       ──connect─► match server (tools/server, /opt/conquer-and-command on the VPS)
+friend ──list────► games list        ──connect─► the same match server
+```
+
+* The match server is peer 1 but owns no player: the **first person in owns the lobby** (map, cash,
+  superweapons, slots, Start) and ownership passes on if they leave. Everything is authoritative on
+  the server, so every player sees every change.
+* Each server says hello to the games list every 8 s with its name and player count; a server that
+  goes quiet for 45 s drops off it. When the match ends, or everyone leaves, the server wipes itself
+  and goes back on the list as free.
+* Room passwords never reach the list - it only records that a room has one, and the match server
+  checks it when a player says hello.
+* `tools/server/setup_vps.sh` installs Godot and a systemd unit per port; `tools/server/deploy.sh`
+  rsyncs the project (with its import cache, so the server runs exactly what was tested) and
+  restarts them. About 200 MB of RAM per match server.
+* **Skirmish vs AI** still runs entirely in the player's own process, and the menu's "same network"
+  box still does a direct connection for two PCs in one house with no internet.
+
 ## What's in (M9) - v0.3.0
 - **Open games list**: Host names a room (password optional, "show in the list" toggle); the menu lists live rooms of the same
   version and joins with a click (password prompt for locked rooms). Client in `game/room_list.gd`, server in

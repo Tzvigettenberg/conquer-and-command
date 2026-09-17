@@ -1,22 +1,23 @@
-// Conquer & Command: Zero Budget - open games list.
+// Conquer & Command: Zero Budget - the games list.
 //
-// A room is just a name, a player count and the host's address, alive only while the host keeps
-// saying so (heartbeat every 10 s, dropped after 45 s of silence). Everything lives in one
-// Durable Object's memory: no database, nothing to clean up, and if the object ever restarts the
-// hosts re-announce on their next heartbeat. The host's address is never listed - it is read from
-// the request itself and only handed back by /join, after the password checks out.
+// Matches run on dedicated servers (see tools/server/), never on a player's PC, so nobody has to
+// forward a port or know what an IP is. Each match server says hello here every few seconds with
+// what it is doing; players ask for the list, or ask for a free one when they create a game.
+//
+// Everything lives in one Durable Object's memory: no database, nothing to clean up. A server that
+// stops calling disappears after 45 s and re-registers on its next heartbeat. Room passwords are
+// never sent here - the match server itself checks them when a player connects - so this only ever
+// holds a room's name, its player count and the address of a public server.
 //
 // Endpoints (all JSON):
-//   GET  /rooms?version=0.3.0            -> [{id, name, players, max_players, has_password, started, age_s}]
-//   POST /rooms                          {name, password, max, port, version} -> {id, secret}
-//   POST /rooms/:id/heartbeat            {secret, players, started}           -> {ok}
-//   POST /rooms/:id/join                 {password}                           -> {ip, port, name} | {error}
-//   POST /rooms/:id/unreachable          {}                                   -> {ok}   (a joiner could not connect)
-//   POST /rooms/:id/close                {secret}                             -> {ok}
-//   GET  /health                         -> {ok, rooms}
+//   POST /servers   {port, version, secret, name, players, max, started, has_password}
+//                                      -> {ok, claimed}   (match servers, every ~8 s)
+//   POST /claim     {version}          -> {ip, port} | {error: "none_free"}   (a player creating a game)
+//   GET  /rooms?version=0.3.3          -> [{id, name, players, max_players, has_password, started, ip, port, age_s}]
+//   GET  /health                       -> {ok, servers, free, rooms}
 
 const STALE_MS = 45_000;
-const MAX_ROOMS = 200;
+const CLAIM_MS = 40_000; // long enough for the creator to connect and name the room
 const NAME_MAX = 40;
 
 const CORS = {
@@ -34,114 +35,111 @@ const json = (body, status = 200) =>
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
-    const id = env.ROOMS.idFromName("global");
-    return env.ROOMS.get(id).fetch(request);
+    return env.ROOMS.get(env.ROOMS.idFromName("global")).fetch(request);
   },
 };
 
 export class RoomRegistry {
   constructor(state) {
     this.state = state;
-    this.rooms = new Map(); // id -> {name, ip, port, version, players, max, started, password, secret, created, seen}
+    this.servers = new Map(); // "ip:port" -> {...}
   }
 
   sweep() {
     const now = Date.now();
-    for (const [id, r] of this.rooms) if (now - r.seen > STALE_MS) this.rooms.delete(id);
+    for (const [key, s] of this.servers) if (now - s.seen > STALE_MS) this.servers.delete(key);
+  }
+
+  // a room is a match server that a player has named; a free server is one nobody is using yet
+  isRoom(s) {
+    return s.name !== "";
+  }
+
+  isFree(s, now) {
+    return s.name === "" && !s.started && s.claimedUntil < now;
   }
 
   async fetch(request) {
     const url = new URL(request.url);
-    const parts = url.pathname.split("/").filter(Boolean); // rooms[/:id[/action]]
+    const parts = url.pathname.split("/").filter(Boolean);
     const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+    const now = Date.now();
     this.sweep();
 
-    if (parts[0] === "health") return json({ ok: true, rooms: this.rooms.size });
-    if (parts[0] !== "rooms") return json({ error: "not_found" }, 404);
+    if (parts[0] === "health") {
+      let free = 0;
+      let rooms = 0;
+      for (const s of this.servers.values()) {
+        if (this.isFree(s, now)) free++;
+        if (this.isRoom(s)) rooms++;
+      }
+      return json({ ok: true, servers: this.servers.size, free, rooms });
+    }
 
-    // ---- GET /rooms?version=x : names and counts only, never an address ----
-    if (request.method === "GET" && parts.length === 1) {
+    // ---- a match server checking in ----
+    if (request.method === "POST" && parts[0] === "servers") {
+      const ip =
+        request.headers.get("cf-connecting-ip") ||
+        (request.headers.get("x-forwarded-for") || "").split(",")[0].trim();
+      const port = Number.isInteger(body.port) ? body.port : 0;
+      if (!ip || !port) return json({ error: "bad_server" }, 400);
+      const key = `${ip}:${port}`;
+      const prev = this.servers.get(key);
+      // the secret stops anyone else claiming to be this address:port
+      if (prev && prev.secret !== body.secret) return json({ error: "not_yours" }, 403);
+      this.servers.set(key, {
+        ip,
+        port,
+        version: String(body.version ?? ""),
+        secret: String(body.secret ?? ""),
+        name: String(body.name ?? "").trim().slice(0, NAME_MAX),
+        hasPassword: !!body.has_password,
+        players: Number.isInteger(body.players) ? body.players : 0,
+        max: Number.isInteger(body.max) ? body.max : 6,
+        started: !!body.started,
+        seen: now,
+        since: prev && prev.name === String(body.name ?? "").trim() ? prev.since : now,
+        claimedUntil: prev ? prev.claimedUntil : 0,
+      });
+      // tell the server it has been handed to someone, so it can expect them
+      return json({ ok: true, claimed: (prev?.claimedUntil ?? 0) > now });
+    }
+
+    // ---- a player creating a game wants a free server ----
+    if (request.method === "POST" && parts[0] === "claim") {
+      const version = String(body.version ?? "");
+      let best = null;
+      for (const s of this.servers.values()) {
+        if (s.version !== version || !this.isFree(s, now)) continue;
+        if (!best || s.seen > best.seen) best = s;
+      }
+      if (!best) return json({ error: "none_free" });
+      best.claimedUntil = now + CLAIM_MS;
+      return json({ ip: best.ip, port: best.port });
+    }
+
+    // ---- the games list ----
+    if (request.method === "GET" && parts[0] === "rooms") {
       const version = url.searchParams.get("version") || "";
-      const now = Date.now();
       const out = [];
-      for (const [id, r] of this.rooms) {
-        if (version && r.version !== version) continue;
+      for (const [key, s] of this.servers) {
+        if (!this.isRoom(s) || (version && s.version !== version)) continue;
         out.push({
-          id,
-          name: r.name,
-          players: r.players,
-          max_players: r.max,
-          has_password: !!r.password,
-          started: r.started,
-          age_s: Math.round((now - r.created) / 1000),
+          id: key,
+          name: s.name,
+          players: s.players,
+          max_players: s.max,
+          has_password: s.hasPassword,
+          started: s.started,
+          ip: s.ip,
+          port: s.port,
+          age_s: Math.round((now - s.since) / 1000),
         });
       }
       out.sort((a, b) => a.age_s - b.age_s);
       return json(out.slice(0, 50));
     }
 
-    // ---- POST /rooms : announce ----
-    if (request.method === "POST" && parts.length === 1) {
-      if (this.rooms.size >= MAX_ROOMS) return json({ error: "full" }, 503);
-      const ip =
-        request.headers.get("cf-connecting-ip") ||
-        (request.headers.get("x-forwarded-for") || "").split(",")[0].trim();
-      if (!ip) return json({ error: "no_address" }, 400);
-      const name = String(body.name ?? "").trim().slice(0, NAME_MAX) || "Unnamed game";
-      const port = Number.isInteger(body.port) ? Math.min(Math.max(body.port, 1), 65535) : 7788;
-      const max = Number.isInteger(body.max) ? Math.min(Math.max(body.max, 2), 8) : 6;
-      const id = crypto.randomUUID();
-      const secret = crypto.randomUUID().replace(/-/g, "");
-      const now = Date.now();
-      this.rooms.set(id, {
-        name,
-        ip,
-        port,
-        version: String(body.version ?? ""),
-        players: 1,
-        max,
-        started: false,
-        password: body.password ? String(body.password) : "",
-        secret,
-        created: now,
-        seen: now,
-      });
-      return json({ id, secret });
-    }
-
-    const room = parts.length >= 2 ? this.rooms.get(parts[1]) : null;
-    const action = parts[2] || "";
-
-    // a joiner got the address but nothing answered: the host is the one who can fix that,
-    // so park a count for them to pick up on their next heartbeat
-    if (request.method === "POST" && action === "unreachable") {
-      if (room) room.unreachable = (room.unreachable || 0) + 1;
-      return json({ ok: true });
-    }
-
-    if (request.method === "POST" && action === "join") {
-      if (!room) return json({ error: "gone" });
-      if (room.password && String(body.password ?? "") !== room.password) return json({ error: "password" });
-      if (room.started) return json({ error: "started" });
-      return json({ ip: room.ip, port: room.port, name: room.name });
-    }
-
-    // the rest need the host's secret
-    if (!room || body.secret !== room.secret) return json({ ok: false });
-
-    if (request.method === "POST" && action === "heartbeat") {
-      room.seen = Date.now();
-      room.players = Number.isInteger(body.players) ? Math.max(1, body.players) : room.players;
-      room.started = !!body.started;
-      // tell the host once about anyone who found the room but could not reach the port
-      const unreachable = room.unreachable || 0;
-      room.unreachable = 0;
-      return json({ ok: true, unreachable });
-    }
-    if (request.method === "POST" && action === "close") {
-      this.rooms.delete(parts[1]);
-      return json({ ok: true });
-    }
     return json({ error: "not_found" }, 404);
   }
 }

@@ -395,7 +395,11 @@ func on_fog(bytes: PackedByteArray) -> void:
 	if args.has("reveal"):
 		map_view.reveal_all()   # debug: --reveal shows the whole map
 		return
-	map_view.update_fog(bytes)
+	if bytes.size() < 4:
+		return
+	var raw := bytes.slice(4).decompress(bytes.decode_u32(0), FileAccess.COMPRESSION_FASTLZ)
+	if not raw.is_empty():
+		map_view.update_fog(raw)
 
 ## Upgrade / battle-plan visuals for every puppet we can see.
 func _push_extras(st: Dictionary) -> void:
