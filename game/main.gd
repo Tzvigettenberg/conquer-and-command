@@ -82,7 +82,7 @@ func _ready() -> void:
 	rooms.rooms_changed.connect(_on_rooms_changed)
 	rooms.rooms_failed.connect(func(msg: String) -> void:
 		if room_rows.get_child_count() == 0:
-			room_hint.text = NO_LIST_TEXT if msg == "off" else "Can't reach the room list (%s). Join by IP below, or try Refresh." % msg)
+			room_hint.text = NO_LIST_TEXT if msg == "off" else "Can't reach the games list. Check your internet and hit Refresh.")
 	rooms.claimed.connect(_on_claimed)
 	if args.has("port"):
 		port = int(args["port"])
@@ -561,7 +561,7 @@ func _on_rooms_changed(list: Array) -> void:
 	for c in room_rows.get_children():
 		c.queue_free()
 	if list.is_empty():
-		room_hint.text = "No open games right now. Host one, or join a friend by IP below."
+		room_hint.text = "Nobody has a game up right now. Create one and your friends will see it here."
 	else:
 		room_hint.text = "%d open game%s - click one to join." % [list.size(), "" if list.size() == 1 else "s"]
 	for r in list:
