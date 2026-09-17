@@ -19,7 +19,7 @@ host rejects mismatched versions.
 Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0.1.
 
 ### Shareable build (no Godot needed)
-`build/Frontline.exe` is a single-file Windows build (everything embedded, ~350 MB). Zip it, send it to a
+`build/Frontline.exe` is a single-file Windows build (everything embedded, ~230 MB; `build/Frontline_v0.1.0_win64.zip` ~90 MB). Send the zip to a
 friend, they double-click it. Rebuild after code changes with the editor (Project → Export → Windows Desktop,
 templates installed once via Editor → Manage Export Templates) or headless:
 ```
