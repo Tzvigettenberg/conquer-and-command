@@ -19,11 +19,12 @@ signal rooms_changed(rooms: Array)
 signal rooms_failed(message: String)
 signal announced(ok: bool, message: String)
 signal joined(ok: bool, ip: String, port: int, message: String)
+signal unreachable_reported(n: int)   # host: this many people found your room but could not connect
 
 var room_id := ""
 var room_secret := ""
 var rooms: Array = []
-var _hb_t := 0.0
+var _hb_due := 0.0
 var _players := 1
 var _started := false
 var _pending_announce: Dictionary = {}
@@ -35,19 +36,26 @@ func base_url() -> String:
 func enabled() -> bool:
 	return base_url() != ""
 
-func _process(dt: float) -> void:
+## Heartbeats are scheduled against the clock, not against frame deltas: the menu (and a big
+## battle later) can drop to a few frames a second, and a room that misses two heartbeats
+## disappears from everyone's list.
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+func _process(_dt: float) -> void:
 	if room_id == "":
 		return
-	_hb_t -= dt
-	if _hb_t <= 0.0:
-		_hb_t = HEARTBEAT
+	if _now() >= _hb_due:
+		_hb_due = _now() + HEARTBEAT
 		_request("POST", "/rooms/%s/heartbeat" % room_id, {"secret": room_secret, "players": _players, "started": _started},
 			func(ok: bool, body: Variant) -> void:
 				if ok and body is Dictionary and not bool(body.get("ok", true)):
 					# the backend forgot us (long hiccup): announce again
 					room_id = ""
 					if not _pending_announce.is_empty():
-						announce(_pending_announce["name"], _pending_announce["password"], _pending_announce["max"], _pending_announce["port"]))
+						announce(_pending_announce["name"], _pending_announce["password"], _pending_announce["max"], _pending_announce["port"])
+				elif ok and body is Dictionary and int(body.get("unreachable", 0)) > 0:
+					unreachable_reported.emit(int(body["unreachable"])))
 
 ## Host: put this game on the list.
 func announce(name: String, password: String, max_players: int, port: int) -> void:
@@ -60,7 +68,7 @@ func announce(name: String, password: String, max_players: int, port: int) -> vo
 			if ok and body is Dictionary and body.has("id"):
 				room_id = str(body["id"])
 				room_secret = str(body["secret"])
-				_hb_t = HEARTBEAT
+				_hb_due = _now() + HEARTBEAT
 				announced.emit(true, "Listed as \"%s\"%s" % [name, " (password)" if password != "" else ""])
 			else:
 				announced.emit(false, "Room list unavailable (%s) - friends can still join by IP." % str(body)))
@@ -69,7 +77,7 @@ func set_players(n: int, started: bool) -> void:
 	if n != _players or started != _started:
 		_players = n
 		_started = started
-		_hb_t = 0.0   # push the change right away
+		_hb_due = 0.0   # push the change right away
 
 ## Host: take the room down (leaving the lobby / quitting).
 func close() -> void:
@@ -91,6 +99,11 @@ func refresh() -> void:
 			rooms_changed.emit(rooms)
 		else:
 			rooms_failed.emit(str(body)))
+
+## A joiner whose connection never landed: let the host know it is their port, not the list.
+func report_unreachable(id: String) -> void:
+	if id != "":
+		_request("POST", "/rooms/%s/unreachable" % id, {}, func(_ok: bool, _b: Variant) -> void: pass)
 
 ## Everyone: ask for a room's address (password checked by the server).
 func join(id: String, password: String) -> void:
@@ -139,7 +152,7 @@ func _request(method: String, path: String, params: Dictionary, cb: Callable) ->
 	req.request_completed.connect(func(result: int, code: int, _h: PackedStringArray, body: PackedByteArray) -> void:
 		req.queue_free()
 		if Main.I.args.has("netdebug"):
-			print("[Rooms] %s %s -> result %d code %d %s" % [method, path, result, code, body.get_string_from_utf8().left(120)])
+			print("[Rooms] t=%.1fs %s %s -> result %d code %d %s" % [Time.get_ticks_msec() / 1000.0, method, path, result, code, body.get_string_from_utf8().left(100)])
 		if result != HTTPRequest.RESULT_SUCCESS:
 			cb.call(false, "no connection")
 			return

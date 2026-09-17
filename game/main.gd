@@ -3,7 +3,7 @@ extends Node3D
 ## Entry point: main menu, host/join lobby, then hands over to Session + ClientView.
 
 const PORT := 7788
-const GAME_VERSION := "0.3.1"
+const GAME_VERSION := "0.3.2"
 const GAME_TITLE := "CONQUER & COMMAND"
 const GAME_SUBTITLE := "ZERO BUDGET"
 const MAX_PLAYERS := 6
@@ -44,6 +44,13 @@ var pw_box: VBoxContainer
 var pw_edit: LineEdit
 var pw_room_id := ""
 var room_refresh_t := 0.0
+const JOIN_TIMEOUT := 12.0     # ENet gives up on its own eventually; this is the friendly one
+const LOBBY_TIMEOUT := 8.0
+var connecting_to := ""
+var connect_t := 0.0
+var lobby_t := 0.0
+var lobby_seen := false
+var joining_room_id := ""
 var args: Dictionary = {}
 var lobby_players: Array = []      # server: [{peer, name}]
 var in_lobby := false
@@ -69,6 +76,8 @@ func _ready() -> void:
 			room_hint.text = NO_LIST_TEXT if msg == "off" else "Can't reach the room list (%s). Join by IP below, or try Refresh." % msg)
 	rooms.announced.connect(func(ok: bool, msg: String) -> void: _set_status(("Hosting on port %d. " % port) + msg) if ok else _set_status(msg))
 	rooms.joined.connect(_on_room_joined)
+	rooms.unreachable_reported.connect(func(n: int) -> void:
+		_set_status("%d player%s found your room but could not connect. They need UDP port %d open on your router - forward it, or host from a Tailscale / ZeroTier address instead." % [n, "" if n == 1 else "s", port]))
 	if args.has("port"):
 		port = int(args["port"])
 	Settings.apply()
@@ -98,6 +107,13 @@ func _ready() -> void:
 	elif args.has("join"):
 		ip_edit.text = args["join"]
 		_join()
+		if args.has("screenshot"):
+			get_tree().create_timer(float(args.get("shot_delay", 8.0))).timeout.connect(func() -> void:
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png("%s/client_lobby.png" % str(args["screenshot"]))
+				print("[Shot] client lobby saved")
+				if args.has("exit_after"):
+					get_tree().quit())
 	elif args.has("screenshot"):
 		# main menu shot (room list included) for the README / site
 		get_tree().create_timer(5.0).timeout.connect(func() -> void:
@@ -436,6 +452,10 @@ func _host() -> void:
 
 ## Room list: rebuild the rows.
 func _on_rooms_changed(list: Array) -> void:
+	if args.has("join_first") and not list.is_empty() and joining_room_id == "" and not in_lobby:
+		# test hook: take the first room in the list without clicking it
+		_join_room(str(list[0]["id"]), str(args.get("pw", "")))
+		return
 	for c in room_rows.get_children():
 		c.queue_free()
 	if list.is_empty():
@@ -465,6 +485,7 @@ func _on_rooms_changed(list: Array) -> void:
 
 func _join_room(id: String, password: String) -> void:
 	pw_box.visible = false
+	joining_room_id = id
 	_set_status("Asking for the room address...")
 	rooms.join(id, password)
 
@@ -477,11 +498,17 @@ func _on_room_joined(ok: bool, ip: String, jport: int, message: String) -> void:
 	_join()
 
 func _process(dt: float) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if connect_t > 0.0 and now >= connect_t:
+		connect_t = 0.0
+		_fail_join()
+	elif lobby_t > 0.0 and now >= lobby_t and not lobby_seen:
+		lobby_t = 0.0
+		_fail_join("Connected to the host, but they never sent the lobby - are you both on the same version? Ask them to check, then try again.")
 	# keep the open-games list fresh while the menu is up
 	if menu != null and menu.visible and menu_box != null and menu_box.visible and not in_lobby and not game_started and rooms.enabled():
-		room_refresh_t -= dt
-		if room_refresh_t <= 0.0:
-			room_refresh_t = 6.0
+		if Time.get_ticks_msec() / 1000.0 >= room_refresh_t:
+			room_refresh_t = Time.get_ticks_msec() / 1000.0 + 6.0
 			if DisplayServer.get_name() != "headless" and not args.has("autostart"):
 				rooms.refresh()
 
@@ -499,8 +526,12 @@ func _join() -> void:
 		_set_status("Could not start client (error %d)" % err)
 		return
 	multiplayer.multiplayer_peer = peer
-	_show_lobby(false)
-	_set_status("Connecting to %s..." % ip)
+	# stay on the menu until the host actually answers - showing an empty lobby while nothing is
+	# connected is what makes an unreachable host look like a broken one
+	connecting_to = "%s:%d" % [ip, port]
+	connect_t = Time.get_ticks_msec() / 1000.0 + JOIN_TIMEOUT
+	lobby_seen = false
+	_set_status("Connecting to %s..." % connecting_to)
 
 func _leave() -> void:
 	rooms.close()
@@ -837,6 +868,11 @@ func _refresh_lobby() -> void:
 				h.add_child(kick)
 			lobby_rows.add_child(h)
 	_update_preview()
+	if args.has("netdebug"):
+		var dbg := []
+		for sl in slots:
+			dbg.append("%s:%s" % [sl["kind"], sl.get("name", "")])
+		print("[Lobby] %s rows=%s observers=%d map=%s cash=%s" % ["host" if is_host else "client", str(dbg), observers.size(), lobby_opts.get("map", "?"), lobby_opts.get("cash", "?")])
 	if is_host:
 		var humans := 0
 		for sl in slots:
@@ -932,6 +968,11 @@ func _remove_peer(peer: int) -> void:
 			break
 
 func on_lobby(players: Array, opts: Dictionary) -> void:
+	if not lobby_seen:
+		lobby_seen = true
+		lobby_t = 0.0
+		joining_room_id = ""
+		_set_status("")
 	if not players.is_empty():
 		lobby_players = players
 	lobby_opts = opts
@@ -983,12 +1024,31 @@ func _on_peer_disconnected(id: int) -> void:
 				break
 
 func _on_connected() -> void:
-	_set_status("Connected. Waiting for host to start...")
+	connecting_to = ""
+	connect_t = 0.0
+	lobby_t = Time.get_ticks_msec() / 1000.0 + LOBBY_TIMEOUT
+	_show_lobby(false)
+	_set_status("Connected. Waiting for the host...")
 	session.rpc_id(1, "srv_hello", my_name, GAME_VERSION)
 
 func _on_conn_failed() -> void:
-	_set_status("Connection failed. Check the IP and that the host's port %d is reachable." % PORT)
+	_fail_join()
+
+## Nothing answered, or the host answered but never sent the lobby: say which, and why it happens.
+func _fail_join(reason := "") -> void:
+	var where := connecting_to if connecting_to != "" else "the host"
+	connecting_to = ""
+	connect_t = 0.0
+	lobby_t = 0.0
 	_leave()
+	if joining_room_id != "":
+		# the host can see this on their own screen - they are the one who can open the port
+		rooms.report_unreachable(joining_room_id)
+		joining_room_id = ""
+	if reason != "":
+		_set_status(reason)
+	else:
+		_set_status("Could not reach %s. The host has to be reachable on UDP port %d: forward it on their router, or both of you join a mesh VPN (Tailscale / ZeroTier) and host from that address. On the same Wi-Fi, use their local IP." % [where, port])
 
 func _on_server_disconnected() -> void:
 	if view:

@@ -11,6 +11,7 @@
 //   POST /rooms                          {name, password, max, port, version} -> {id, secret}
 //   POST /rooms/:id/heartbeat            {secret, players, started}           -> {ok}
 //   POST /rooms/:id/join                 {password}                           -> {ip, port, name} | {error}
+//   POST /rooms/:id/unreachable          {}                                   -> {ok}   (a joiner could not connect)
 //   POST /rooms/:id/close                {secret}                             -> {ok}
 //   GET  /health                         -> {ok, rooms}
 
@@ -111,6 +112,13 @@ export class RoomRegistry {
     const room = parts.length >= 2 ? this.rooms.get(parts[1]) : null;
     const action = parts[2] || "";
 
+    // a joiner got the address but nothing answered: the host is the one who can fix that,
+    // so park a count for them to pick up on their next heartbeat
+    if (request.method === "POST" && action === "unreachable") {
+      if (room) room.unreachable = (room.unreachable || 0) + 1;
+      return json({ ok: true });
+    }
+
     if (request.method === "POST" && action === "join") {
       if (!room) return json({ error: "gone" });
       if (room.password && String(body.password ?? "") !== room.password) return json({ error: "password" });
@@ -125,7 +133,10 @@ export class RoomRegistry {
       room.seen = Date.now();
       room.players = Number.isInteger(body.players) ? Math.max(1, body.players) : room.players;
       room.started = !!body.started;
-      return json({ ok: true });
+      // tell the host once about anyone who found the room but could not reach the port
+      const unreachable = room.unreachable || 0;
+      room.unreachable = 0;
+      return json({ ok: true, unreachable });
     }
     if (request.method === "POST" && action === "close") {
       this.rooms.delete(parts[1]);
