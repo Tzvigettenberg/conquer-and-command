@@ -715,7 +715,10 @@ func _start_game() -> void:
 	session.world = w
 	w.start(session, peers, names, {"map": lobby_opts["map"], "cash": lobby_opts["cash"], "superweapons": lobby_opts["superweapons"], "teams": teams, "levels": levels, "slots": starts})
 	if args.has("simtest"):
-		w.probe_ridge()
+		if str(args["simtest"]) == "load":
+			w.probe_load()
+		else:
+			w.probe_ridge()
 		get_tree().quit()
 
 ## Called (via Session.cl_map) on every peer once the server has built the map.

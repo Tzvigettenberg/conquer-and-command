@@ -60,6 +60,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 			dragging = mb.pressed
 			drag_last = mb.position
 	elif ev is InputEventMouseMotion and dragging:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
+			dragging = false   # released outside the window
+			return
 		# middle-drag rotates the camera (Generals); right-drag scrolling is driven by the controller
 		var mm := ev as InputEventMouseMotion
 		var d := mm.position - drag_last

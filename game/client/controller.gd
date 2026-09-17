@@ -227,6 +227,13 @@ func _unhandled_input(ev: InputEvent) -> void:
 		return
 	if ev is InputEventMouseMotion:
 		mouse_pos = ev.position
+		# a release that happened outside the window never reaches us: trust the live button state
+		if rmb_press.x >= 0 and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+			rmb_press = Vector2(-1, -1)
+			rmb_dragged = false
+		if drag_start.x >= 0 and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			drag_start = Vector2(-1, -1)
+			dragging = false
 		if rmb_press.x >= 0:
 			# right-drag scrolls the map (Generals); the order is only given if the mouse didn't move
 			if rmb_dragged or mouse_pos.distance_to(rmb_press) > DRAG_MIN:
@@ -395,6 +402,13 @@ func _unhandled_input(ev: InputEvent) -> void:
 							cam.jump_to(Vector2(view.puppets[ids[0]].cur_pos.x, view.puppets[ids[0]].cur_pos.z))
 					last_click_t = Time.get_ticks_msec() / 1000.0
 					last_click_id = -n
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_MOUSE_EXIT or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		rmb_press = Vector2(-1, -1)
+		rmb_dragged = false
+		if not dragging:
+			drag_start = Vector2(-1, -1)
 
 func _process(dt: float) -> void:
 	if view.pstate.get("beam", false):

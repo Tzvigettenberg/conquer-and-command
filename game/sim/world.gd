@@ -467,6 +467,12 @@ func _tick_unit(e: Ent, dt: float) -> void:
 			_do_board(e, dt)
 		"unload":
 			_do_unload(e, dt)
+		"pickup":
+			# transport landed for boarding: wait for the walkers, then lift off again
+			e.alt = move_toward(e.alt, 0.5, 6.0 * dt)
+			e.timer -= dt
+			if e.timer <= 0.0:
+				e.state = "idle"
 		"build":
 			_do_build(e, dt)
 		"repair":
@@ -1439,10 +1445,11 @@ func _do_board(e: Ent, dt: float) -> void:
 	if not _can_board(e, t):
 		_next_order(e)
 		return
-	if t.is_air() and t.alt > 1.5:
+	if t.is_air() and t.state != "pickup" and (t.alt > 1.5 or t.state == "idle"):
 		# a hovering Chinook comes down to pick up
-		t.state = "unload"
-		t.timer = 4.0
+		t.state = "pickup"
+	if t.state == "pickup":
+		t.timer = 4.0   # keep it waiting while someone is still walking over
 	var d := e.pos.distance_to(t.pos) - t.radius - e.radius
 	if d <= 1.2:
 		e.inside_id = t.id
@@ -2708,6 +2715,27 @@ func _cmd_superweapon(p: int, c: Dictionary) -> void:
 # Headless probe (--simtest): drive a tank across a ridge and verify it never
 # enters a solid cell.
 # ---------------------------------------------------------------------------
+## --simtest=load: a tank boards a Chinook, then is unloaded again.
+func probe_load() -> void:
+	bots.clear()
+	var s: Vector2 = map["starts"][players[0]["slot"]]
+	var tank := spawn("crusader", 0, s + Vector2(20, 0))
+	var heli := spawn("chinook", 0, s + Vector2(30, 6))
+	heli.state = "idle"
+	cmd(0, {"t": "load", "ids": [tank.id], "tid": heli.id})
+	print("[Probe] tank state after load cmd: ", tank.state, " target ", tank.target_id)
+	for i in range(600):
+		step(TICK)
+		if i % 60 == 0:
+			print("[Probe] t=%d tank=%s inside=%d pos=%s heli=%s alt=%.1f cargo=%s" % [i, tank.state, tank.inside_id, tank.pos.round(), heli.state, heli.alt, str(heli.cargo)])
+		if tank.inside_id >= 0 and i > 100:
+			print("[Probe] boarded at tick ", i)
+			break
+	cmd(0, {"t": "unload", "ids": [heli.id]})
+	for i in range(200):
+		step(TICK)
+	print("[Probe] after unload: inside=%d heli=%s cargo=%s tank=%s" % [tank.inside_id, heli.state, str(heli.cargo), tank.state])
+
 func probe_ridge() -> void:
 	bots.clear()
 	var tank := spawn("crusader", 0, Vector2(100, 40))
