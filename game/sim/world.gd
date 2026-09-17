@@ -34,6 +34,7 @@ var shots: Array = []              # scheduled projectile impacts
 var events: Array = []             # pending FX events for this snapshot
 var strikes: Array = []            # delayed general's powers
 var beams: Array = []              # active particle cannon beams
+var zones: Array = []              # lingering radiation / toxin fields [{kind, p, r, dps, until}]
 var next_sid := 1                  # shot ids (client matches projectiles for mid-air intercepts)
 var spatial: Dictionary = {}
 var known: Array = []              # per player: id -> last tick included
@@ -61,6 +62,7 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 	var start_cash := float(opts.get("cash", Data.STARTING_CASH))
 	var teams: Array = opts.get("teams", [])
 	var levels: Array = opts.get("levels", [])
+	var factions: Array = opts.get("factions", [])
 	# spawn slot per player (index into map starts); default = player order
 	var slots: Array = opts.get("slots", [])
 	var used_slots := {}
@@ -83,6 +85,7 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 			"slot": int(slots[i]), "level": str(levels[i]) if i < levels.size() else str(opts.get("ai", "medium")),
 			"powers": {}, "cds": {}, "upgrades": {}, "defeated": false, "pp": 0, "pu": 0, "low": false,
 			"sw_steer": Vector2(-1, -1), "attack_msg_t": -100.0, "income_mult": 1.0, "plan": "",
+			"faction": _pick_faction(str(factions[i]) if i < factions.size() else "random"),
 		})
 		var v := Vision.new()
 		v.setup(map_size)
@@ -104,15 +107,17 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 	for i in range(players.size()):
 		var sl: int = players[i]["slot"]
 		var s: Vector2 = map["starts"][sl]
-		var cc := spawn("command_center", i, PathGrid.snap_center(s, Data.BUILDINGS["command_center"]["fp"]), true, map["start_yaw"][sl])
+		var fd: Dictionary = Data.FACTIONS[players[i]["faction"]]
+		var cc := spawn(fd["cc"], i, PathGrid.snap_center(s, Data.BUILDINGS[fd["cc"]]["fp"]), true, map["start_yaw"][sl])
 		var ex := _exit_point(cc)
-		var dz := spawn("dozer", i, ex)
+		var dz := spawn(fd["builder"], i, ex)
 		dz.yaw = map["start_yaw"][sl]
 		_recompute_power(i)
 	grid.flush()
 	map["player_names"] = names.duplicate()
 	map["player_teams"] = _teams_array()
 	map["player_slots"] = slots.duplicate()
+	map["player_factions"] = _factions_array()
 	for i in range(players.size()):
 		if peers[i] == -1:
 			var b := Bot.new()
@@ -124,6 +129,29 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 		observers.append({"peer": int(op), "known": {}})
 		session.s_map(int(op), map, -1)
 	_update_vision()
+
+func _pick_faction(f: String) -> String:
+	if Data.FACTIONS.has(f):
+		return f
+	return Data.FACTION_ORDER[randi() % Data.FACTION_ORDER.size()]
+
+func _factions_array() -> Array:
+	var out := []
+	for pl in players:
+		out.append(pl["faction"])
+	return out
+
+func faction_of_player(p: int) -> String:
+	if p < 0 or p >= players.size():
+		return "usa"
+	return str(players[p]["faction"])
+
+## Does the player own a completed structure with this role (cc, supply, airfield ...)?
+func has_role(p: int, role: String) -> bool:
+	for e: Ent in ents.values():
+		if e.alive and e.owner == p and e.is_building and e.complete and Data.role_of(e.type) == role:
+			return true
+	return false
 
 func is_observer(peer: int) -> bool:
 	for ob in observers:
@@ -186,9 +214,20 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 		return
 	e.alive = false
 	dead_list.append(e)
+	var other_tunnel: Ent = null
+	if e.def.get("tunnel", false):
+		for o: Ent in ents.values():
+			if o != e and o.alive and o.owner == e.owner and o.is_building and o.complete and o.def.get("tunnel", false):
+				other_tunnel = o
+				break
 	for id in e.cargo:
 		var u: Ent = ents.get(id)
 		if u != null and u.alive:
+			if other_tunnel != null:
+				# the network survives: everyone inside is now somewhere else underground
+				u.inside_id = other_tunnel.id
+				other_tunnel.cargo.append(u.id)
+				continue
 			u.inside_id = -1
 			destroy(u, "killed", killer)
 	e.cargo.clear()
@@ -215,6 +254,10 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 			xp *= 2.0
 		killer.xp += xp
 		killer.kills += 1
+		if kp["powers"].has("cash_bounty"):
+			var bounty := float(e.def.get("cost", 0)) * 0.1
+			kp["cash"] += bounty
+			kp["stats"]["cash_earned"] += int(bounty)
 		while killer.level < 3 and killer.xp >= Data.VET_XP[killer.level]:
 			killer.level += 1
 			var old_max := killer.max_hp
@@ -283,7 +326,10 @@ func _add_player_xp(p: int, xp: float) -> void:
 		pl["points"] += 1
 		session.s_msg(pl["peer"], "Promoted to General rank %d - promotion point available" % pl["rank"])
 		if pl["rank"] == 5:
-			pl["powers"]["fuel_air_bomb"] = 1
+			for pid in Data.POWERS:
+				var pd: Dictionary = Data.POWERS[pid]
+				if pd.get("auto", false) and pd.get("faction", "usa") == pl["faction"]:
+					pl["powers"][pid] = 1
 
 func _recompute_power(p: int) -> void:
 	var prod := 0
@@ -329,6 +375,8 @@ func count_type(p: int, type: String, include_queued := true) -> int:
 func prereqs_met(p: int, type: String) -> String:
 	var d := Data.def(type)
 	var pl: Dictionary = players[p]
+	if Data.faction_of(type) != "" and Data.faction_of(type) != pl["faction"]:
+		return "Not available to %s" % Data.FACTIONS[pl["faction"]]["name"]
 	for r in d.get("prereq", []):
 		if not has_building(p, r):
 			return "Requires %s" % Data.BUILDINGS[r]["name"]
@@ -397,6 +445,7 @@ func step(dt: float) -> void:
 	_tick_shots()
 	_tick_strikes()
 	_tick_beams(dt)
+	_tick_zones(dt)
 	for b in bots:
 		b.think(dt)
 	if tick % 10 == 0:
@@ -452,17 +501,28 @@ func _tick_unit(e: Ent, dt: float) -> void:
 		e.turret_yaw = wrapf(e.turret_yaw + clampf(diff, -turn, turn), -PI, PI)
 	match e.state:
 		"idle":
-			if e.has_weapons():
+			if e.has_weapons() and not e.def.get("suicide", false):
 				_auto_acquire(e, dt)
 			elif e.def.get("builder", false):
 				e.acquire_t -= dt
 				if e.acquire_t <= 0.0:
 					e.acquire_t = 1.5
 					_dozer_auto_repair(e)
+			elif e.def.has("hack") and e.owner >= 0:
+				# hackers sit down and skim cash while nobody bothers them
+				e.timer += dt
+				var hk: Dictionary = e.def["hack"]
+				if e.timer >= float(hk["every"]):
+					e.timer = 0.0
+					var amt := float(hk["cash"]) * (1.0 + 0.5 * e.level)
+					players[e.owner]["cash"] += amt
+					players[e.owner]["stats"]["cash_earned"] += int(amt)
+					if randf() < 0.2:
+						events.append({"k": "cash", "p": e.pos, "d": [int(amt), e.id], "o": e.owner, "only": e.owner})
 		"guard":
 			if not e.path.is_empty() and e.path_i < e.path.size():
 				_follow_path(e, dt)
-			elif e.has_weapons():
+			elif e.has_weapons() and not e.def.get("suicide", false):
 				_auto_acquire(e, dt)
 		"move":
 			if _follow_path(e, dt):
@@ -819,6 +879,8 @@ func _is_stealthed(e: Ent) -> bool:
 		return false
 	if time < e.revealed_until:
 		return false
+	if e.is_building and not e.complete:
+		return false
 	if e.type == "pathfinder" and (e.state == "move" or e.state == "amove" or e.pos != e.last_pos):
 		return false
 	return true
@@ -974,6 +1036,13 @@ func _fire(e: Ent, wi: int, t: Ent) -> void:
 	var wd: Dictionary = Data.WEAPONS[wid]
 	var dmg := _consume_shot(e, wi)
 	e.last_target_owner = t.owner
+	if wd.get("suicide", false):
+		# terrorists / bomb trucks: the unit IS the warhead
+		events.append({"k": "hit", "p": e.pos, "d": [wid, e.pos.x, e.pos.y, 0.0], "o": e.owner})
+		var own := e.owner
+		destroy(e, "killed", null)
+		_apply_hit(null, wid, t, e.pos, dmg, own)
+		return
 	if e.type == "patriot":
 		_patriot_assist(e, t)
 	var sid := next_sid
@@ -1013,12 +1082,47 @@ func _consume_shot(e: Ent, wi: int) -> float:
 	e.last_fire_t = time
 	if e.stealth:
 		e.revealed_until = time + 2.0
-	var dmg: float = wd["dmg"] * e.vet_dmg()
-	if e.owner >= 0 and wd["type"] == "JET_MISSILES" and players[e.owner]["upgrades"].has("laser_missiles"):
-		dmg *= 1.25
-	if _plan_of(e) == "bombardment":
-		dmg *= 1.2
+	var dmg: float = wd["dmg"] * e.vet_dmg() * _dmg_mult(e, wd)
 	return dmg
+
+## Faction bonuses: upgrades, battle plans, China hordes, Frenzy.
+func _dmg_mult(e: Ent, wd: Dictionary) -> float:
+	var m := 1.0
+	if e.owner < 0:
+		return m
+	var upg: Dictionary = players[e.owner]["upgrades"]
+	var dtype: String = wd["type"]
+	if dtype == "JET_MISSILES" and upg.has("laser_missiles"):
+		m *= 1.25
+	if dtype == "GATTLING" and upg.has("chain_guns"):
+		m *= 1.25
+	if dtype == "FLAME" and (upg.has("black_napalm") or upg.has("anthrax_beta")):
+		m *= 1.25
+	if dtype == "SMALL_ARMS" and upg.has("ap_bullets"):
+		m *= 1.25
+	if dtype == "INFANTRY_MISSILE" and upg.has("ap_rockets"):
+		m *= 1.25
+	if e.def.get("shells", false) and upg.has("uranium_shells"):
+		m *= 1.25
+	if _plan_of(e) == "bombardment":
+		m *= 1.2
+	if e.def.get("horde", false) and _in_horde(e):
+		m *= 1.5 if upg.has("nationalism") else 1.25
+	if time < e.frenzy_t:
+		m *= 1.3
+	return m
+
+## China horde bonus: five or more horde units of the same kind within 15 m.
+func _in_horde(e: Ent) -> bool:
+	if tick - e.horde_tick < 20:
+		return e.horde
+	e.horde_tick = tick
+	var n := 0
+	for o: Ent in query(e.pos, 15.0):
+		if o.alive and o.owner == e.owner and o.type == e.type and o.inside_id < 0:
+			n += 1
+	e.horde = n >= 5
+	return e.horde
 
 func _tick_shots() -> void:
 	if shots.is_empty():
@@ -1093,6 +1197,13 @@ func _apply_hit(attacker: Ent, wid: String, target: Ent, pos: Vector2, dmg: floa
 	var radius := float(wd.get("radius", 0.0))
 	var radius2 := float(wd.get("radius2", 0.0))
 	var dtype: String = wd["type"]
+	if wd.has("zone"):
+		var z: Dictionary = wd["zone"]
+		var dps := float(z["dps"])
+		if own >= 0 and z["kind"] == "toxin" and players[own]["upgrades"].has("anthrax_beta"):
+			dps *= 1.25
+		zones.append({"kind": z["kind"], "p": pos, "r": float(z["r"]), "dps": dps, "until": time + float(z["t"]), "owner": own})
+		events.append({"k": "zone", "p": pos, "d": [z["kind"], pos.x, pos.y, float(z["r"]), float(z["t"])], "o": own, "all": true})
 	if target != null and target.alive:
 		_damage(target, dmg, dtype, attacker)
 	if radius <= 0.0 and radius2 <= 0.0:
@@ -1355,7 +1466,7 @@ func _jet_return_home(e: Ent) -> void:
 func _jet_find_home(e: Ent) -> void:
 	e.home_id = -1
 	for b: Ent in ents.values():
-		if b.alive and b.owner == e.owner and b.type == "airfield" and b.complete and _airfield_load(b) < int(b.def.get("pads", 4)):
+		if b.alive and b.owner == e.owner and b.def.get("runway", false) and b.complete and _airfield_load(b) < int(b.def.get("pads", 4)):
 			e.home_id = b.id
 			return
 
@@ -1438,16 +1549,29 @@ func _pad_index(b: Ent, e: Ent) -> int:
 # ---- transports (Generals: Humvee 5 infantry with fire ports, Chinook 8 slots, vehicles take 3) ----
 func _cargo_used(t: Ent) -> int:
 	var n := 0
-	for id in t.cargo:
+	for id in _cargo_ids(t):
 		var u: Ent = ents.get(id)
 		if u != null and u.alive:
 			n += u.slot_cost()
 	return n
 
+## Occupants of a transport; for a GLA tunnel, everyone in the owner's whole network.
+func _cargo_ids(t: Ent) -> Array:
+	if not t.def.get("tunnel", false):
+		return t.cargo
+	var out := []
+	for o: Ent in ents.values():
+		if o.alive and o.owner == t.owner and o.is_building and o.def.get("tunnel", false):
+			for id in o.cargo:
+				out.append(id)
+	return out
+
 func _can_board(u: Ent, t: Ent) -> bool:
 	if t == null or not t.alive or u == t or not t.def.has("cargo") or not allied(u.owner, t.owner):
 		return false
-	if u.is_building or u.is_air() or u.def.get("builder", false) and not t.def.get("cargo_veh", false):
+	if t.is_building and not t.complete:
+		return false
+	if u.is_building or u.is_air() or (u.def.get("builder", false) and u.cat() != "inf" and not t.def.get("cargo_veh", false)):
 		return false
 	if u.cat() == "veh" and not t.def.get("cargo_veh", false):
 		return false
@@ -1465,6 +1589,11 @@ func _do_board(e: Ent, dt: float) -> void:
 	if t.state == "pickup":
 		t.timer = 4.0   # keep it waiting while someone is still walking over
 	var d := e.pos.distance_to(t.pos) - t.radius - e.radius
+	if t.is_building:
+		# garrisons and tunnels: walk up to the wall, then step inside
+		if not _approach_building(e, t, dt, 2.2):
+			return
+		d = 0.0
 	if d <= 1.2:
 		e.inside_id = t.id
 		t.cargo.append(e.id)
@@ -1504,12 +1633,19 @@ func _do_unload(e: Ent, dt: float) -> void:
 			e.state = "idle"
 		return
 	var out: Array[int] = []
-	for id in e.cargo:
+	var ids: Array = _cargo_ids(e).duplicate()
+	for id in ids:
 		var u: Ent = ents.get(id)
 		if u == null or not u.alive:
 			continue
-		var c := grid.nearest_free(grid.cell_of(e.pos + Vector2(randf_range(-3, 3), randf_range(-3, 3))))
+		var exit := e.pos
+		if e.is_building:
+			exit = _exit_point(e)
+		var c := grid.nearest_free(grid.cell_of(exit + Vector2(randf_range(-3, 3), randf_range(-3, 3))))
 		u.pos = grid.center_of(c)
+		var car: Ent = ents.get(u.inside_id)
+		if car != null and car != e:
+			car.cargo.erase(u.id)
 		u.inside_id = -1
 		u.state = "idle"
 		u.guard_pos = u.pos
@@ -1567,7 +1703,7 @@ func _nearest_center(e: Ent) -> Ent:
 	var best: Ent = null
 	var bd := 1e18
 	for o: Ent in ents.values():
-		if o.alive and o.owner == e.owner and o.type == "supply_center" and o.complete:
+		if o.alive and o.owner == e.owner and Data.role_of(o.type) == "supply" and o.complete:
 			var d := o.pos.distance_squared_to(e.pos)
 			if d < bd:
 				bd = d
@@ -1587,16 +1723,19 @@ func _do_gather(e: Ent, dt: float) -> void:
 				e.state = "idle"
 				return
 			e.dock_id = dock.id
-		var d := e.pos.distance_to(dock.pos)
-		if d > dock.radius + 2.0:
-			_move_toward(e, dock.pos + (e.pos - dock.pos).normalized() * (dock.radius + 1.0), dt)
-			return
-		# land beside the crates, then load one box at a time
-		e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
-		if e.alt > 0.9:
+		if e.is_air():
+			var d := e.pos.distance_to(dock.pos)
+			if d > dock.radius + 2.0:
+				_move_toward(e, dock.pos + (e.pos - dock.pos).normalized() * (dock.radius + 1.0), dt)
+				return
+			# land beside the crates, then load one box at a time
+			e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
+			if e.alt > 0.9:
+				return
+		elif not _approach_building(e, dock, dt, 2.5):
 			return
 		e.timer += dt
-		if e.timer >= 1.3:
+		if e.timer >= float(e.def.get("load_t", 1.3)):
 			e.timer = 0.0
 			if dock.boxes > 0:
 				dock.boxes -= 1
@@ -1617,20 +1756,31 @@ func _do_gather(e: Ent, dt: float) -> void:
 		if c.pad_user >= 0 and c.pad_user != e.id:
 			var hold := c.pos + Vector2(sin(float(e.id)), cos(float(e.id))) * 11.0
 			if e.pos.distance_to(hold) > 2.0:
-				_move_toward(e, hold, dt)
-			e.alt = move_toward(e.alt, 10.0, 6.0 * dt)
+				if e.is_air():
+					_move_toward(e, hold, dt)
+				else:
+					if e.path.is_empty():
+						_set_path(e, hold)
+					_follow_path(e, dt)
+			if e.is_air():
+				e.alt = move_toward(e.alt, 10.0, 6.0 * dt)
 			return
-		var d := e.pos.distance_to(c.pos)
-		if d > 3.0:
-			_move_toward(e, c.pos, dt)
-			return
-		c.pad_user = e.id
-		# land on the H and unload
-		e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
-		if e.alt > 0.9:
-			return
+		if e.is_air():
+			var d := e.pos.distance_to(c.pos)
+			if d > 3.0:
+				_move_toward(e, c.pos, dt)
+				return
+			c.pad_user = e.id
+			# land on the H and unload
+			e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
+			if e.alt > 0.9:
+				return
+		else:
+			if not _approach_building(e, c, dt, 3.0):
+				return
+			c.pad_user = e.id
 		e.timer += dt
-		if e.timer >= 4.5:
+		if e.timer >= float(e.def.get("unload_t", 4.5)):
 			e.timer = 0.0
 			var val := float(e.carry * Data.BOX_VALUE) * float(players[e.owner]["income_mult"])
 			players[e.owner]["cash"] += val
@@ -1689,8 +1839,11 @@ func _complete_building(b: Ent) -> void:
 	_recompute_power(b.owner)
 	session.s_msg(players[b.owner]["peer"], "%s complete" % b.def["name"])
 	events.append({"k": "built", "p": b.pos, "d": [b.id], "o": b.owner})
+	var free: Array = b.def.get("free_units", []).duplicate()
 	if b.def.has("free_unit"):
-		var u := spawn(b.def["free_unit"], b.owner, b.pos + Vector2(0, 4))
+		free.append(b.def["free_unit"])
+	for ft in free:
+		var u := spawn(ft, b.owner, grid.center_of(grid.nearest_free(grid.cell_of(_exit_point(b) + Vector2(randf_range(-2, 2), randf_range(-2, 2))))))
 		if u.def.get("gatherer", 0) > 0:
 			u.state = "gather"
 			u.center_id = b.id
@@ -1716,7 +1869,7 @@ func _do_capture(e: Ent, dt: float) -> void:
 	if b == null or not b.alive or b.owner == e.owner:
 		_next_order(e)
 		return
-	if not _approach_building(e, b, dt):
+	if not _approach_building(e, b, dt, float(e.def.get("capture_reach", 4.2))):
 		return
 	if b.capture_by != e.owner:
 		b.capture_by = e.owner
@@ -1771,6 +1924,16 @@ func _tick_building(e: Ent, dt: float) -> void:
 	if e.owner < 0:
 		return
 	var pl: Dictionary = players[e.owner]
+	if e.def.has("trap"):
+		# demo trap: blows when an enemy ground unit is on top of it
+		for o: Ent in query(e.pos, 4.0):
+			if o.alive and o.owner >= 0 and not allied(o.owner, e.owner) and not o.is_building and not o.is_air() and o.inside_id < 0:
+				var wid: String = e.def["trap"]
+				var own := e.owner
+				destroy(e, "killed", null)
+				_apply_hit(null, wid, null, e.pos, float(Data.WEAPONS[wid]["dmg"]), own)
+				return
+		return
 	var rate := Data.LOW_POWER_SPEED if pl["low"] else 1.0
 	if not e.prod.is_empty():
 		var q: Dictionary = e.prod[0]
@@ -1808,7 +1971,7 @@ func _tick_building(e: Ent, dt: float) -> void:
 			e.sw_t += dt
 			if e.sw_t >= float(e.def["superweapon"]):
 				e.sw_ready = true
-				session.s_msg(pl["peer"], "Particle Cannon ready")
+				session.s_msg(pl["peer"], "%s ready" % e.def["name"])
 	if e.has_weapons():
 		for i in range(e.cds.size()):
 			e.cds[i] = maxf(0.0, e.cds[i] - dt)
@@ -1848,6 +2011,15 @@ func _produce(b: Ent, type: String) -> void:
 		u = spawn(type, b.owner, ex)
 		u.yaw = atan2(b.rally.x - ex.x, b.rally.y - ex.y)
 		_order_move(u, b.rally + Vector2(randf_range(-2, 2), randf_range(-2, 2)))
+		if d.get("pair", false):
+			# Red Guards come two at a time
+			var u2 := spawn(type, b.owner, ex + Vector2(randf_range(-1, 1), randf_range(-1, 1)))
+			u2.yaw = u.yaw
+			_order_move(u2, b.rally + Vector2(randf_range(-2, 2), randf_range(-2, 2)))
+		for ct in d.get("spawn_cargo", []):
+			var rider := spawn(ct, b.owner, ex)
+			rider.inside_id = u.id
+			u.cargo.append(rider.id)
 	events.append({"k": "produced", "p": b.pos, "d": [b.id, u.id], "o": b.owner})
 	session.s_msg(players[b.owner]["peer"], "%s ready" % d["name"])
 
@@ -1877,16 +2049,23 @@ func _tick_heal(dt: float) -> void:
 		if h.is_building and not h.complete:
 			continue
 		var hd: Dictionary = h.def["heal"]
+		var rate := float(hd["rate"])
+		if hd["cat"] == "any" and players[h.owner]["upgrades"].has("subliminal_messaging"):
+			rate *= 1.5
 		for o: Ent in query(h.pos, float(hd["radius"])):
-			if o == h or o.owner != h.owner or o.is_building or o.cat() != hd["cat"]:
+			if o == h or o.owner != h.owner or o.is_building or (hd["cat"] != "any" and o.cat() != hd["cat"]):
 				continue
 			if o.is_jet() and o.flight != "parked":
 				continue
-			o.hp = minf(o.max_hp, o.hp + float(hd["rate"]) * dt)
-	# heroic units self-heal
+			o.hp = minf(o.max_hp, o.hp + rate * dt)
+	# heroic units self-heal; GLA Junk Repair patches vehicles anywhere
 	for o: Ent in ents.values():
-		if o.alive and not o.is_building and o.level >= 3:
+		if not o.alive or o.is_building:
+			continue
+		if o.level >= 3:
 			o.hp = minf(o.max_hp, o.hp + o.max_hp * 0.02 * dt)
+		elif o.owner >= 0 and o.cat() == "veh" and players[o.owner]["upgrades"].has("junk_repair"):
+			o.hp = minf(o.max_hp, o.hp + o.max_hp * 0.01 * dt)
 
 # ---------------------------------------------------------------------------
 # General's powers / superweapon
@@ -1927,7 +2106,70 @@ func _tick_strikes() -> void:
 					var u := spawn("ranger", s["owner"], grid.center_of(c))
 					u.state = "guard"
 					u.guard_pos = u.pos
+			"ambush":
+				for i in range(int(s["n"])):
+					var c := grid.nearest_free(grid.cell_of(p + Vector2(randf_range(-4, 4), randf_range(-4, 4))))
+					var u := spawn("rebel", s["owner"], grid.center_of(c))
+					u.state = "guard"
+					u.guard_pos = u.pos
+			"barrage":
+				var n := 6 + 4 * int(s["level"])
+				for i in range(n):
+					var off := Vector2(randf_range(-1, 1), randf_range(-1, 1)) * float(s["radius"])
+					shots.append({"t": time + 0.35 * i, "wid": "arty_shell", "tid": -1, "pos": p + off, "dmg": 90.0, "aid": -1, "owner": s["owner"]})
+			"carpet":
+				var dir := Vector2.from_angle(s["heading"])
+				for i in range(-4, 4):
+					shots.append({"t": time + 0.3 * (i + 4), "wid": "carpet_bomb", "tid": -1, "pos": p + dir * (i * 9.0), "dmg": 250.0, "aid": -1, "owner": s["owner"]})
+			"anthrax":
+				shots.append({"t": time, "wid": "anthrax_bomb", "tid": -1, "pos": p, "dmg": 200.0, "aid": -1, "owner": s["owner"]})
+			"sneak":
+				var own: int = s["owner"]
+				var fp: Vector2i = Data.BUILDINGS["tunnel_network"]["fp"]
+				var spot := PathGrid.snap_center(p, fp)
+				var placed := false
+				for r in [0.0, 6.0, 12.0, 18.0]:
+					for k in range(8 if r > 0.0 else 1):
+						var cand := PathGrid.snap_center(p + Vector2.from_angle(k * TAU / 8.0) * r, fp)
+						if placement_ok(own, "tunnel_network", cand):
+							spot = cand
+							placed = true
+							break
+					if placed:
+						break
+				if placed:
+					var tn := spawn("tunnel_network", own, spot, true)
+					_clear_footprint(tn)
+					grid.flush()
+					events.append({"k": "built", "p": tn.pos, "d": [tn.id], "o": own})
+					session.s_msg(players[own]["peer"], "Sneak Attack: tunnel entrance surfaced")
+			"nuke":
+				shots.append({"t": time, "wid": "nuke", "tid": -1, "pos": p, "dmg": 1500.0, "aid": -1, "owner": s["owner"]})
+			"scud_storm":
+				shots.append({"t": time, "wid": "scud_storm", "tid": -1, "pos": p, "dmg": 320.0, "aid": -1, "owner": s["owner"]})
 	strikes = keep
+
+## Radiation and toxin fields keep hurting whatever stands in them.
+func _tick_zones(dt: float) -> void:
+	if zones.is_empty():
+		return
+	var keep := []
+	for z in zones:
+		if time >= z["until"]:
+			continue
+		keep.append(z)
+		if tick % 10 != 0:
+			continue
+		var pos: Vector2 = z["p"]
+		var dtype := "RADIATION" if z["kind"] == "radiation" else "FLAME"
+		for o: Ent in query(pos, float(z["r"])):
+			if not o.alive or o.owner < 0 or (o.is_air() and o.alt > 0.5) or o.inside_id >= 0:
+				continue
+			if o.is_building and z["kind"] != "radiation":
+				continue
+			var mult := 0.25 if o.is_building else 1.0
+			_damage(o, float(z["dps"]) * 0.5 * mult, dtype, null)
+	zones = keep
 
 func _tick_beams(dt: float) -> void:
 	if beams.is_empty():
@@ -2022,6 +2264,8 @@ func _visible_to(p: int, e: Ent) -> bool:
 	if allied(e.owner, p):
 		return true
 	if e.is_building:
+		if e.owner >= 0 and _is_stealthed(e) and not e.detected:
+			return false   # demo traps and the like
 		# a structure is visible if any of its footprint corners or its centre is in view
 		if not team_visible(p, e.pos):
 			var fp: Vector2i = e.def["fp"]
@@ -2221,6 +2465,7 @@ func _send_pstates() -> void:
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": _steering_beam(p), "sw_bld": sw_bld,
 			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
+			"faction": pl["faction"], "factions": _factions_array(),
 		}
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
@@ -2248,9 +2493,10 @@ func _send_pstates() -> void:
 				if e.def.get("runway", false):
 					st["air_load"][e.id] = [_airfield_load(e), int(e.def.get("pads", 4))]
 			st["hp"][e.id] = [int(e.hp), int(e.max_hp)]
-			if not e.cargo.is_empty():
+			var cids: Array = _cargo_ids(e) if e.def.has("cargo") else []
+			if not cids.is_empty():
 				var types := []
-				for cid in e.cargo:
+				for cid in cids:
 					var cu: Ent = ents.get(cid)
 					if cu != null and cu.alive:
 						types.append(cu.type)
@@ -2266,7 +2512,7 @@ func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> D
 		"cds": {}, "upgrades": [], "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 		"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": false, "sw_bld": sw_bld,
 		"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": false, "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
-		"board": [],
+		"board": [], "faction": "", "factions": _factions_array(),
 	}
 	var units := []
 	var blds := []
@@ -2301,9 +2547,10 @@ func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> D
 			if e.def.get("runway", false):
 				st["air_load"][e.id] = [_airfield_load(e), int(e.def.get("pads", 4))]
 		st["hp"][e.id] = [int(e.hp), int(e.max_hp)]
-		if not e.cargo.is_empty():
+		var cids: Array = _cargo_ids(e) if e.def.has("cargo") else []
+		if not cids.is_empty():
 			var types := []
-			for cid in e.cargo:
+			for cid in cids:
 				var cu: Ent = ents.get(cid)
 				if cu != null and cu.alive:
 					types.append(cu.type)
@@ -2315,7 +2562,7 @@ func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> D
 		st["board"].append({
 			"name": pl["name"], "team": pl["team"], "cash": int(pl["cash"]), "units": units[p], "blds": blds[p], "rank": pl["rank"],
 			"defeated": pl["defeated"], "plan": pl["plan"], "pp": pl["pp"], "pu": pl["pu"], "low": pl["low"], "killed": pl["stats"]["units_killed"],
-			"ai": pl["peer"] < 0,
+			"ai": pl["peer"] < 0, "faction": pl["faction"],
 		})
 	return st
 
@@ -2366,6 +2613,7 @@ func report() -> Array:
 		st["xp"] = int(pl["xp"])
 		st["defeated"] = pl["defeated"]
 		st["team"] = pl["team"]
+		st["faction"] = pl["faction"]
 		st["time"] = int(time)
 		out.append(st)
 	return out
@@ -2405,7 +2653,13 @@ func cmd(p: int, c: Dictionary) -> void:
 		"unload":
 			for id in c.get("ids", []):
 				var e: Ent = ents.get(int(id))
-				if e != null and e.alive and e.owner == p and e.def.has("cargo") and not e.cargo.is_empty():
+				if e != null and e.alive and e.owner == p and e.def.has("cargo") and not _cargo_ids(e).is_empty():
+					if e.is_building:
+						# garrisons / tunnels let everyone out on the spot
+						var st := e.state
+						_do_unload(e, 0.0)
+						e.state = st
+						continue
 					e.queue.clear()
 					e.state = "unload"
 					e.path = PackedVector2Array()
@@ -2442,7 +2696,7 @@ func cmd(p: int, c: Dictionary) -> void:
 				if b["owner"] == p:
 					b["steer"] = false
 		"cheat_cash":
-			if solo or debug:
+			if solo or debug or options.get("cheats", false):
 				players[p]["cash"] += 10000.0
 		"plan":
 			var b: Ent = ents.get(int(c.get("id", -1)))
@@ -2551,9 +2805,9 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 			e.path = PackedVector2Array()
 			e.repath_t = 0.0
 		"capture":
-			if e.type != "ranger":
+			if not e.def.get("capture", false):
 				return
-			if not players[e.owner]["upgrades"].has("capture"):
+			if not e.def.get("capture_free", false) and not players[e.owner]["upgrades"].has("capture"):
 				session.s_msg(players[e.owner]["peer"], "Requires the Capture Building upgrade (Barracks)")
 				return
 			var b: Ent = ents.get(int(c.get("tid", -1)))
@@ -2596,6 +2850,8 @@ func _cmd_build(p: int, c: Dictionary) -> void:
 	if not Data.BUILDINGS.has(type) or Data.BUILDINGS[type].get("neutral", false):
 		return
 	var d: Dictionary = Data.BUILDINGS[type]
+	if Data.faction_of(type) != players[p]["faction"]:
+		return
 	var why := prereqs_met(p, type)
 	if why != "":
 		session.s_msg(players[p]["peer"], why)
@@ -2772,7 +3028,7 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 	var pd: Dictionary = Data.POWERS[pid]
 	if pd["kind"] != "ability" or int(pl["powers"].get(pid, 0)) <= 0:
 		return
-	if not has_building(p, "command_center"):
+	if not has_role(p, "cc"):
 		session.s_msg(pl["peer"], "Requires a Command Center")
 		return
 	if float(pl["cds"].get(pid, 0.0)) > time:
@@ -2801,6 +3057,54 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 			for o in range(players.size()):
 				if o != p:
 					session.s_msg(players[o]["peer"], "Warning: enemy Fuel Air Bomb inbound!")
+		# ---- China ----
+		"cash_hack":
+			var victim: Ent = null
+			for o: Ent in query(pos, float(pd["radius"])):
+				if o.alive and o.is_building and o.owner >= 0 and not allied(o.owner, p) and (victim == null or o.pos.distance_squared_to(pos) < victim.pos.distance_squared_to(pos)):
+					victim = o
+			if victim == null:
+				pl["cds"].erase(pid)
+				session.s_msg(pl["peer"], "Cash Hack needs an enemy structure")
+				return
+			var vp: Dictionary = players[victim.owner]
+			var amt: float = minf(1000.0, float(vp["cash"]))
+			vp["cash"] -= amt
+			pl["cash"] += amt
+			pl["stats"]["cash_earned"] += int(amt)
+			session.s_msg(pl["peer"], "Cash Hack: stole $%d" % int(amt))
+			session.s_msg(vp["peer"], "Warning: $%d stolen by a Cash Hack!" % int(amt))
+			events.append({"k": "strike", "p": victim.pos, "d": [pid, victim.pos.x, victim.pos.y, 0.0], "o": p, "all": true})
+		"artillery_barrage":
+			var lvl := int(pl["powers"][pid])
+			strikes.append({"k": "barrage", "p": pos, "t": time + 3.0, "owner": p, "level": lvl, "radius": float(pd["radius"])})
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0, lvl], "o": p, "all": true})
+		"frenzy":
+			for o: Ent in query(pos, float(pd["radius"])):
+				if o.alive and o.owner == p and not o.is_building:
+					o.frenzy_t = time + 30.0
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
+		"carpet_bomb":
+			var heading := randf() * TAU
+			strikes.append({"k": "carpet", "p": pos, "t": time + 8.0, "owner": p, "heading": heading})
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, heading], "o": p, "all": true})
+			for o in range(players.size()):
+				if o != p:
+					session.s_msg(players[o]["peer"], "Warning: enemy Carpet Bomb inbound!")
+		# ---- GLA ----
+		"rebel_ambush":
+			var lvl := int(pl["powers"][pid])
+			strikes.append({"k": "ambush", "p": pos, "t": time + 2.0, "owner": p, "n": 3 + lvl * 2})
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0, lvl], "o": p, "all": true})
+		"anthrax_bomb":
+			strikes.append({"k": "anthrax", "p": pos, "t": time + 6.0, "owner": p})
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
+			for o in range(players.size()):
+				if o != p:
+					session.s_msg(players[o]["peer"], "Warning: enemy Anthrax Bomb inbound!")
+		"sneak_attack":
+			strikes.append({"k": "sneak", "p": pos, "t": time + 6.0, "owner": p})
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 
 func _cmd_superweapon(p: int, c: Dictionary) -> void:
 	var b: Ent = ents.get(int(c.get("id", -1)))
@@ -2809,10 +3113,22 @@ func _cmd_superweapon(p: int, c: Dictionary) -> void:
 	var pos := Vector2(clampf(float(c["x"]), 0.0, map_size), clampf(float(c["y"]), 0.0, map_size))
 	b.sw_ready = false
 	b.sw_t = 0.0
-	players[p]["sw_steer"] = Vector2(-1, -1)
-	beams.append({"owner": p, "p": pos, "until": time + 10.0, "next": 0.0, "bid": b.id, "steer": true})
+	var kind := str(b.def.get("sw_kind", "beam"))
+	match kind:
+		"nuke":
+			# launch, then a long flight; everybody sees the missile
+			strikes.append({"k": "nuke", "p": pos, "t": time + 12.0, "owner": p})
+			events.append({"k": "sw_launch", "p": b.pos, "d": ["nuke", b.pos.x, b.pos.y, pos.x, pos.y, 12.0, b.id], "o": p, "all": true})
+		"scud":
+			for i in range(9):
+				var off := Vector2(randf_range(-1, 1), randf_range(-1, 1)) * 9.0
+				strikes.append({"k": "scud_storm", "p": pos + off, "t": time + 6.0 + i * 0.5, "owner": p})
+			events.append({"k": "sw_launch", "p": b.pos, "d": ["scud", b.pos.x, b.pos.y, pos.x, pos.y, 6.0, b.id], "o": p, "all": true})
+		_:
+			players[p]["sw_steer"] = Vector2(-1, -1)
+			beams.append({"owner": p, "p": pos, "until": time + 10.0, "next": 0.0, "bid": b.id, "steer": true})
 	for o in range(players.size()):
-		session.s_msg(players[o]["peer"], "Particle Cannon fired" if o == p else "Warning: enemy Particle Cannon fired!")
+		session.s_msg(players[o]["peer"], "%s fired" % b.def["name"] if o == p else "Warning: enemy %s fired!" % b.def["name"])
 
 # ---------------------------------------------------------------------------
 # Headless probe (--simtest): drive a tank across a ridge and verify it never

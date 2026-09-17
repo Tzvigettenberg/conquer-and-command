@@ -156,4 +156,7 @@ var cargo: Array[int] = []     # transports: ids of the units inside
 var inside_id := -1            # riding in this transport (-1 = not)
 var linked_until := -1.0       # patriot: designated by a linked battery until this time
 var pad_user := -1             # supply center: the chinook currently on the pad
+var frenzy_t := -100.0         # China Frenzy: +30% damage until this sim time
+var horde := false             # China horde bonus active (cached)
+var horde_tick := -100         # tick the horde check last ran
 var orphan_t := 0.0

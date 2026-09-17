@@ -21,7 +21,8 @@ var ring := 0
 var rng := RandomNumberGenerator.new()
 var difficulty := 1.0     # income / aggression multiplier
 
-const BUILD_ORDER := ["power_plant", "barracks", "supply_center", "war_factory", "power_plant", "patriot", "supply_center", "war_factory", "airfield", "power_plant", "strategy_center", "patriot", "patriot", "firebase", "power_plant", "supply_drop_zone", "particle_cannon", "power_plant"]
+var fd: Dictionary = {}          # Data.FACTIONS entry for this bot's side
+var next_want := ""              # structure the crew is saving up for (production leaves the money alone)
 
 var level := "medium"
 var powers_after := 240.0
@@ -35,6 +36,7 @@ func setup(_w: World, _p: int, _level := "medium") -> void:
 	w = _w
 	p = _p
 	level = _level
+	fd = Data.FACTIONS[w.faction_of_player(p)]
 	rng.seed = 100 + p
 	match level:
 		"easy":
@@ -106,9 +108,38 @@ func _own_units() -> Array:
 			out.append(e)
 	return out
 
+## Own completed structures with a given role (cc / supply / factory / airfield / barracks ...).
+func _role(role: String, complete_only := true) -> Array:
+	var out := []
+	for e: Ent in w.ents.values():
+		if e.alive and e.owner == p and e.is_building and (e.complete or not complete_only) and Data.role_of(e.type) == role:
+			out.append(e)
+	return out
+
 func _cc() -> Ent:
-	var l := _own("command_center")
+	var l := _role("cc")
 	return l[0] if not l.is_empty() else null
+
+## Construction crew, oldest first. GLA workers: the first two are builders, the rest haul.
+func _builders() -> Array:
+	var out := []
+	for e: Ent in w.ents.values():
+		if e.alive and e.owner == p and not e.is_building and e.def.get("builder", false) and e.inside_id < 0:
+			out.append(e)
+	out.sort_custom(func(a: Ent, b: Ent) -> bool: return a.id < b.id)
+	return out
+
+const KEEP_BUILDERS := 2
+
+func _is_crew(e: Ent) -> bool:
+	var bs := _builders()
+	for i in range(mini(KEEP_BUILDERS, bs.size())):
+		if bs[i] == e:
+			return true
+	return false
+
+func _pick(list: Array) -> String:
+	return list[rng.randi() % list.size()]
 
 func _base_pos() -> Vector2:
 	var cc := _cc()
@@ -146,29 +177,41 @@ func _nearest_enemy_start() -> Vector2:
 
 # ---------------------------------------------------------------------------
 func _economy() -> void:
-	# keep 2 chinooks per supply center, re-task idle ones
-	var centers := _own("supply_center")
-	var chinooks := _own("chinook")
-	for c in chinooks:
+	# haulers: re-task idle ones, keep a few per supply centre (GLA workers double as builders:
+	# the two oldest are the construction crew and never haul)
+	var centers := _role("supply")
+	var haulers := []
+	for e: Ent in w.ents.values():
+		if e.alive and e.owner == p and not e.is_building and int(e.def.get("gatherer", 0)) > 0 and e.inside_id < 0 and not _is_crew(e):
+			haulers.append(e)
+	var builder_type: String = fd["builder"]
+	var gla := builder_type == "worker"
+	for c in haulers:
 		if c.state == "idle":
 			w.cmd(p, {"t": "gather", "ids": [c.id], "tid": -1})
-	if not centers.is_empty() and chinooks.size() < mini(3, centers.size() * 2) and _cash() > 1800:
+	var per_center := 2 if fd["cc"] == "command_center" else (3 if not gla else 5)
+	var want_haulers := mini(per_center * 2 + 1, centers.size() * per_center)
+	if not centers.is_empty() and haulers.size() < want_haulers:
 		var sc: Ent = centers[0]
-		if sc.prod.is_empty():
-			w.cmd(p, {"t": "produce", "id": sc.id, "type": "chinook"})
-	# dozers: keep two
+		var ht: String = sc.def["produces"][0] if not sc.def.get("produces", []).is_empty() else ""
+		if ht != "" and sc.prod.is_empty() and _cash() > float(Data.UNITS[ht]["cost"]) + 300.0:
+			w.cmd(p, {"t": "produce", "id": sc.id, "type": ht})
+	# construction crew: keep two
 	var cc := _cc()
-	var dozers := _own("dozer")
-	if cc and dozers.size() < 2 and cc.prod.is_empty() and _cash() > 2200 and t > 60.0:
-		w.cmd(p, {"t": "produce", "id": cc.id, "type": "dozer"})
-	# capture derricks with rangers once the upgrade exists
+	var crew := 0
+	for b in _builders():
+		if _is_crew(b):
+			crew += 1
+	var margin := (1200.0 if not gla else 300.0) if crew > 0 else 100.0
+	if cc and crew < KEEP_BUILDERS and cc.prod.is_empty() and _cash() > float(Data.UNITS[builder_type]["cost"]) + margin and (t > 60.0 or crew == 0 or gla):
+		w.cmd(p, {"t": "produce", "id": cc.id, "type": builder_type})
+	# capture derricks with basic infantry once the upgrade exists
 	if w.players[p]["upgrades"].has("capture"):
 		for d: Ent in w.ents.values():
 			if d.alive and d.type == "oil_derrick" and d.owner != p and d.capture_by != p:
-				var rangers := _own("ranger")
 				var best: Ent = null
-				for r in rangers:
-					if r.state == "idle" or r.state == "guard":
+				for r in _own_units():
+					if r.def.get("capture", false) and not r.def.get("capture_free", false) and (r.state == "idle" or r.state == "guard"):
 						if best == null or r.pos.distance_squared_to(d.pos) < best.pos.distance_squared_to(d.pos):
 							best = r
 				if best != null and best.pos.distance_to(d.pos) < 160.0:
@@ -176,7 +219,10 @@ func _economy() -> void:
 					break
 
 func _construction() -> void:
-	var dozers := _own("dozer")
+	var dozers := []
+	for b in _builders():
+		if _is_crew(b):
+			dozers.append(b)
 	if dozers.is_empty():
 		return
 	# repair damaged structures first
@@ -205,17 +251,31 @@ func _construction() -> void:
 	# what to build next: first missing entry in the build order, with power kept positive
 	var pl: Dictionary = w.players[p]
 	var want := ""
-	if int(pl["pu"]) >= int(pl["pp"]) and _count_built("power_plant") > 0:
-		want = "power_plant"
+	var order: Array = fd["build_order"]
+	var power_type := ""
+	for b in order:
+		if Data.role_of(b) == "power":
+			power_type = b
+			break
+	if power_type != "" and int(pl["pu"]) >= int(pl["pp"]) and _count_built(power_type) > 0:
+		want = power_type
 	else:
 		var counts := {}
-		for b in BUILD_ORDER:
+		for b in order:
 			counts[b] = counts.get(b, 0) + 1
 			if _count_built(b, false) < counts[b]:
 				want = b
 				break
 	if want == "":
-		want = "war_factory" if _count_built("war_factory") < 3 else "patriot"
+		var factory := ""
+		var defense := ""
+		for b in order:
+			if Data.role_of(b) == "factory" and factory == "":
+				factory = b
+			if Data.role_of(b) == "defense" and defense == "":
+				defense = b
+		want = factory if _count_built(factory) < 3 else defense
+	next_want = want
 	var d: Dictionary = Data.BUILDINGS[want]
 	if w.prereqs_met(p, want) != "" or _cash() < float(d["cost"]) + 200.0:
 		return
@@ -233,7 +293,7 @@ func _find_spot(type: String) -> Vector2:
 	var base := _base_pos()
 	var fp: Vector2i = Data.BUILDINGS[type]["fp"]
 	var toward := Vector2.ZERO
-	if type == "patriot" or type == "firebase":
+	if Data.role_of(type) == "defense" or Data.role_of(type) == "trap":
 		var en: Vector2 = known_enemy if known_enemy.x >= 0 else Vector2(200, 200)
 		toward = (en - base).normalized()
 	var best := Vector2(-1, -1)
@@ -261,37 +321,60 @@ func _find_spot(type: String) -> Vector2:
 		r += 8.0
 	return best
 
+## A unit the bot can build right now from a role list (prereqs, promotions, limits).
+func _choose(list: Array, b: Ent) -> String:
+	for i in range(4):
+		var pick := _pick(list)
+		if b.def.get("produces", []).has(pick) and w.prereqs_met(p, pick) == "":
+			return pick
+	for pick in b.def.get("produces", []):
+		if w.prereqs_met(p, pick) == "" and int(Data.UNITS[pick].get("gatherer", 0)) == 0 and not Data.UNITS[pick].get("builder", false):
+			return pick
+	return ""
+
 func _production() -> void:
 	var cash := _cash()
 	var army := _own_units().size()
-	var reserve := 600.0 if _count_built("war_factory") > 0 else 0.0
+	# the crew gets first call on the money while the core base is still going up
+	var reserve := 600.0 if not _role("factory").is_empty() else 0.0
+	if next_want != "":
+		var nf := _role("factory").size()
+		if nf == 0:
+			reserve = maxf(reserve, float(Data.BUILDINGS[next_want]["cost"]) * 0.8)
+		elif nf == 1:
+			reserve = maxf(reserve, float(Data.BUILDINGS[next_want]["cost"]) * 0.4)
 	var qmax := 2 if level == "hard" else 1
-	for b: Ent in _own("barracks"):
+	for b: Ent in _role("barracks"):
 		if b.prod.size() < qmax and cash > reserve + 300 and army < unit_cap:
-			var pick := "ranger" if rng.randf() < 0.55 else "missile_defender"
-			if _count_built("strategy_center") > 0 and rng.randf() < 0.15:
-				pick = "pathfinder" if w.players[p]["powers"].has("pathfinder") else pick
+			var pick := _choose(fd["inf"], b)
+			if pick == "paladin" or pick == "":
+				continue
+			if w.players[p]["powers"].has("pathfinder") and pick == "ranger" and rng.randf() < 0.15:
+				pick = "pathfinder"
 			w.cmd(p, {"t": "produce", "id": b.id, "type": pick})
 			cash -= float(Data.UNITS[pick]["cost"])
-	for b: Ent in _own("war_factory"):
+	for b: Ent in _role("factory"):
 		if b.prod.size() < qmax and cash > 900 and army < unit_cap:
+			var pick := _choose(fd["veh"], b)
+			if pick == "":
+				continue
 			var roll := rng.randf()
-			var pick := "crusader"
-			if w.players[p]["powers"].has("paladin") and roll < 0.35:
-				pick = "paladin"
-			elif roll < 0.5:
-				pick = "humvee"
-			elif roll < 0.62 and _count_built("strategy_center") > 0:
-				pick = "tomahawk"
-			elif roll < 0.7:
-				pick = "ambulance" if _count_built("ambulance") + _queued("ambulance") < 1 else "crusader"
+			if fd["cc"] == "command_center":
+				if w.players[p]["powers"].has("paladin") and roll < 0.35:
+					pick = "paladin"
+				elif roll < 0.42 and _count_built("ambulance") + _queued("ambulance") < 1:
+					pick = "ambulance"
+			elif fd["cc"] == "gla_cc" and w.players[p]["powers"].has("marauder") and roll < 0.3:
+				pick = "marauder"
+			if w.prereqs_met(p, pick) != "":
+				continue
 			w.cmd(p, {"t": "produce", "id": b.id, "type": pick})
 			cash -= float(Data.UNITS[pick]["cost"])
-	for b: Ent in _own("airfield"):
-		if b.prod.is_empty() and cash > 2200 and w._airfield_load(b) < 4:
-			var pick := "raptor" if rng.randf() < 0.5 else "comanche"
-			if _count_built("strategy_center") > 0 and rng.randf() < 0.3:
-				pick = "aurora"
+	for b: Ent in _role("airfield"):
+		if b.prod.is_empty() and cash > 2200 and w._airfield_load(b) < 4 and not (fd["air"] as Array).is_empty():
+			var pick := _choose(fd["air"], b)
+			if pick == "":
+				continue
 			w.cmd(p, {"t": "produce", "id": b.id, "type": pick})
 			cash -= float(Data.UNITS[pick]["cost"])
 
@@ -311,7 +394,7 @@ func _research() -> void:
 			w.cmd(p, {"t": "plan", "id": sc.id, "plan": "bombardment" if level == "hard" else ("search" if level == "medium" else "hold")})
 	if _cash() < 3000:
 		return
-	var order := [["barracks", "capture"], ["war_factory", "tow"], ["power_plant", "control_rods"], ["strategy_center", "composite_armor"], ["airfield", "rocket_pods"], ["strategy_center", "advanced_training"], ["strategy_center", "supply_lines"], ["airfield", "laser_missiles"]]
+	var order: Array = fd["upgrades"]
 	for pair in order:
 		var bs := _own(pair[0])
 		if bs.is_empty():
@@ -333,7 +416,7 @@ func _powers() -> void:
 	if t < powers_after:
 		return
 	if int(pl["points"]) > 0:
-		for pid in ["a10", "paladin", "spy_satellite", "emergency_repair", "paradrop", "pathfinder", "stealth_fighter"]:
+		for pid in fd["powers"]:
 			var pd: Dictionary = Data.POWERS[pid]
 			if int(pl["rank"]) >= int(pd["rank"]) and int(pl["powers"].get(pid, 0)) < int(pd.get("levels", 1)):
 				w.cmd(p, {"t": "buy_power", "pid": pid})
@@ -342,12 +425,29 @@ func _powers() -> void:
 	var target: Vector2 = attack_target if attacking and attack_target.x >= 0 else known_enemy
 	if target.x < 0:
 		return
-	for pid in ["a10", "fuel_air_bomb"]:
+	for pid in fd["strike_powers"]:
 		if int(pl["powers"].get(pid, 0)) > 0 and float(pl["cds"].get(pid, 0.0)) <= w.time:
+			if (pid == "rebel_ambush" or pid == "sneak_attack") and not attacking:
+				continue
 			var tp := _enemy_cluster(target)
 			w.cmd(p, {"t": "power", "pid": pid, "x": tp.x, "y": tp.y})
 	if int(pl["powers"].get("paradrop", 0)) > 0 and float(pl["cds"].get("paradrop", 0.0)) <= w.time and attacking:
 		w.cmd(p, {"t": "power", "pid": "paradrop", "x": target.x, "y": target.y})
+	if int(pl["powers"].get("cash_hack", 0)) > 0 and float(pl["cds"].get("cash_hack", 0.0)) <= w.time:
+		for e: Ent in w.ents.values():
+			if e.alive and e.is_building and e.owner >= 0 and not w.allied(e.owner, p) and w.visions[p].visible(e.pos):
+				w.cmd(p, {"t": "power", "pid": "cash_hack", "x": e.pos.x, "y": e.pos.y})
+				break
+	if int(pl["powers"].get("frenzy", 0)) > 0 and float(pl["cds"].get("frenzy", 0.0)) <= w.time and attacking:
+		var centre := Vector2.ZERO
+		var n := 0
+		for u in _own_units():
+			if u.pos.distance_to(target) < 60.0:
+				centre += u.pos
+				n += 1
+		if n >= 5:
+			centre /= n
+			w.cmd(p, {"t": "power", "pid": "frenzy", "x": centre.x, "y": centre.y})
 	if int(pl["powers"].get("emergency_repair", 0)) > 0 and float(pl["cds"].get("emergency_repair", 0.0)) <= w.time:
 		var hurt := 0
 		var centre := Vector2.ZERO
@@ -359,11 +459,12 @@ func _powers() -> void:
 			centre /= hurt
 			w.cmd(p, {"t": "power", "pid": "emergency_repair", "x": centre.x, "y": centre.y})
 	# superweapon
-	for b: Ent in _own("particle_cannon"):
+	for b: Ent in _role("sw"):
 		if b.sw_ready:
 			var tp := _enemy_cluster(known_enemy)
 			w.cmd(p, {"t": "sw", "id": b.id, "x": tp.x, "y": tp.y})
-			w.cmd(p, {"t": "sw_steer", "x": tp.x, "y": tp.y})
+			if b.def.get("sw_kind", "beam") == "beam":
+				w.cmd(p, {"t": "sw_steer", "x": tp.x, "y": tp.y})
 
 ## Densest known enemy spot near a point (visible entities), else the point itself.
 func _enemy_cluster(near: Vector2) -> Vector2:
@@ -384,7 +485,7 @@ func _enemy_cluster(near: Vector2) -> Vector2:
 func _army() -> void:
 	var units := []
 	for u in _own_units():
-		if u.def.get("builder", false) or u.def.get("gatherer", 0) > 0 or u.type == "ambulance":
+		if u.def.get("builder", false) or u.def.get("gatherer", 0) > 0 or u.type == "ambulance" or u.def.has("hack") or u.inside_id >= 0:
 			continue
 		units.append(u)
 	# defence: react to attacks on our base

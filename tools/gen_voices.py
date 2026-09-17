@@ -28,6 +28,30 @@ VOICES = {
     "raptor": "onwK4e9ZLuTAKqWW03F9",     # Daniel
     "stealth_fighter": "JBFqnCBsd6RMkjVDRZzb",  # George
     "aurora": "pqHfZKP75CvOlQylNhV4",     # Bill
+    # China
+    "china_dozer": "GBv7mTt0atIp3Br8iCZE",   # Thomas
+    "red_guard": "TxGEqnHWrfWFTfGW9XjX",     # Josh
+    "tank_hunter": "yoZ06aMxZJJ28mfd3POQ",   # Sam
+    "hacker": "g5CIjZEefAph4nQFvHAz",        # Ethan
+    "black_lotus": "AZnzlk1XvdvUeBnXmlld",   # Domi
+    "supply_truck": "CYw3kZ02Hs0563khs1Fj",  # Dave
+    "cn_tank": "VR6AewLTigWG4xSOukaG",       # Arnold
+    "troop_crawler": "ErXwobaYiN019PkySvjV", # Antoni
+    "cn_artillery": "2EiwWnXFnvU5JabPnv8n",  # Clyde
+    "mig": "D38z5RcWu1voky8WS1ja",           # Fin
+    "helix": "ODq5zmih8GrVes37Dizd",         # Patrick
+    # GLA
+    "worker": "Zlb1dXrM653N07WRdFW3",        # Joseph
+    "rebel": "zcAOhNBS3c14rBihAFp1",         # Giovanni
+    "rpg_trooper": "flq6f7yk4E4fJM5XTYuZ",   # Michael
+    "terrorist": "5Q0t7uMcjvnagumLfvZi",     # Paul
+    "jarmen_kell": "onwK4e9ZLuTAKqWW03F9",   # Daniel
+    "gla_truck": "IKne3meq5aSn9XLyUdCD",     # Charlie
+    "gla_tank": "JBFqnCBsd6RMkjVDRZzb",      # George
+    "quad_cannon": "bIHbv24MWmeRgasZH58o",   # Will
+    "rocket_buggy": "cjVigY5qzO86Huf0OWal",  # Eric
+    "toxin_tractor": "N2lVS1w4EtoT3dr4eOWO", # Callum
+    "scud_launcher": "pNInz6obpgDQGcFmaJgB", # Adam
 }
 
 UNIT_LINES = {
@@ -127,6 +151,147 @@ UNIT_LINES = {
     },
 }
 
+UNIT_LINES.update({
+    # ---------------- China ----------------
+    "china_dozer": {
+        "ready": ["Dozer reporting."],
+        "select": ["What shall we build?", "Dozer awaiting orders.", "The People's builder.", "Ready to construct."],
+        "move": ["Moving the dozer.", "On our way.", "Understood.", "Driving over."],
+        "build": ["We build for China.", "Construction begins.", "It will be done quickly.", "Laying the foundation."],
+        "repair": ["Making repairs.", "We will fix it."],
+    },
+    "red_guard": {
+        "ready": ["Red Guard reporting!"],
+        "select": ["For the People!", "Red Guard ready.", "We are many.", "Awaiting orders, comrade."],
+        "move": ["Forward, comrades!", "Marching.", "We advance!", "Together!"],
+        "attack": ["Attack! Attack!", "For the motherland!", "Fire!", "Charge!"],
+        "capture": ["We claim this building.", "It belongs to the People now."],
+    },
+    "tank_hunter": {
+        "ready": ["Tank Hunter ready."],
+        "select": ["Show me the tanks.", "Rockets loaded.", "Tank Hunter here.", "Ready for armor."],
+        "move": ["Moving up.", "Understood.", "Advancing.", "On our way."],
+        "attack": ["Rocket away!", "Destroy the armor!", "Firing!", "They will burn!"],
+    },
+    "hacker": {
+        "ready": ["Hacker online."],
+        "select": ["Need something hacked?", "I'm in.", "Firewall? What firewall?", "Hacker ready."],
+        "move": ["Packing up the laptop.", "Relocating.", "Moving.", "Fine, fine."],
+    },
+    "black_lotus": {
+        "ready": ["Black Lotus has arrived."],
+        "select": ["I am a ghost.", "Lotus here.", "They will never see me.", "Speak."],
+        "move": ["Moving unseen.", "Slipping through.", "Understood.", "Silently."],
+        "capture": ["This building is ours.", "Hacking their systems.", "Taking control."],
+    },
+    "supply_truck": {
+        "ready": ["Supply truck ready."],
+        "select": ["Truck here.", "Where are the supplies?", "Ready to haul.", "Engine running."],
+        "move": ["Driving.", "On the road.", "Moving the truck.", "Understood."],
+        "gather": ["Loading supplies.", "Off to the depot.", "Supply run."],
+    },
+    "cn_tank": {
+        "ready": ["Battlemaster ready!", "Overlord has arrived.", "Gattling tank ready.", "Dragon tank ready."],
+        "select": ["Armor ready.", "Tank crew awaiting orders.", "Where is the enemy?", "The People's armor."],
+        "move": ["Rolling forward.", "Advancing.", "Moving out.", "Understood."],
+        "attack": ["Open fire!", "Crush them!", "Firing!", "For China!"],
+    },
+    "troop_crawler": {
+        "ready": ["Troop Crawler ready."],
+        "select": ["Crawler here.", "Troops aboard.", "Ready to transport.", "Where to?"],
+        "move": ["Moving the troops.", "Driving.", "On our way.", "Understood."],
+    },
+    "cn_artillery": {
+        "ready": ["Inferno Cannon ready.", "Nuke Cannon deployed."],
+        "select": ["Artillery ready.", "Give us a target.", "Long range, sir.", "Shells loaded."],
+        "move": ["Moving the guns.", "Repositioning.", "Understood.", "Slowly."],
+        "attack": ["Fire!", "Shell away!", "Burn them!", "Impact incoming!"],
+    },
+    "mig": {
+        "ready": ["MiG ready for takeoff."],
+        "select": ["MiG standing by.", "Napalm loaded.", "Ready to scramble.", "Pilot ready."],
+        "move": ["Taking off.", "Airborne.", "MiG en route.", "Climbing."],
+        "attack": ["Napalm away!", "Burning them!", "Missiles away!", "Attacking!"],
+        "return": ["Returning to base.", "Out of napalm, heading home."],
+    },
+    "helix": {
+        "ready": ["Helix online."],
+        "select": ["Helix here.", "Rotors spinning.", "Ready to lift.", "Heavy helicopter ready."],
+        "move": ["Lifting off.", "Helix moving.", "Flying.", "Understood."],
+        "attack": ["Guns firing!", "Engaging!", "Open fire!", "Target sighted!"],
+    },
+    # ---------------- GLA ----------------
+    "worker": {
+        "ready": ["Worker ready."],
+        "select": ["Yes?", "What do you need?", "I will do it.", "Worker here."],
+        "move": ["Going.", "Okay.", "On my way.", "Walking."],
+        "build": ["Building it.", "I will build.", "Give me a moment.", "It will stand."],
+        "repair": ["Fixing it.", "Repairing."],
+        "gather": ["Getting supplies.", "To the crates.", "Carrying."],
+    },
+    "rebel": {
+        "ready": ["Rebel ready."],
+        "select": ["For the cause!", "Rebel here.", "Ready to fight.", "Tell me where."],
+        "move": ["Moving.", "Going now.", "Quickly!", "On the way."],
+        "attack": ["Attack!", "Fire!", "Death to them!", "Kill them all!"],
+        "capture": ["Taking it.", "This is ours now."],
+    },
+    "rpg_trooper": {
+        "ready": ["RPG Trooper ready."],
+        "select": ["Rocket loaded.", "RPG here.", "Find me a tank.", "Ready."],
+        "move": ["Moving.", "Going.", "Advancing.", "Yes."],
+        "attack": ["Rocket away!", "Fire!", "Take that!", "Boom!"],
+    },
+    "terrorist": {
+        "ready": ["Terrorist ready."],
+        "select": ["I am ready.", "Where shall I go?", "It is a good day.", "Point the way."],
+        "move": ["Running.", "Going.", "Quickly.", "Yes."],
+        "attack": ["For the cause!", "Here I come!", "Goodbye!", "This is the end!"],
+    },
+    "jarmen_kell": {
+        "ready": ["Jarmen Kell reporting."],
+        "select": ["Kell here.", "I never miss.", "Speak.", "Who dies today?"],
+        "move": ["Moving quietly.", "Understood.", "Relocating.", "Like a shadow."],
+        "attack": ["One shot.", "Taking the shot.", "Target down.", "Say nothing."],
+    },
+    "gla_truck": {
+        "ready": ["Technical ready.", "Bomb truck ready."],
+        "select": ["Truck here.", "Ready to drive.", "Where to?", "Engine is running."],
+        "move": ["Driving!", "Going fast!", "On the road.", "Yes, yes."],
+        "attack": ["Shoot them!", "Open fire!", "Drive them down!", "Attack!"],
+    },
+    "gla_tank": {
+        "ready": ["Scorpion ready.", "Marauder ready."],
+        "select": ["Tank here.", "Ready to roll.", "Armor ready.", "Give the order."],
+        "move": ["Rolling.", "Moving out.", "Advancing.", "Going."],
+        "attack": ["Fire!", "Destroy them!", "Shell loaded!", "Crush them!"],
+    },
+    "quad_cannon": {
+        "ready": ["Quad Cannon ready."],
+        "select": ["Quad here.", "Watching the sky.", "Four barrels ready.", "Ready."],
+        "move": ["Moving.", "Driving.", "On our way.", "Going."],
+        "attack": ["Shred them!", "Firing!", "Bring it down!", "Open fire!"],
+    },
+    "rocket_buggy": {
+        "ready": ["Rocket Buggy ready."],
+        "select": ["Buggy here.", "Rockets loaded.", "Fast and deadly.", "Ready."],
+        "move": ["Driving fast!", "Going!", "Moving.", "Yes."],
+        "attack": ["Rockets away!", "Fire everything!", "Launching!", "Take cover!"],
+    },
+    "toxin_tractor": {
+        "ready": ["Toxin Tractor ready."],
+        "select": ["Tractor here.", "Toxins loaded.", "Ready to spray.", "Yes?"],
+        "move": ["Driving.", "Moving slowly.", "Going.", "Understood."],
+        "attack": ["Spraying!", "Breathe deep!", "Poison them!", "Let it flow!"],
+    },
+    "scud_launcher": {
+        "ready": ["SCUD Launcher ready."],
+        "select": ["Scud here.", "Missile loaded.", "Give me coordinates.", "Ready to launch."],
+        "move": ["Moving the launcher.", "Repositioning.", "Going.", "Slowly."],
+        "attack": ["Launching!", "Scud away!", "Fire!", "Impact soon!"],
+    },
+})
+
 EVA_LINES = {
     "construction_complete": "Construction complete.",
     "unit_ready": "Unit ready.",
@@ -163,6 +328,16 @@ EVA_LINES = {
     "capture_requires": "Capture building upgrade required.",
     "player_disconnected": "Opponent disconnected.",
     "select_dozer": "Dozer selected.",
+    "superweapon_launched": "Superweapon launched.",
+    "nuke_ready": "Nuclear missile ready.",
+    "scud_ready": "Scud storm ready.",
+    "artillery_barrage": "Artillery barrage inbound.",
+    "carpet_bomb": "Carpet bomb inbound.",
+    "anthrax_bomb": "Anthrax bomb inbound.",
+    "rebel_ambush": "Rebel ambush deployed.",
+    "cash_hack": "Cash hack successful.",
+    "sneak_attack": "Sneak attack tunnel deployed.",
+    "frenzy": "Frenzy activated.",
 }
 
 

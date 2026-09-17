@@ -5,6 +5,7 @@ extends Node3D
 var map: Dictionary
 var my_index := 0                  # -1 = observer (sees everything, commands nothing)
 var observer := false
+var my_faction := "usa"
 var puppets: Dictionary = {}       # id -> Puppet
 var pstate: Dictionary = {}
 var map_view: MapView
@@ -31,6 +32,9 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	if names.is_empty():
 		for p in lobby:
 			names.append(p["name"])
+	var facs: Array = m.get("player_factions", [])
+	if index >= 0 and index < facs.size():
+		my_faction = str(facs[index])
 	grid.setup(float(m["size"]))
 	for pr in m["props"]:
 		var fp: Vector2i = pr["fp"]
@@ -74,7 +78,7 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 		map_view.disable_fog()
 		on_msg("Observer mode: you see everything and command nothing.  Enter: chat   Esc: menu")
 	else:
-		on_msg("Welcome, %s. You are %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index]])
+		on_msg("Welcome, %s. You are %s, playing %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index], Data.FACTIONS[my_faction]["name"]])
 	if args.has("test"):
 		_run_test(str(args["test"]))
 	if args.has("zoom"):
@@ -84,15 +88,38 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 		var xy := str(args["look"]).split(",")
 		camera.jump_to(Vector2(float(xy[0]), float(xy[1])))
 	if args.has("showcase"):
-		# debug: every unit model in a grid by the base
+		# debug: every unit (or structure, --showcase=buildings) model in a grid by the base;
+		# --showcase_faction=x limits it to one side
 		var i := 0
-		for t in Data.UNITS:
+		var want_fac := str(args.get("showcase_faction", ""))
+		var blds := str(args["showcase"]) == "buildings"
+		var cols := 8 if not blds else 4
+		var step := 9.0 if not blds else 26.0
+		var centre := Vector2(float(m["size"]) * 0.5, float(m["size"]) * 0.5)
+		var mid := start + (centre - start).normalized() * (38.0 if not blds else 75.0)
+		var c0 := mid - Vector2(cols * step * 0.5 - step * 0.5, (5.0 if not blds else 26.0))
+		for t in (Data.BUILDINGS if blds else Data.UNITS):
+			if want_fac != "" and Data.faction_of(t) != want_fac:
+				continue
+			if blds and Data.BUILDINGS[t].get("neutral", false):
+				continue
 			var mdl := Visuals.make_model(t, my_index)
-			mdl.position = Vector3(start.x - 30 + (i % 6) * 12.0, 0, start.y + 30 + (i / 6) * 12.0)
-			mdl.rotation.y = 0.6
+			mdl.position = Vector3(c0.x + (i % cols) * step, 0, c0.y + (i / cols) * step)
+			mdl.rotation.y = 0.6 if not blds else 0.0
 			add_child(mdl)
+			var lbl := Label3D.new()
+			lbl.text = Data.def(t)["name"]
+			lbl.font_size = 64
+			lbl.pixel_size = 0.012
+			lbl.position = mdl.position + Vector3(0, 0.3, (4.5 if not blds else 14.0))
+			lbl.rotation.x = -PI * 0.5
+			lbl.modulate = Color(1, 1, 1)
+			lbl.outline_size = 16
+			add_child(lbl)
 			i += 1
-		camera.jump_to(start + Vector2(0, 40))
+		camera.jump_to(mid + Vector2(0, 4.0 if not blds else 12.0))
+		camera.yaw = 0.0
+		camera._apply()
 	if args.has("fxdemo"):
 		# debug: explosions and missiles near the base every second
 		var fxt := Timer.new()
@@ -240,6 +267,14 @@ func on_events(evs: Array) -> void:
 				if str(d[0]) == "fab":
 					fx.explosion(Vector3(d[1], 0, d[2]), 9.0)
 					Audio.I.sfx("explosion_large", Vector3(d[1], 2, d[2]), 8.0, 0.0, 0.5)
+				elif str(d[0]) == "nuke":
+					fx.nuke_blast(Vector3(d[1], 0, d[2]))
+					Audio.I.sfx("explosion_large", Vector3(d[1], 2, d[2]), 10.0, 0.0, 0.5)
+					Audio.I.sfx("explosion_large", Vector3(d[1], 2, d[2]), 8.0, 0.0, 0.5)
+					camera.shake(2.5)
+				elif str(d[0]) in ["scud_storm", "carpet_bomb", "anthrax_bomb", "demo_charge", "terrorist_bomb", "bombtruck_bomb"]:
+					fx.explosion(Vector3(d[1], 0, d[2]), 4.0 if str(d[0]) != "terrorist_bomb" else 2.5)
+					Audio.I.sfx("explosion_large", Vector3(d[1], 2, d[2]), 4.0, 0.0, 0.3)
 				else:
 					fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"))
 					Audio.I.impact(wd.get("style", "shell"), Vector3(d[1], float(d[3]), d[2]))
@@ -310,6 +345,18 @@ func on_events(evs: Array) -> void:
 					"emergency_repair":
 						Audio.I.sfx("repair", Vector3(d[1], 2, d[2]), 0.0)
 						Audio.I.eva("emergency_repair", 2.0)
+					"artillery_barrage":
+						Audio.I.sfx("artillery_fire", Vector3(d[1], 2, d[2]), 2.0)
+					"carpet_bomb", "anthrax_bomb":
+						Audio.I.sfx("plane_pass", Vector3(d[1], 30, d[2]), 4.0)
+					"cash_hack":
+						Audio.I.sfx("cash", Vector3(d[1], 2, d[2]), 0.0)
+			"zone":
+				fx.zone(str(d[0]), Vector3(d[1], 0, d[2]), float(d[3]), float(d[4]))
+			"sw_launch":
+				fx.sw_launch(str(d[0]), Vector3(d[1], 0, d[2]), Vector3(d[3], 0, d[4]), float(d[5]))
+				Audio.I.sfx("superweapon_fire", Vector3(d[1], 5, d[2]), 6.0)
+				Audio.I.eva("superweapon_launched", 2.0)
 			"place":
 				var b0: Puppet = puppets.get(int(d[0]))
 				if b0 != null:
@@ -465,6 +512,29 @@ func on_gameover(winner: int, rep: Array = []) -> void:
 func on_paused(on: bool) -> void:
 	hud.set_paused(on)
 
+## Faction of any player (from the map handshake / pstate).
+func faction_of(team_idx: int) -> String:
+	var facs: Array = pstate.get("factions", map.get("player_factions", []))
+	if team_idx >= 0 and team_idx < facs.size():
+		return str(facs[team_idx])
+	return "usa"
+
+## Can this player pick / use this general's power?
+func power_for_me(pid: String) -> bool:
+	var f := str(Data.POWERS[pid].get("faction", "usa"))
+	return f == "all" or f == my_faction
+
+## Name of a player's superweapon (for the countdown strip).
+func sw_name(team_idx: int) -> String:
+	for pu in puppets.values():
+		if pu.team == team_idx and pu.is_building and pu.def.has("superweapon"):
+			return pu.def["name"]
+	var f := faction_of(team_idx)
+	for bt in Data.BUILDINGS:
+		if Data.BUILDINGS[bt].has("superweapon") and Data.faction_of(bt) == f:
+			return Data.BUILDINGS[bt]["name"]
+	return "Superweapon"
+
 func is_ally(team_idx: int) -> bool:
 	if observer:
 		return false
@@ -613,6 +683,9 @@ func _run_test(kind: String) -> void:
 			print("[Test obs] t=%.0f puppets=%s board=[%s]" % [pstate.get("time", 0.0), str(per_team), " | ".join(bl)])
 			send({"t": "surrender"})   # must be a no-op for spectators
 		return
+	if kind == "faction":
+		await _faction_test()
+		return
 	await get_tree().create_timer(1.5).timeout
 	var cc := _own("command_center")
 	var dz := _own("dozer")
@@ -730,6 +803,129 @@ func _run_test(kind: String) -> void:
 		await get_tree().create_timer(15.0).timeout
 		_report()
 	print("[Test] done")
+
+## Spiral out from the base for a legal footprint (client-side placement check).
+func _find_spot(type: String, base: Vector2) -> Vector2:
+	var fp: Vector2i = Data.BUILDINGS[type]["fp"]
+	var r := 14.0
+	while r < 90.0:
+		var n := int(TAU * r / 4.0)
+		for i in range(n):
+			var a := TAU * i / n
+			var cand := PathGrid.snap_center(base + Vector2(cos(a), sin(a)) * r, fp)
+			if placement_ok(type, cand, 0.0):
+				return cand
+		r += 6.0
+	return Vector2(-1, -1)
+
+## Generic per-faction smoke: build the opening of the faction's build order, train
+## everything each structure offers, research, fire powers, load a transport / tunnel,
+## and keep selecting things so the HUD renders every kind of card.
+func _faction_test() -> void:
+	await get_tree().create_timer(1.5).timeout
+	var fd: Dictionary = Data.FACTIONS[my_faction]
+	print("[Test] faction %s" % my_faction)
+	var cc := _own(fd["cc"])
+	var dz := _own(fd["builder"])
+	if cc == null or dz == null:
+		print("[Test] FAIL: no command center / builder for %s" % my_faction)
+		return
+	var base := Vector2(cc.cur_pos.x, cc.cur_pos.z)
+	send({"t": "cheat_cash"})
+	send({"t": "cheat_cash"})
+	send({"t": "cheat_cash"})
+	var order: Array = fd["build_order"]
+	var built := {}
+	for i in range(mini(order.size(), 9)):
+		var bt: String = order[i]
+		if built.has(bt) and Data.role_of(bt) != "power":
+			continue
+		var pos := _find_spot(bt, base)
+		if pos.x < 0:
+			print("[Test] WARN no spot for %s" % bt)
+			continue
+		var b0 := _own(bt)
+		var n0 := count_own(bt)
+		send({"t": "build", "id": dz.id, "type": bt, "x": pos.x, "y": pos.y, "yaw": 0.0})
+		print("[Test] ordered %s at %s" % [bt, pos])
+		var waited := 0.0
+		while waited < 80.0:
+			await get_tree().create_timer(1.0).timeout
+			waited += 1.0
+			if not is_inside_tree():
+				return
+			var done := false
+			for pp in puppets.values():
+				if pp.team == my_index and pp.type == bt and pp.complete and (b0 == null or pp.id != b0.id or n0 == 0):
+					done = true
+			if done:
+				print("[Test] %s complete after %.0fs (cash %d)" % [bt, waited, pstate.get("cash", 0)])
+				built[bt] = true
+				break
+			if count_own(bt) <= n0 and waited > 6.0:
+				print("[Test] WARN %s never placed (%s)" % [bt, unit_prereq_text(bt) if Data.UNITS.has(bt) else building_prereq_text(bt)])
+				break
+		send({"t": "cheat_cash"})
+	# train everything, research everything, once
+	for pp in puppets.values():
+		if pp.team != my_index or not pp.is_building or not pp.complete:
+			continue
+		for ut in pp.def.get("produces", []):
+			send({"t": "produce", "id": pp.id, "type": ut})
+		for uid in pp.def.get("upgrades", []):
+			send({"t": "upgrade", "id": pp.id, "uid": uid})
+		if pp.def.get("plans", false):
+			send({"t": "plan", "id": pp.id, "plan": "bombardment"})
+	print("[Test] production queued everywhere")
+	# cycle the selection through every own thing while the army builds
+	var t := 0.0
+	while t < 75.0:
+		await get_tree().create_timer(2.5).timeout
+		t += 2.5
+		if not is_inside_tree():
+			return
+		var own := []
+		for pp in puppets.values():
+			if pp.team == my_index and not pp.ghost:
+				own.append(pp)
+		if not own.is_empty():
+			ctl.set_selection([own[randi() % own.size()].id])
+		send({"t": "cheat_cash"})
+	_report()
+	# transports / tunnels: put infantry in the first thing with cargo, then unload
+	var carrier: Puppet = null
+	var inf := []
+	for pp in puppets.values():
+		if pp.team != my_index or pp.ghost:
+			continue
+		if pp.def.has("cargo") and carrier == null and (not pp.is_building or pp.complete):
+			carrier = pp
+		elif pp.cat == "inf" and pp.def.has("weapons") and not pp.def["weapons"].is_empty():
+			inf.append(pp.id)
+	if carrier != null and not inf.is_empty():
+		send({"t": "load", "ids": inf.slice(0, 4), "tid": carrier.id})
+		print("[Test] loading %d infantry into %s" % [mini(4, inf.size()), carrier.type])
+		await get_tree().create_timer(25.0).timeout
+		print("[Test] cargo of %s: %s" % [carrier.type, str(pstate.get("cargo", {}).get(carrier.id, []))])
+		send({"t": "unload", "ids": [carrier.id]})
+		await get_tree().create_timer(6.0).timeout
+		print("[Test] after unload cargo: %s" % str(pstate.get("cargo", {}).get(carrier.id, [])))
+	# powers: buy what we can, fire abilities at the enemy start
+	for k in range(3):
+		for pid in fd["powers"]:
+			send({"t": "buy_power", "pid": pid})
+	var en := _enemy_start()
+	for pid in fd["strike_powers"]:
+		send({"t": "power", "pid": pid, "x": en.x, "y": en.y})
+	send({"t": "power", "pid": "emergency_repair", "x": base.x, "y": base.y})
+	# send the army at the enemy
+	var army := _own_ids(func(p: Puppet) -> bool: return not p.is_building and not p.def.get("builder", false) and int(p.def.get("gatherer", 0)) == 0)
+	if not army.is_empty():
+		send({"t": "amove", "ids": army, "x": en.x, "y": en.y, "q": false})
+		print("[Test] %d units attack-moving to %s" % [army.size(), en])
+	await get_tree().create_timer(40.0).timeout
+	_report()
+	print("[Test] faction %s done" % my_faction)
 
 func _report() -> void:
 	var counts := {}

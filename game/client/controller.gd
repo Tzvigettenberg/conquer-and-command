@@ -369,17 +369,17 @@ func _unhandled_input(ev: InputEvent) -> void:
 			KEY_H:
 				_jump_home()
 			KEY_N:
-				_select_next("dozer", true)
+				_select_next("builder", true)
 			KEY_B:
 				_select_next("barracks", false)
 			KEY_F:
-				_select_next("war_factory", false)
+				_select_next("factory", false)
 			KEY_I:
 				_select_next("airfield", false)
 			KEY_C:
-				_select_next("command_center", false)
+				_select_next("cc", false)
 			KEY_Y:
-				_select_next("supply_center", false)
+				_select_next("supply", false)
 			KEY_SPACE:
 				if not view.alerts.is_empty():
 					cam.jump_to(view.alerts[view.alerts.size() - 1]["p"])
@@ -510,12 +510,12 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 				_voice_for(builders, "repair")
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
-				if target.def.has("heal") and target.type == "war_factory":
+				if target.def.has("heal") and Data.role_of(target.type) == "factory":
 					view.fx.floating_text(target.cur_pos, "REPAIR", Color(0.5, 1.0, 0.5))
 			return
 		if target.is_building and (target.team < 0 and target.def.get("capturable", false)):
-			var rangers := _filter_ids(ids, func(p: Puppet) -> bool: return p.type == "ranger")
-			if not rangers.is_empty() and view.has_upgrade("capture"):
+			var rangers := _filter_ids(ids, func(p: Puppet) -> bool: return p.def.get("capture", false) and (p.def.get("capture_free", false) or view.has_upgrade("capture")))
+			if not rangers.is_empty():
 				view.send({"t": "capture", "ids": rangers, "tid": target.id, "q": queue})
 				_voice_for(rangers, "capture")
 				return
@@ -560,18 +560,23 @@ func minimap_command(world: Vector2) -> void:
 
 func _jump_home() -> void:
 	for pu in view.puppets.values():
-		if pu.team == view.my_index and pu.type == "command_center":
+		if pu.team == view.my_index and Data.role_of(pu.type) == "cc":
 			cam.jump_to(Vector2(pu.cur_pos.x, pu.cur_pos.z))
 			return
 
-## Cycle through own entities of a type (idle first for units), select and centre.
-func _select_next(type: String, idle_first: bool) -> void:
+## Cycle through own entities of a role ("builder" for dozers / workers, or a structure role), select and centre.
+func _select_next(role: String, idle_first: bool) -> void:
 	var list := []
 	for pu in view.puppets.values():
-		if pu.team == view.my_index and pu.type == type and not pu.ghost:
+		if pu.team != view.my_index or pu.ghost:
+			continue
+		if role == "builder":
+			if pu.def.get("builder", false) and not pu.is_building:
+				list.append(pu)
+		elif pu.is_building and Data.role_of(pu.type) == role:
 			list.append(pu)
 	if list.is_empty():
-		view.on_msg("No %s" % Data.def(type)["name"])
+		view.on_msg("No %s" % ({"builder": "builder", "barracks": "Barracks", "factory": "vehicle factory", "airfield": "Airfield", "cc": "Command Center", "supply": "supply center"}.get(role, role)))
 		return
 	list.sort_custom(func(a: Puppet, b: Puppet) -> bool: return a.id < b.id)
 	var pick: Puppet = null
@@ -623,7 +628,8 @@ func _mode_click(pos: Vector2) -> void:
 			var dozer := _first_builder()
 			if dozer >= 0:
 				view.send({"t": "build", "id": dozer, "type": place_type, "x": snapped.x, "y": snapped.y, "yaw": place_yaw})
-				Audio.I.voice("dozer", "build")
+				var dp: Puppet = view.puppets.get(dozer)
+				Audio.I.voice(dp.type if dp != null else "dozer", "build")
 			cancel_mode()
 		"amove":
 			view.send({"t": "amove", "ids": _own_units_selected(), "x": g.x, "y": g.y, "q": Input.is_key_pressed(KEY_SHIFT)})
@@ -643,7 +649,7 @@ func _mode_click(pos: Vector2) -> void:
 		"capture":
 			var target := _puppet_at(pos)
 			if target != null and target.is_building and target.team != view.my_index:
-				var rangers := _filter_ids(_own_units_selected(), func(p: Puppet) -> bool: return p.type == "ranger")
+				var rangers := _filter_ids(_own_units_selected(), func(p: Puppet) -> bool: return p.def.get("capture", false))
 				view.send({"t": "capture", "ids": rangers, "tid": target.id, "q": false})
 				view.fx.floating_text(target.cur_pos, "CAPTURE", Color(1.0, 0.5, 0.9))
 				_voice_for(rangers, "capture")
@@ -786,7 +792,7 @@ func beacon_mode() -> void:
 	_refresh_sig()
 
 func select_next_dozer() -> void:
-	_select_next("dozer", true)
+	_select_next("builder", true)
 
 func set_plan(bid: int, plan: String) -> void:
 	view.send({"t": "plan", "id": bid, "plan": plan})

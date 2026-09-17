@@ -121,6 +121,26 @@ func _upgrade_model(uid: String) -> String:
 			return "crusader"
 		"advanced_training":
 			return "missile_defender"
+		"chain_guns":
+			return "gattling_tank"
+		"black_napalm":
+			return "mig"
+		"uranium_shells":
+			return "battlemaster"
+		"nationalism":
+			return "red_guard"
+		"subliminal_messaging":
+			return "speaker_tower"
+		"scorpion_rocket":
+			return "scorpion"
+		"ap_bullets":
+			return "rebel"
+		"ap_rockets":
+			return "rpg_trooper"
+		"junk_repair":
+			return "marauder"
+		"anthrax_beta":
+			return "toxin_tractor"
 	return "ranger"
 
 func _power_model(pid: String) -> String:
@@ -141,6 +161,26 @@ func _power_model(pid: String) -> String:
 			return "chinook"
 		"fuel_air_bomb":
 			return "aurora"
+		"cash_hack":
+			return "hacker"
+		"artillery_barrage":
+			return "inferno_cannon"
+		"frenzy":
+			return "red_guard"
+		"nuke_cannon":
+			return "nuke_cannon"
+		"carpet_bomb":
+			return "mig"
+		"rebel_ambush":
+			return "rebel"
+		"marauder":
+			return "marauder"
+		"cash_bounty":
+			return "black_market"
+		"anthrax_bomb":
+			return "toxin_tractor"
+		"sneak_attack":
+			return "tunnel_network"
 	return "command_center"
 
 func _draw_badge(img: Image, badge: String) -> void:

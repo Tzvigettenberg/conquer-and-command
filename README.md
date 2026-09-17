@@ -50,6 +50,30 @@ free mesh VPN (Tailscale / ZeroTier / Radmin) and uses the VPN IP - no router se
 | Right-click with a factory selected | set its rally point |
 | F1 | +$10,000 (solo / debug only) |
 
+## Factions
+Pick a side per slot in the lobby (Random / USA / China / GLA); AI slots get one too, so any matchup works.
+
+**USA** - the original roster: Dozer, Rangers, Missile Defenders, Pathfinder, Colonel Burton; Humvee, Crusader, Paladin, Tomahawk,
+Ambulance, Avenger; Chinook, Comanche, Raptor, Stealth Fighter, Aurora. Strategy Center battle plans, Particle Cannon.
+
+**China** - numbers and firepower. Nuclear Reactor (+10 power), Barracks (Red Guards come in pairs, Tank Hunters, Hackers that
+earn cash while idle, Black Lotus who captures from a distance), Supply Center with ground Supply Trucks ($300 a trip), War Factory
+(Battlemaster, Gattling Tank, Dragon flame tank, Troop Crawler packed with 8 Red Guards, Inferno Cannon, Overlord, Nuke Cannon),
+Airfield (MiG napalm jets, Helix transport gunship), Propaganda Center (heals nearby, unlocks the heavies), Speaker Towers,
+Gattling Cannon and Bunker (garrison 5) defenses, and the **Nuclear Missile** superweapon (5 min; fallout lingers).
+Mechanics: **horde bonus** (5+ Red Guards / Tank Hunters / Battlemasters together deal +25%, +50% with Nationalism),
+upgrades Chain Guns, Black Napalm, Uranium Shells, Subliminal Messaging; powers Cash Hack, Artillery Barrage, Frenzy, Nuke Cannon,
+Carpet Bomb (rank 5).
+
+**GLA** - guerrillas that **need no power at all**. Workers build *and* haul supplies ($150 a trip), Barracks (Rebels, RPG Troopers,
+Terrorists who run in and explode, Jarmen Kell), Supply Stash, Arms Dealer (Technical with 5 fire ports, Scorpion, Quad Cannon,
+Rocket Buggy, Toxin Tractor, Marauder, SCUD Launcher, Bomb Truck), Palace (garrison 5, unlocks SCUDs), Black Market (steady income
+plus Junk Repair and Anthrax Beta), **Tunnel Network** (walk units in at one tunnel, unload them from any other - 10 shared slots,
+rocket turret on top), Stinger Site, hidden Demo Traps, and the **SCUD Storm** (nine toxin warheads every 4 min).
+Powers: Rebel Ambush, Cash Bounty, Marauder, Anthrax Bomb, Sneak Attack (a tunnel entrance surfaces anywhere, rank 5).
+
+Toxin and radiation leave lingering fields that keep hurting whatever stands in them (toxin melts infantry; radiation hurts everything).
+
 ## Lobby
 Host a game and set it up before starting. Every map has a fixed number of **spawn slots** (Desert Divide 2,
 Sand Sea 4, Frozen Front 4, Green Valley 6). Each slot is **Open / Closed / Easy AI / Medium AI / Hard AI** —
@@ -69,6 +93,12 @@ becomes an observer automatically (*Play* takes them back into a slot). Observer
 `audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
 `audio/music` — 14 Kevin MacLeod tracks (menu, game, victory, defeat), CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M7)
+- Two new factions, China and GLA, with full Zero Hour-style rosters (26 units, 21 structures, 10 upgrades, 10 general's powers, two superweapons), each with its own procedural models, a faction picker per lobby slot (humans and AIs, Random by default), faction-aware bots with their own build orders, and per-faction mechanics: China hordes, hackers, paired Red Guards, packed Troop Crawlers, ground supply trucks, propaganda healing; GLA no-power base, worker builders/haulers, suicide units, tunnel network pooling, demo traps, black market income, junk repair, cash bounty.
+- New sim systems: lingering damage zones (radiation / toxin), suicide weapons, ballistic superweapons (nuke, SCUD storm), flame weapons, garrison unload fix, transports that spawn loaded.
+- New FX: flamethrowers / toxin sprays, nuke mushroom cloud with screen shake, silo launches and SCUD salvos in flight, toxin / radiation fields, carpet-bomb and anthrax flyovers, artillery barrage.
+- `--faction=x --ai_faction=a,b,c` for headless runs; `--showcase=units|buildings --showcase_faction=x` renders a model gallery.
 
 ## What's in (M6.2)
 - Observer mode: humans can step out of the slot list and watch (AI vs AI works with nobody playing). Observers get every entity, no fog, all events and a live scoreboard; commands from observers are dropped by the sim. Lobby: Observe / Play buttons, "Watching:" on the map preview, full lobby → auto-observer.
@@ -174,10 +204,11 @@ mixamo/                 rifle idle/run/fire/death clips for infantry
 
 ## Headless smoke test (what Claude runs before shipping)
 ```
-godot --headless --path . -- --host --solo --autostart --test=smoke --exit_after=240
+godot --headless --path . -- --host --solo --autostart --faction=usa --test=smoke --exit_after=240
+godot --headless --path . -- --host --autostart --ai=1 --faction=gla --ai_faction=china --test=faction --exit_after=330   # per-faction client smoke
 godot --headless --path . -- --host --autostart --ai=2 --ai_level=hard --map=grass6 --exit_after=400   # AI game
 # two peers:
 godot --headless --path . -- --host --autostart --test=smoke --exit_after=330 &
 godot --headless --path . -- --join=127.0.0.1 --test=smoke --exit_after=320
 ```
-`--simdebug` prints unit states from the sim every 3 s; `--screenshot=DIR` saves a frame every 8 s; `--reveal` shows the whole map; `--look=x,y` starts the camera there; `--map=desert2|desert4|snow4|grass6`, `--teams=0,1,1`.
+`--simdebug` prints unit states from the sim every 3 s; `--screenshot=DIR` saves a frame every 8 s; `--reveal` shows the whole map; `--look=x,y` starts the camera there; `--map=desert2|desert4|snow4|grass6`, `--teams=0,1,1`, `--faction=usa|china|gla`, `--ai_faction=china,gla`, `--observe`.

@@ -14,6 +14,8 @@ var yaw := 0.0
 var pitch := PITCH_DEG
 var map_size := 400.0
 var target := Vector3.ZERO
+var shake_t := 0.0
+var shake_amp := 0.0
 var dragging := false
 var drag_last := Vector2.ZERO
 var enabled := true
@@ -35,11 +37,19 @@ func setup(size: float, start: Vector2) -> void:
 	listener.make_current()
 	_apply()
 
+## Screen shake for big detonations (seconds of decaying wobble).
+func shake(amount: float) -> void:
+	shake_amp = maxf(shake_amp, amount)
+	shake_t = 1.2
+
 func _apply() -> void:
 	position = target
 	rotation.y = yaw
 	var back := height / tan(deg_to_rad(pitch))
 	cam.position = Vector3(0, height, back)
+	if shake_t > 0.0:
+		var k := shake_t / 1.2 * shake_amp
+		cam.position += Vector3(randf_range(-k, k), randf_range(-k, k), 0)
 	cam.rotation_degrees = Vector3(-pitch, 0, 0)
 	if listener != null:
 		listener.position = Vector3(0, 10.0 + height * 0.15, back * 0.15)
@@ -91,6 +101,11 @@ func _pan(v: Vector2) -> void:
 	_apply()
 
 func _process(dt: float) -> void:
+	if shake_t > 0.0:
+		shake_t -= dt
+		if shake_t <= 0.0:
+			shake_amp = 0.0
+		_apply()
 	if not enabled:
 		return
 	var v := Vector2.ZERO

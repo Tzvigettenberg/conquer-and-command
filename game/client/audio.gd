@@ -37,8 +37,17 @@ const WEAPON_SFX := {
 	"patriot": "missile_launch", "raptor_missile": "missile_launch", "stealth_missile": "missile_launch", "comanche_rockets": "rocket_pod",
 	"tomahawk": "missile_launch", "firebase_gun": "artillery_fire", "avenger_laser": "laser_zap", "pathfinder_rifle": "sniper_shot",
 	"burton_rifle": "sniper_shot", "aurora_bomb": "bomb_whistle", "a10_gun": "gau8", "a10_missile": "missile_launch", "sc_cannon": "artillery_fire", "fab": "explosion_large", "particle": "superweapon_fire", "pd_laser": "laser_zap",
+	# China
+	"redguard_rifle": "rifle_burst", "th_rocket": "missile_launch", "battlemaster_gun": "tank_cannon", "gattling_gun": "machinegun", "dragon_flame": "flame",
+	"inferno_shell": "artillery_fire", "overlord_gun": "tank_cannon", "nuke_shell": "artillery_fire", "mig_napalm": "missile_launch", "helix_gun": "machinegun",
+	"gattling_cannon": "machinegun", "arty_shell": "artillery_fire", "carpet_bomb": "bomb_whistle", "nuke": "explosion_large",
+	# GLA
+	"rebel_rifle": "rifle_burst", "rpg_rocket": "missile_launch", "terrorist_bomb": "explosion_medium", "kell_rifle": "sniper_shot", "technical_gun": "machinegun",
+	"scorpion_gun": "tank_cannon", "scorpion_rocket": "missile_launch", "quad_gun": "machinegun", "buggy_rockets": "rocket_pod", "toxin_spray": "flame",
+	"marauder_gun": "tank_cannon", "scud": "missile_launch", "bombtruck_bomb": "explosion_large", "stinger": "missile_launch", "tunnel_gun": "missile_launch",
+	"demo_charge": "explosion_large", "scud_storm": "explosion_large", "anthrax_bomb": "bomb_whistle",
 }
-const IMPACT_SFX := {"bullet": "ricochet", "shell": "explosion_small", "missile": "explosion_small", "cruise": "explosion_medium", "bomb": "explosion_medium", "beam": ""}
+const IMPACT_SFX := {"bullet": "ricochet", "shell": "explosion_small", "missile": "explosion_small", "cruise": "explosion_medium", "bomb": "explosion_medium", "beam": "", "flame": "", "nuke": ""}
 const VOICE_CLASS := {"crusader": "tank", "paladin": "tank"}
 
 func _ready() -> void:
@@ -189,6 +198,12 @@ func weapon(wid: String, pos: Vector3) -> void:
 			vol = 2.0
 		"superweapon_fire":
 			vol = 6.0
+		"flame":
+			# no dedicated sample yet: a soft, low-pitched whoosh from the fire loop family
+			name = "jet_flyby"
+			vol = -14.0
+			sfx(name, pos, vol, 0.1, 0.9)
+			return
 	sfx(name, pos, vol, 0.1, 0.06 if name != "machinegun" else 0.15)
 
 ## Engine rev when a vehicle is sent somewhere.
@@ -197,8 +212,8 @@ func engine_ack(unit_type: String, pos: Vector3) -> void:
 	if d.get("cat", "") != "veh":
 		return
 	var name := "truck_rev"
-	match unit_type:
-		"crusader", "paladin", "avenger":
+	match str(d.get("snd", unit_type)):
+		"crusader", "paladin", "avenger", "tank":
 			name = "tank_rev"
 		"humvee", "ambulance":
 			name = "humvee_rev"
@@ -229,7 +244,7 @@ func voice(unit_type: String, kind: String, force := false) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if not force and now < voice_cd:
 		return
-	var cls: String = VOICE_CLASS.get(unit_type, unit_type)
+	var cls: String = str(Data.def(unit_type).get("voice", VOICE_CLASS.get(unit_type, unit_type)))
 	var kinds: Dictionary = voice_dirs.get(cls, {})
 	if not kinds.has(kind):
 		return
@@ -281,10 +296,26 @@ func eva_for_message(text: String) -> void:
 		eva("building_captured", 2.0)
 	elif "particle cannon ready" in t:
 		eva("superweapon_ready", 2.0)
+	elif "nuclear missile ready" in t:
+		eva("nuke_ready", 2.0)
+	elif "scud storm ready" in t:
+		eva("scud_ready", 2.0)
 	elif "enemy particle cannon fired" in t:
 		eva("enemy_superweapon_launch", 2.0)
 	elif "particle cannon fired" in t:
 		eva("superweapon_launch", 2.0)
+	elif t.begins_with("warning: enemy") and t.ends_with("fired!"):
+		eva("enemy_superweapon_launch", 2.0)
+	elif t.ends_with(" fired"):
+		eva("superweapon_launched", 2.0)
+	elif "carpet bomb inbound" in t:
+		eva("carpet_bomb", 2.0)
+	elif "anthrax bomb inbound" in t:
+		eva("anthrax_bomb", 2.0)
+	elif "cash hack: stole" in t:
+		eva("cash_hack", 2.0)
+	elif "sneak attack" in t:
+		eva("sneak_attack", 2.0)
 	elif "upgrade complete" in t:
 		eva("upgrade_complete", 2.0)
 	elif t.ends_with(" complete"):

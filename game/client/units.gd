@@ -14,6 +14,15 @@ const GLASS := Color(0.3, 0.55, 0.8)
 const RUBBER := Color(0.12, 0.12, 0.13)
 const SKIN := Color(0.85, 0.68, 0.55)
 const UNIFORM := Color(0.36, 0.4, 0.3)
+# China: olive drab with red trim.  GLA: sun-bleached khaki, rust, improvised.
+const CN_BODY := Color(0.36, 0.44, 0.3)
+const CN_DARK := Color(0.26, 0.32, 0.22)
+const CN_RED := Color(0.8, 0.15, 0.12)
+const CN_UNIFORM := Color(0.3, 0.38, 0.26)
+const GLA_BODY := Color(0.64, 0.56, 0.38)
+const GLA_DARK := Color(0.46, 0.4, 0.28)
+const GLA_RUST := Color(0.5, 0.3, 0.18)
+const GLA_UNIFORM := Color(0.5, 0.42, 0.3)
 
 static func _tc(team: int) -> Color:
 	return Data.TEAM_COLORS[team % Data.TEAM_COLORS.size()] if team >= 0 else Color(0.6, 0.6, 0.6)
@@ -87,6 +96,50 @@ static func make(type: String, team: int) -> Node3D:
 			_jet(root, tc, l, "aurora")
 		"ranger", "missile_defender", "pathfinder", "burton":
 			_soldier(root, tc, type)
+		# ---- China ----
+		"china_dozer":
+			_dozer(root, tc, l, CN_BODY, CN_DARK)
+		"red_guard", "tank_hunter", "hacker", "black_lotus":
+			_soldier(root, tc, type)
+		"supply_truck":
+			_supply_truck(root, tc, l)
+		"battlemaster":
+			_tank(root, tc, l, false, CN_BODY, CN_DARK)
+		"gattling_tank":
+			_gattling_tank(root, tc, l)
+		"dragon_tank":
+			_dragon_tank(root, tc, l)
+		"troop_crawler":
+			_troop_crawler(root, tc, l)
+		"inferno_cannon":
+			_inferno(root, tc, l)
+		"overlord":
+			_overlord(root, tc, l)
+		"nuke_cannon":
+			_nuke_cannon(root, tc, l)
+		"mig":
+			_jet(root, tc, l, "mig")
+		"helix":
+			_helix(root, tc, l)
+		# ---- GLA ----
+		"worker", "rebel", "rpg_trooper", "terrorist", "jarmen_kell":
+			_soldier(root, tc, type)
+		"technical":
+			_technical(root, tc, l)
+		"scorpion":
+			_scorpion(root, tc, l)
+		"quad_cannon":
+			_quad_cannon(root, tc, l)
+		"rocket_buggy":
+			_rocket_buggy(root, tc, l)
+		"toxin_tractor":
+			_toxin_tractor(root, tc, l)
+		"marauder":
+			_marauder(root, tc, l)
+		"scud_launcher":
+			_scud_launcher(root, tc, l)
+		"bomb_truck":
+			_bomb_truck(root, tc, l)
 		_:
 			box(root, Vector3(l * 0.5, l * 0.3, l), Vector3(0, l * 0.15, 0), tc)
 	return root
@@ -94,13 +147,13 @@ static func make(type: String, team: int) -> Node3D:
 # ---------------------------------------------------------------------------
 # Ground vehicles
 # ---------------------------------------------------------------------------
-static func _dozer(root: Node3D, tc: Color, l: float) -> void:
+static func _dozer(root: Node3D, tc: Color, l: float, body := BODY, body_dark := BODY_DARK) -> void:
 	var w := l * 0.55
 	tracks(root, l * 0.7, w * 0.25, 0.7, w * 0.42)
-	box(root, Vector3(w * 0.7, 0.7, l * 0.62), Vector3(0, 1.0, -0.2), BODY)
+	box(root, Vector3(w * 0.7, 0.7, l * 0.62), Vector3(0, 1.0, -0.2), body)
 	box(root, Vector3(w * 0.72, 0.16, l * 0.3), Vector3(0, 1.4, -0.9), tc)     # team-colour rear deck
 	# cab with glass
-	box(root, Vector3(w * 0.5, 0.9, l * 0.28), Vector3(0, 1.8, -0.35), BODY_DARK)
+	box(root, Vector3(w * 0.5, 0.9, l * 0.28), Vector3(0, 1.8, -0.35), body_dark)
 	box(root, Vector3(w * 0.52, 0.5, l * 0.29), Vector3(0, 1.9, -0.35), GLASS)
 	box(root, Vector3(w * 0.56, 0.1, l * 0.34), Vector3(0, 2.3, -0.35), tc)
 	cyl(root, 0.08, 0.08, 0.9, Vector3(w * 0.28, 2.0, -0.9), DARK, Vector3.ZERO, 6).name = "Exhaust"
@@ -149,24 +202,24 @@ static func _ambulance(root: Node3D, tc: Color, l: float) -> void:
 		for sx in [-1.0, 1.0]:
 			wheel(root, 0.4, 0.3, Vector3(sx * w * 0.5, 0.4, sz * l * 0.3), "Wheel%s%s" % ["L" if sx < 0 else "R", "F" if sz > 0 else "B"])
 
-static func _tank(root: Node3D, tc: Color, l: float, heavy: bool) -> void:
+static func _tank(root: Node3D, tc: Color, l: float, heavy: bool, body := BODY, body_dark := BODY_DARK) -> void:
 	var w := l * 0.62
 	tracks(root, l * 0.95, w * 0.26, 0.75, w * 0.4)
-	box(root, Vector3(w * 0.62, 0.55, l * 0.9), Vector3(0, 1.0, 0), BODY)                       # hull
-	prism(root, Vector3(w * 0.62, 0.35, l * 0.25), Vector3(0, 1.45, l * 0.35), BODY_DARK, Vector3(-PI * 0.5, 0, 0))  # glacis
-	box(root, Vector3(w * 0.64, 0.1, l * 0.5), Vector3(0, 1.3, -0.2), BODY_DARK)
+	box(root, Vector3(w * 0.62, 0.55, l * 0.9), Vector3(0, 1.0, 0), body)                       # hull
+	prism(root, Vector3(w * 0.62, 0.35, l * 0.25), Vector3(0, 1.45, l * 0.35), body_dark, Vector3(-PI * 0.5, 0, 0))  # glacis
+	box(root, Vector3(w * 0.64, 0.1, l * 0.5), Vector3(0, 1.3, -0.2), body_dark)
 	if heavy:
 		for sx in [-1.0, 1.0]:
 			# armour skirts hang over the tracks
-			box(root, Vector3(w * 0.3, 0.42, l * 0.9), Vector3(sx * w * 0.4, 0.92, 0), BODY_DARK)
-			box(root, Vector3(w * 0.32, 0.08, l * 0.92), Vector3(sx * w * 0.4, 1.15, 0), BODY)
+			box(root, Vector3(w * 0.3, 0.42, l * 0.9), Vector3(sx * w * 0.4, 0.92, 0), body_dark)
+			box(root, Vector3(w * 0.32, 0.08, l * 0.92), Vector3(sx * w * 0.4, 1.15, 0), body)
 	var turret := Node3D.new()
 	turret.name = "Turret"
 	turret.position = Vector3(0, 1.3, -0.15)
 	root.add_child(turret)
 	var tw := w * 0.5 if not heavy else w * 0.58
-	box(turret, Vector3(tw, 0.55, l * 0.4), Vector3(0, 0.28, 0), BODY)
-	prism(turret, Vector3(tw, 0.25, l * 0.2), Vector3(0, 0.65, l * 0.1), BODY_DARK, Vector3(-PI * 0.5, 0, 0))
+	box(turret, Vector3(tw, 0.55, l * 0.4), Vector3(0, 0.28, 0), body)
+	prism(turret, Vector3(tw, 0.25, l * 0.2), Vector3(0, 0.65, l * 0.1), body_dark, Vector3(-PI * 0.5, 0, 0))
 	box(turret, Vector3(tw * 0.9, 0.08, l * 0.3), Vector3(0, 0.6, -0.05), tc)      # team-colour roof patch
 	cyl(turret, 0.09, 0.11, l * 0.7, Vector3(0, 0.3, l * 0.2 + l * 0.35), DARK, Vector3(PI * 0.5, 0, 0), 8)   # barrel
 	cyl(turret, 0.14, 0.14, 0.4, Vector3(0, 0.3, l * 0.2 + l * 0.66), DARK, Vector3(PI * 0.5, 0, 0), 8)      # muzzle brake
@@ -212,6 +265,348 @@ static func _avenger(root: Node3D, tc: Color, l: float) -> void:
 		var em := Buildings.sphere(turret, 0.12, Vector3(sx * 0.55, 0.6, 0.35), Color(0.4, 0.8, 1.0))
 		em.name = "Laser%d" % int(sx + 1)
 	root.set_meta("turret", turret)
+
+static func _star_decal(root: Node3D, pos: Vector3, r: float) -> void:
+	for i in range(5):
+		var arm := box(root, Vector3(r * 0.3, r * 0.02, r), pos, CN_RED, Vector3(0, i * TAU / 5.0, 0))
+		arm.position = pos
+
+# ---------------------------------------------------------------------------
+# China vehicles
+# ---------------------------------------------------------------------------
+static func _supply_truck(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.5
+	box(root, Vector3(w, 0.45, l * 0.95), Vector3(0, 0.75, 0), CN_DARK)
+	box(root, Vector3(w * 0.95, 1.0, l * 0.26), Vector3(0, 1.45, l * 0.3), CN_BODY)     # cab
+	box(root, Vector3(w * 0.9, 0.4, l * 0.24), Vector3(0, 1.7, l * 0.31), GLASS)
+	box(root, Vector3(w * 0.98, 0.1, l * 0.28), Vector3(0, 2.0, l * 0.3), tc)
+	box(root, Vector3(w * 1.0, 0.25, l * 0.55), Vector3(0, 1.1, -l * 0.15), CN_BODY)    # flatbed
+	for i in range(4):
+		var c := box(root, Vector3(w * 0.42, 0.55, l * 0.22), Vector3((-0.5 + (i % 2)) * w * 0.48, 1.5, -l * 0.02 - (i / 2) * l * 0.26), Color(0.72, 0.56, 0.3))
+		c.name = "Crate%d" % i
+	for sz in [-1.0, 0.0, 1.0]:
+		for sx in [-1.0, 1.0]:
+			wheel(root, 0.42, 0.3, Vector3(sx * w * 0.5, 0.42, sz * l * 0.32), "Wheel%s%d" % ["L" if sx < 0 else "R", int(sz + 1)])
+	cyl(root, 0.06, 0.06, 0.8, Vector3(w * 0.45, 1.9, l * 0.15), DARK, Vector3.ZERO, 6).name = "Exhaust"
+
+static func _gattling_tank(root: Node3D, tc: Color, l: float) -> void:
+	_tank(root, tc, l, false, CN_BODY, CN_DARK)
+	var old := root.get_meta("turret") as Node3D
+	old.queue_free()
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.3, -0.15)
+	root.add_child(turret)
+	var w := l * 0.62
+	box(turret, Vector3(w * 0.45, 0.5, l * 0.36), Vector3(0, 0.25, 0), CN_BODY)
+	box(turret, Vector3(w * 0.4, 0.08, l * 0.28), Vector3(0, 0.55, -0.05), tc)
+	var spin := Node3D.new()
+	spin.name = "Barrels"
+	spin.position = Vector3(0, 0.3, l * 0.2)
+	turret.add_child(spin)
+	for i in range(6):
+		var a := i * TAU / 6.0
+		cyl(spin, 0.06, 0.06, l * 0.55, Vector3(sin(a) * 0.17, cos(a) * 0.17, l * 0.27), DARK, Vector3(PI * 0.5, 0, 0), 6)
+	cyl(spin, 0.22, 0.22, 0.15, Vector3(0, 0, l * 0.5), METAL, Vector3(PI * 0.5, 0, 0), 8)
+	root.set_meta("turret", turret)
+	root.set_meta("anim", [{"node": spin, "kind": "spinz", "speed": 10.0}])
+
+static func _dragon_tank(root: Node3D, tc: Color, l: float) -> void:
+	_tank(root, tc, l, false, CN_BODY, CN_DARK)
+	var old := root.get_meta("turret") as Node3D
+	old.queue_free()
+	var w := l * 0.62
+	# fuel tanks on the rear deck
+	for sx in [-1.0, 1.0]:
+		cyl(root, 0.3, 0.3, l * 0.35, Vector3(sx * w * 0.2, 1.55, -l * 0.28), Color(0.55, 0.15, 0.1), Vector3(PI * 0.5, 0, 0), 10)
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.3, -0.05)
+	root.add_child(turret)
+	box(turret, Vector3(w * 0.42, 0.45, l * 0.32), Vector3(0, 0.22, 0), CN_BODY)
+	box(turret, Vector3(w * 0.36, 0.08, l * 0.24), Vector3(0, 0.5, -0.05), tc)
+	cyl(turret, 0.12, 0.12, l * 0.4, Vector3(0, 0.25, l * 0.3), DARK, Vector3(PI * 0.5, 0, 0), 8)
+	var nozzle := cyl(turret, 0.2, 0.12, 0.3, Vector3(0, 0.25, l * 0.52), Color(0.9, 0.45, 0.1), Vector3(PI * 0.5, 0, 0), 8)
+	nozzle.name = "Nozzle"
+	root.set_meta("turret", turret)
+
+static func _troop_crawler(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.5
+	box(root, Vector3(w, 0.5, l * 0.95), Vector3(0, 0.8, 0), CN_DARK)
+	box(root, Vector3(w * 1.02, 1.3, l * 0.7), Vector3(0, 1.65, -l * 0.08), CN_BODY)      # armoured box
+	prism(root, Vector3(w * 1.02, 0.5, l * 0.24), Vector3(0, 1.3, l * 0.4), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	box(root, Vector3(w * 0.9, 0.35, 0.1), Vector3(0, 1.75, l * 0.27), GLASS)
+	box(root, Vector3(w * 1.04, 0.1, l * 0.72), Vector3(0, 2.32, -l * 0.08), tc)
+	for i in range(3):
+		for sx in [-1.0, 1.0]:
+			box(root, Vector3(0.06, 0.3, 0.5), Vector3(sx * w * 0.52, 1.7, -l * 0.3 + i * l * 0.22), Color(0.05, 0.05, 0.06))   # firing slits
+	var ramp := box(root, Vector3(w * 0.9, 0.12, 0.5), Vector3(0, 1.1, -l * 0.46), CN_DARK)
+	ramp.name = "Ramp"
+	for sz in [-1.0, 0.0, 1.0]:
+		for sx in [-1.0, 1.0]:
+			wheel(root, 0.45, 0.32, Vector3(sx * w * 0.5, 0.45, sz * l * 0.3), "Wheel%s%d" % ["L" if sx < 0 else "R", int(sz + 1)])
+	_star_decal(root, Vector3(0, 2.38, 0), 0.5)
+
+static func _inferno(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.6
+	tracks(root, l * 0.9, w * 0.26, 0.7, w * 0.4)
+	box(root, Vector3(w * 0.6, 0.5, l * 0.85), Vector3(0, 0.95, 0), CN_BODY)
+	box(root, Vector3(w * 0.62, 0.1, l * 0.3), Vector3(0, 1.25, l * 0.25), tc)
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.2, -0.3)
+	root.add_child(turret)
+	box(turret, Vector3(w * 0.5, 0.5, l * 0.3), Vector3(0, 0.25, 0), CN_DARK)
+	var tilt := Node3D.new()
+	tilt.position = Vector3(0, 0.5, 0)
+	tilt.rotation.x = -0.6
+	turret.add_child(tilt)
+	cyl(tilt, 0.2, 0.28, l * 0.7, Vector3(0, 0, l * 0.3), DARK, Vector3(PI * 0.5, 0, 0), 10)
+	cyl(tilt, 0.3, 0.2, 0.3, Vector3(0, 0, l * 0.66), Color(0.9, 0.45, 0.1), Vector3(PI * 0.5, 0, 0), 10)
+	root.set_meta("turret", turret)
+
+static func _overlord(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.66
+	tracks(root, l * 0.98, w * 0.3, 1.0, w * 0.38)
+	box(root, Vector3(w * 0.6, 0.8, l * 0.92), Vector3(0, 1.3, 0), CN_BODY)
+	prism(root, Vector3(w * 0.6, 0.45, l * 0.22), Vector3(0, 1.9, l * 0.38), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	for sx in [-1.0, 1.0]:
+		box(root, Vector3(w * 0.34, 0.5, l * 0.94), Vector3(sx * w * 0.38, 1.25, 0), CN_DARK)   # skirts
+		box(root, Vector3(w * 0.36, 0.08, l * 0.96), Vector3(sx * w * 0.38, 1.55, 0), CN_BODY)
+		box(root, Vector3(w * 0.1, 0.09, l * 0.6), Vector3(sx * w * 0.5, 1.55, 0), CN_RED)   # thin red stripe along the edge
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.7, -0.2)
+	root.add_child(turret)
+	box(turret, Vector3(w * 0.58, 0.75, l * 0.42), Vector3(0, 0.38, 0), CN_BODY)
+	prism(turret, Vector3(w * 0.58, 0.3, l * 0.2), Vector3(0, 0.9, l * 0.12), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	box(turret, Vector3(w * 0.5, 0.08, l * 0.3), Vector3(0, 0.8, -0.05), tc)
+	for sx in [-1.0, 1.0]:
+		cyl(turret, 0.1, 0.13, l * 0.65, Vector3(sx * 0.32, 0.4, l * 0.2 + l * 0.32), DARK, Vector3(PI * 0.5, 0, 0), 8)
+		cyl(turret, 0.16, 0.16, 0.4, Vector3(sx * 0.32, 0.4, l * 0.2 + l * 0.62), DARK, Vector3(PI * 0.5, 0, 0), 8)
+	box(turret, Vector3(0.5, 0.35, 0.5), Vector3(-w * 0.15, 0.95, -0.3), METAL)
+	_star_decal(root, Vector3(0, 1.76, -l * 0.35), 0.45)
+	root.set_meta("turret", turret)
+
+static func _nuke_cannon(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.58
+	tracks(root, l * 0.9, w * 0.26, 0.7, w * 0.4)
+	box(root, Vector3(w * 0.6, 0.55, l * 0.85), Vector3(0, 0.95, 0), CN_BODY)
+	box(root, Vector3(w * 0.62, 0.1, l * 0.3), Vector3(0, 1.25, l * 0.25), tc)
+	# outriggers
+	for sx in [-1.0, 1.0]:
+		box(root, Vector3(w * 0.5, 0.15, 0.3), Vector3(sx * w * 0.5, 0.5, -l * 0.3), METAL)
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.2, -0.4)
+	root.add_child(turret)
+	box(turret, Vector3(w * 0.55, 0.6, l * 0.35), Vector3(0, 0.3, 0), CN_DARK)
+	var tilt := Node3D.new()
+	tilt.position = Vector3(0, 0.6, 0)
+	tilt.rotation.x = -0.75
+	turret.add_child(tilt)
+	cyl(tilt, 0.16, 0.26, l * 1.1, Vector3(0, 0, l * 0.5), DARK, Vector3(PI * 0.5, 0, 0), 10)
+	cyl(tilt, 0.3, 0.3, 0.5, Vector3(0, 0, l * 1.0), METAL, Vector3(PI * 0.5, 0, 0), 10)
+	cyl(tilt, 0.32, 0.32, 0.5, Vector3(0, 0, l * 0.1), CN_RED, Vector3(PI * 0.5, 0, 0), 10)
+	var sym := Buildings.sphere(turret, 0.22, Vector3(0, 0.75, -0.3), Color(0.9, 0.95, 0.2))
+	sym.name = "RadSymbol"
+	root.set_meta("turret", turret)
+
+static func _helix(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.22
+	box(root, Vector3(w, 1.5, l * 0.7), Vector3(0, 1.6, 0), CN_BODY)
+	prism(root, Vector3(w, 1.2, l * 0.16), Vector3(0, 1.5, l * 0.43), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	box(root, Vector3(w * 0.9, 0.5, l * 0.14), Vector3(0, 2.1, l * 0.34), GLASS)
+	box(root, Vector3(w * 1.02, 0.25, l * 0.55), Vector3(0, 1.0, -0.05), tc)
+	box(root, Vector3(w * 0.4, 0.5, l * 0.3), Vector3(0, 1.6, -l * 0.5), CN_BODY)     # tail boom
+	box(root, Vector3(0.08, 0.9, l * 0.1), Vector3(0, 2.2, -l * 0.62), CN_RED)         # fin
+	box(root, Vector3(w * 1.4, 0.06, l * 0.08), Vector3(0, 1.9, -l * 0.6), CN_DARK)
+	for sx in [-1.0, 1.0]:
+		box(root, Vector3(0.06, 0.5, 0.06), Vector3(sx * w * 0.42, 0.6, l * 0.15), METAL)
+		box(root, Vector3(0.06, 0.5, 0.06), Vector3(sx * w * 0.42, 0.6, -l * 0.15), METAL)
+		box(root, Vector3(0.06, 0.06, l * 0.5), Vector3(sx * w * 0.42, 0.35, 0), METAL)   # skids
+	# coaxial rotors: two stacked rotor nodes on the same mast
+	cyl(root, 0.14, 0.14, 0.9, Vector3(0, 2.8, 0), METAL, Vector3.ZERO, 6)
+	_rotor(root, "RotorMain", Vector3(0, 2.75, 0), l * 0.45, 2)
+	_rotor(root, "RotorTop", Vector3(0, 3.15, 0), l * 0.45, 2)
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.0, l * 0.3)
+	root.add_child(turret)
+	cyl(turret, 0.2, 0.2, 0.25, Vector3.ZERO, METAL, Vector3.ZERO, 8)
+	for i in range(3):
+		var a := i * TAU / 3.0
+		box(turret, Vector3(0.07, 0.07, 0.9), Vector3(sin(a) * 0.09, -0.05 + cos(a) * 0.09, 0.45), DARK)
+	root.set_meta("turret", turret)
+	_star_decal(root, Vector3(0, 2.36, -0.05), 0.45)
+
+# ---------------------------------------------------------------------------
+# GLA vehicles
+# ---------------------------------------------------------------------------
+static func _pickup(root: Node3D, tc: Color, l: float, body: Color) -> void:
+	var w := l * 0.48
+	box(root, Vector3(w, 0.45, l * 0.95), Vector3(0, 0.75, 0), body.darkened(0.2))
+	box(root, Vector3(w * 0.96, 0.85, l * 0.3), Vector3(0, 1.35, l * 0.12), body)        # cab
+	box(root, Vector3(w * 0.9, 0.4, l * 0.28), Vector3(0, 1.55, l * 0.12), GLASS)
+	box(root, Vector3(w * 1.0, 0.08, l * 0.32), Vector3(0, 1.8, l * 0.12), tc)
+	box(root, Vector3(w * 0.95, 0.4, l * 0.22), Vector3(0, 1.0, l * 0.38), body.darkened(0.1))   # hood
+	box(root, Vector3(w * 1.0, 0.5, l * 0.4), Vector3(0, 1.05, -l * 0.28), body)          # open bed walls
+	box(root, Vector3(w * 0.8, 0.3, l * 0.34), Vector3(0, 1.15, -l * 0.28), Color(0.15, 0.13, 0.11))
+	for sz in [-1.0, 1.0]:
+		for sx in [-1.0, 1.0]:
+			wheel(root, 0.4, 0.28, Vector3(sx * w * 0.5, 0.4, sz * l * 0.3), "Wheel%s%s" % ["L" if sx < 0 else "R", "F" if sz > 0 else "B"])
+
+static func _technical(root: Node3D, tc: Color, l: float) -> void:
+	_pickup(root, tc, l, GLA_BODY)
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.4, -l * 0.24)
+	root.add_child(turret)
+	cyl(turret, 0.06, 0.06, 0.6, Vector3(0, 0.25, 0), METAL, Vector3.ZERO, 6)
+	box(turret, Vector3(0.25, 0.22, 0.4), Vector3(0, 0.6, 0), DARK)
+	box(turret, Vector3(0.08, 0.08, 1.0), Vector3(0, 0.62, 0.55), DARK)
+	box(turret, Vector3(0.3, 0.12, 0.1), Vector3(0, 0.55, -0.2), tc)
+	root.set_meta("turret", turret)
+	# a couple of jerry cans and a spare tyre
+	box(root, Vector3(0.3, 0.35, 0.2), Vector3(-l * 0.16, 1.4, -l * 0.42), Color(0.35, 0.4, 0.3))
+	cyl(root, 0.35, 0.35, 0.2, Vector3(l * 0.14, 1.45, -l * 0.42), RUBBER, Vector3(PI * 0.5, 0, 0), 10)
+
+static func _scorpion(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.6
+	tracks(root, l * 0.9, w * 0.26, 0.7, w * 0.4)
+	box(root, Vector3(w * 0.6, 0.5, l * 0.85), Vector3(0, 0.95, 0), GLA_BODY)
+	prism(root, Vector3(w * 0.6, 0.35, l * 0.28), Vector3(0, 1.38, l * 0.32), GLA_DARK, Vector3(-PI * 0.5, 0, 0))
+	# spikes / junk plating
+	for i in range(3):
+		box(root, Vector3(w * 0.66, 0.06, 0.3), Vector3(0, 1.22, -l * 0.3 + i * l * 0.22), GLA_RUST)
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.2, -0.15)
+	root.add_child(turret)
+	box(turret, Vector3(w * 0.42, 0.45, l * 0.34), Vector3(0, 0.22, 0), GLA_BODY)
+	box(turret, Vector3(w * 0.36, 0.08, l * 0.24), Vector3(0, 0.5, -0.05), tc)
+	cyl(turret, 0.08, 0.1, l * 0.62, Vector3(0, 0.25, l * 0.17 + l * 0.31), DARK, Vector3(PI * 0.5, 0, 0), 8)
+	var rocket := cyl(turret, 0.09, 0.09, 0.9, Vector3(w * 0.26, 0.42, 0.1), Color(0.85, 0.85, 0.8), Vector3(PI * 0.5, 0, 0), 6)
+	rocket.name = "Missile0"
+	root.set_meta("turret", turret)
+
+static func _quad_cannon(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.5
+	box(root, Vector3(w, 0.5, l * 0.95), Vector3(0, 0.75, 0), GLA_DARK)
+	box(root, Vector3(w * 0.95, 0.8, l * 0.24), Vector3(0, 1.3, l * 0.33), GLA_BODY)     # cab
+	box(root, Vector3(w * 0.9, 0.35, l * 0.22), Vector3(0, 1.5, l * 0.33), GLASS)
+	box(root, Vector3(w * 1.0, 0.3, l * 0.5), Vector3(0, 1.15, -l * 0.18), GLA_BODY)
+	for sz in [-1.0, 0.0, 1.0]:
+		for sx in [-1.0, 1.0]:
+			wheel(root, 0.4, 0.3, Vector3(sx * w * 0.5, 0.4, sz * l * 0.32), "Wheel%s%d" % ["L" if sx < 0 else "R", int(sz + 1)])
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.3, -l * 0.2)
+	root.add_child(turret)
+	cyl(turret, 0.5, 0.55, 0.3, Vector3(0, 0.15, 0), METAL, Vector3.ZERO, 10)
+	var tilt := Node3D.new()
+	tilt.position = Vector3(0, 0.55, 0)
+	tilt.rotation.x = -0.35
+	turret.add_child(tilt)
+	box(tilt, Vector3(0.9, 0.5, 0.6), Vector3(0, 0, 0), GLA_DARK)
+	for i in range(4):
+		cyl(tilt, 0.06, 0.06, l * 0.45, Vector3(-0.3 + (i % 2) * 0.6, -0.12 + (i / 2) * 0.24, l * 0.28), DARK, Vector3(PI * 0.5, 0, 0), 6)
+	box(tilt, Vector3(0.5, 0.15, 0.1), Vector3(0, 0.32, -0.2), tc)
+	root.set_meta("turret", turret)
+
+static func _rocket_buggy(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.5
+	box(root, Vector3(w * 0.8, 0.35, l * 0.8), Vector3(0, 0.7, 0), GLA_BODY)
+	box(root, Vector3(w * 0.6, 0.4, l * 0.3), Vector3(0, 1.05, l * 0.15), GLA_DARK)
+	box(root, Vector3(w * 0.55, 0.25, l * 0.1), Vector3(0, 1.25, l * 0.22), GLASS)
+	# roll cage
+	for sx in [-1.0, 1.0]:
+		box(root, Vector3(0.06, 0.9, 0.06), Vector3(sx * w * 0.3, 1.3, l * 0.05), METAL)
+	box(root, Vector3(w * 0.66, 0.06, 0.06), Vector3(0, 1.75, l * 0.05), METAL)
+	for sz in [-1.0, 1.0]:
+		for sx in [-1.0, 1.0]:
+			wheel(root, 0.45, 0.32, Vector3(sx * w * 0.55, 0.45, sz * l * 0.3), "Wheel%s%s" % ["L" if sx < 0 else "R", "F" if sz > 0 else "B"])
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.0, -l * 0.25)
+	root.add_child(turret)
+	var tilt := Node3D.new()
+	tilt.position = Vector3(0, 0.35, 0)
+	tilt.rotation.x = -0.55
+	turret.add_child(tilt)
+	box(tilt, Vector3(w * 0.7, 0.55, l * 0.4), Vector3(0, 0, 0), Color(0.22, 0.23, 0.26))
+	for i in range(6):
+		var m := cyl(tilt, 0.07, 0.07, l * 0.36, Vector3(-0.28 + (i % 3) * 0.28, -0.15 + (i / 3) * 0.3, l * 0.05), Color(0.85, 0.85, 0.8), Vector3(PI * 0.5, 0, 0), 6)
+		m.name = "Missile%d" % i
+	box(tilt, Vector3(w * 0.5, 0.1, 0.1), Vector3(0, 0.33, -0.15), tc)
+	root.set_meta("turret", turret)
+
+static func _toxin_tractor(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.5
+	box(root, Vector3(w * 0.7, 0.6, l * 0.8), Vector3(0, 0.9, 0), GLA_BODY)
+	box(root, Vector3(w * 0.6, 0.7, l * 0.25), Vector3(0, 1.5, l * 0.05), GLA_DARK)     # cab
+	box(root, Vector3(w * 0.55, 0.3, l * 0.22), Vector3(0, 1.65, l * 0.06), GLASS)
+	box(root, Vector3(w * 0.62, 0.08, l * 0.28), Vector3(0, 1.88, l * 0.05), tc)
+	# toxin tank on the back
+	var tank := cyl(root, 0.55, 0.55, l * 0.35, Vector3(0, 1.45, -l * 0.28), Color(0.35, 0.6, 0.25), Vector3(PI * 0.5, 0, 0), 12)
+	tank.name = "ToxinTank"
+	cyl(root, 0.08, 0.08, 0.5, Vector3(0, 2.1, -l * 0.28), METAL, Vector3.ZERO, 6)
+	# big rear wheels, small front
+	for sx in [-1.0, 1.0]:
+		wheel(root, 0.7, 0.4, Vector3(sx * w * 0.5, 0.7, -l * 0.22), "Wheel%sB" % ("L" if sx < 0 else "R"))
+		wheel(root, 0.35, 0.25, Vector3(sx * w * 0.45, 0.35, l * 0.33), "Wheel%sF" % ("L" if sx < 0 else "R"))
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.2, l * 0.35)
+	root.add_child(turret)
+	cyl(turret, 0.1, 0.1, l * 0.3, Vector3(0, 0, l * 0.12), METAL, Vector3(PI * 0.5, 0, 0), 8)
+	var nozzle := cyl(turret, 0.2, 0.1, 0.3, Vector3(0, 0, l * 0.29), Color(0.5, 0.9, 0.3), Vector3(PI * 0.5, 0, 0), 8)
+	nozzle.name = "Nozzle"
+	root.set_meta("turret", turret)
+
+static func _marauder(root: Node3D, tc: Color, l: float) -> void:
+	_tank(root, tc, l, true, GLA_BODY, GLA_DARK)
+	var w := l * 0.62
+	# welded-on junk: plates and spikes
+	for i in range(4):
+		box(root, Vector3(0.3, 0.5, 0.25), Vector3((-0.75 + (i % 2) * 1.5) * w * 0.3, 1.5, -l * 0.3 + (i / 2) * l * 0.5), GLA_RUST)
+	var t := root.get_meta("turret") as Node3D
+	box(t, Vector3(w * 0.66, 0.1, 0.2), Vector3(0, 0.5, -l * 0.18), GLA_RUST)
+	for i in range(3):
+		var spike := cyl(t, 0.0, 0.06, 0.4, Vector3(-0.3 + i * 0.3, 0.75, -0.25), METAL, Vector3.ZERO, 5)
+		spike.rotation.x = -0.4
+
+static func _scud_launcher(root: Node3D, tc: Color, l: float) -> void:
+	var w := l * 0.5
+	box(root, Vector3(w, 0.5, l * 0.95), Vector3(0, 0.75, 0), GLA_DARK)
+	box(root, Vector3(w * 0.95, 0.8, l * 0.22), Vector3(0, 1.3, l * 0.34), GLA_BODY)     # cab
+	box(root, Vector3(w * 0.9, 0.35, l * 0.2), Vector3(0, 1.5, l * 0.34), GLASS)
+	box(root, Vector3(w * 1.0, 0.1, l * 0.24), Vector3(0, 1.75, l * 0.34), tc)
+	for sz in [-1.0, -0.33, 0.33, 1.0]:
+		for sx in [-1.0, 1.0]:
+			wheel(root, 0.42, 0.3, Vector3(sx * w * 0.5, 0.42, sz * l * 0.34), "Wheel%s%d" % ["L" if sx < 0 else "R", int(sz * 1.5 + 1.5)])
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.0, -l * 0.3)
+	root.add_child(turret)
+	var tilt := Node3D.new()
+	tilt.position = Vector3(0, 0.2, 0)
+	tilt.rotation.x = -1.0
+	turret.add_child(tilt)
+	box(tilt, Vector3(w * 0.5, 0.4, l * 0.7), Vector3(0, 0, l * 0.25), METAL)
+	var m := cyl(tilt, 0.3, 0.3, l * 0.75, Vector3(0, 0.45, l * 0.25), Color(0.55, 0.5, 0.4), Vector3(PI * 0.5, 0, 0), 10)
+	m.name = "Missile0"
+	cyl(tilt, 0.0, 0.3, 0.8, Vector3(0, 0.45, l * 0.65), Color(0.3, 0.6, 0.2), Vector3(PI * 0.5, 0, 0), 10)
+	root.set_meta("turret", turret)
+
+static func _bomb_truck(root: Node3D, tc: Color, l: float) -> void:
+	_pickup(root, tc, l, Color(0.55, 0.5, 0.42))
+	# barrels in the bed under a tarp
+	for i in range(3):
+		cyl(root, 0.28, 0.28, 0.6, Vector3(-0.5 + i * 0.5, 1.45, -l * 0.28), Color(0.7, 0.2, 0.15), Vector3.ZERO, 8)
+	box(root, Vector3(l * 0.46, 0.06, l * 0.36), Vector3(0, 1.8, -l * 0.28), Color(0.35, 0.45, 0.3))
+	var lamp := Buildings.sphere(root, 0.1, Vector3(0, 1.9, -l * 0.44), Color(1.0, 0.2, 0.1))
+	lamp.name = "LightBeacon"
 
 # ---------------------------------------------------------------------------
 # Aircraft
@@ -292,6 +687,9 @@ static func _jet(root: Node3D, tc: Color, l: float, kind: String) -> void:
 		box(root, Vector3(w * 0.4, w * 0.55, l * 0.22), Vector3(sx * w * 0.65, y - w * 0.1, l * 0.08), body2)   # intakes
 		box(root, Vector3(w * 0.3, w * 0.35, 0.08), Vector3(sx * w * 0.65, y - w * 0.1, l * 0.19), DARK)
 	var span := l * 0.78 if kind != "aurora" else l * 0.62
+	if kind == "mig":
+		body = CN_BODY.lightened(0.15)
+		body2 = CN_DARK
 	var eng_pos: Array = []
 	match kind:
 		"raptor":
@@ -315,6 +713,17 @@ static func _jet(root: Node3D, tc: Color, l: float, kind: String) -> void:
 				fin.rotation.z = -sx * 0.7
 				box(root, Vector3(span * 0.25, 0.05, l * 0.04), Vector3(sx * span * 0.32, y - w * 0.11, -l * 0.26), tc)
 			eng_pos.append(Vector3(0, y, -l * 0.3))
+		"mig":
+			# swept delta wings with red tips, twin canted fins, two engines, nose intake
+			box(root, Vector3(span, 0.09, l * 0.26), Vector3(0, y - w * 0.15, -l * 0.08), body)
+			box(root, Vector3(span * 0.5, 0.1, l * 0.18), Vector3(0, y - w * 0.15, l * 0.1), body)
+			for sx in [-1.0, 1.0]:
+				box(root, Vector3(span * 0.16, 0.06, l * 0.12), Vector3(sx * span * 0.42, y - w * 0.13, -l * 0.1), CN_RED)
+				var fin := box(root, Vector3(0.07, l * 0.12, l * 0.14), Vector3(sx * w * 0.45, y + l * 0.07, -l * 0.27), body2)
+				fin.rotation.z = -sx * 0.25
+				box(root, Vector3(0.09, l * 0.05, l * 0.06), Vector3(sx * w * 0.45, y + l * 0.1, -l * 0.3), tc).rotation.z = -sx * 0.25
+				eng_pos.append(Vector3(sx * w * 0.3, y - w * 0.05, -l * 0.32))
+			_star_decal(root, Vector3(0, y + w * 0.62, -l * 0.16), 0.35)
 		"aurora":
 			# sleek dart: slim swept wing far back, single fin, one big engine
 			box(root, Vector3(span, 0.07, l * 0.18), Vector3(0, y - w * 0.15, -l * 0.2), body)
@@ -336,12 +745,12 @@ static func _jet(root: Node3D, tc: Color, l: float, kind: String) -> void:
 		fm.emission_energy_multiplier = 2.5
 		flame.visible = false
 	# missiles under the wings: "Missile0..n" (Puppet hides them as ammo is spent)
-	var nmis := 4 if kind == "raptor" else (2 if kind == "stealth" else 1)
+	var nmis := 4 if kind == "raptor" else (2 if kind == "stealth" or kind == "mig" else 1)
 	for i in range(nmis):
 		var sx := -1.0 if i % 2 == 0 else 1.0
 		var off := (1 + i / 2) * span * 0.18
 		var mp := Vector3(sx * off, y - w * 0.45, -l * 0.02) if kind != "aurora" else Vector3(0, y - w * 0.6, 0)
-		var m := cyl(root, 0.1, 0.1, l * 0.16 if kind != "aurora" else l * 0.22, mp, Color(0.85, 0.85, 0.8), Vector3(PI * 0.5, 0, 0), 6)
+		var m := cyl(root, 0.1, 0.1, l * 0.16 if kind != "aurora" else l * 0.22, mp, Color(0.85, 0.85, 0.8) if kind != "mig" else Color(0.9, 0.5, 0.2), Vector3(PI * 0.5, 0, 0), 6)
 		m.name = "Missile%d" % i
 		if kind == "aurora":
 			m.scale = Vector3(2.2, 1.0, 2.2)
@@ -401,16 +810,39 @@ static func supply_crate() -> Node3D:
 # ---------------------------------------------------------------------------
 static func _soldier(root: Node3D, tc: Color, type: String) -> void:
 	var uni := UNIFORM
+	var fac := Data.faction_of(type)
+	if fac == "china":
+		uni = CN_UNIFORM
+	elif fac == "gla":
+		uni = GLA_UNIFORM
 	if type == "pathfinder":
 		uni = Color(0.3, 0.34, 0.24)
-	elif type == "burton":
+	elif type == "burton" or type == "black_lotus" or type == "jarmen_kell":
 		uni = Color(0.15, 0.15, 0.17)
+	elif type == "hacker":
+		uni = Color(0.25, 0.28, 0.35)
+	elif type == "worker":
+		uni = Color(0.55, 0.5, 0.42)
 	var s := 1.0
 	box(root, Vector3(0.5 * s, 0.6 * s, 0.3 * s), Vector3(0, 1.15 * s, 0), uni)          # torso
 	box(root, Vector3(0.54 * s, 0.34 * s, 0.34 * s), Vector3(0, 1.28 * s, 0), tc)         # team-colour vest so they read at a glance
 	box(root, Vector3(0.52 * s, 0.12 * s, 0.32 * s), Vector3(0, 0.98 * s, 0), DARK)      # belt
 	Buildings.sphere(root, 0.17 * s, Vector3(0, 1.62 * s, 0), SKIN)                       # head
-	box(root, Vector3(0.42 * s, 0.16 * s, 0.42 * s), Vector3(0, 1.75 * s, 0), tc.darkened(0.25))   # helmet in team colour
+	match fac:
+		"china":
+			# peaked cap with a red band
+			box(root, Vector3(0.4 * s, 0.14 * s, 0.4 * s), Vector3(0, 1.76 * s, 0), tc.darkened(0.25))
+			box(root, Vector3(0.42 * s, 0.05 * s, 0.42 * s), Vector3(0, 1.7 * s, 0), CN_RED)
+			box(root, Vector3(0.3 * s, 0.03 * s, 0.2 * s), Vector3(0, 1.7 * s, 0.25 * s), DARK)
+		"gla":
+			# head-wrap / shemagh
+			box(root, Vector3(0.42 * s, 0.2 * s, 0.42 * s), Vector3(0, 1.7 * s, 0), Color(0.9, 0.85, 0.7) if type != "jarmen_kell" else Color(0.2, 0.2, 0.22))
+			box(root, Vector3(0.44 * s, 0.05 * s, 0.44 * s), Vector3(0, 1.62 * s, 0), tc.darkened(0.2))
+			if type == "terrorist":
+				for sx in [-1.0, 1.0]:
+					box(root, Vector3(0.1 * s, 0.35 * s, 0.1 * s), Vector3(sx * 0.15 * s, 1.25 * s, 0.2 * s), Color(0.8, 0.2, 0.1))
+		_:
+			box(root, Vector3(0.42 * s, 0.16 * s, 0.42 * s), Vector3(0, 1.75 * s, 0), tc.darkened(0.25))   # helmet in team colour
 	for sx in [-1.0, 1.0]:
 		var leg := Node3D.new()
 		leg.name = "LegL" if sx < 0 else "LegR"
@@ -430,10 +862,23 @@ static func _soldier(root: Node3D, tc: Color, type: String) -> void:
 	gun.position = Vector3(0.15 * s, 1.2 * s, 0.3 * s)
 	root.add_child(gun)
 	match type:
-		"missile_defender":
+		"missile_defender", "tank_hunter", "rpg_trooper":
 			cyl(gun, 0.09, 0.09, 1.0, Vector3(0.1, 0.35, -0.2), DARK, Vector3(PI * 0.5, 0, 0), 8)   # launcher tube on the shoulder
-		"pathfinder", "burton":
+		"pathfinder", "burton", "jarmen_kell":
 			box(gun, Vector3(0.06, 0.08, 1.0), Vector3(0, 0, 0.2), DARK)
 			cyl(gun, 0.03, 0.03, 0.2, Vector3(0, 0.06, 0.1), METAL, Vector3(PI * 0.5, 0, 0), 6)
+		"hacker":
+			# laptop held open in front
+			box(gun, Vector3(0.45, 0.03, 0.3), Vector3(-0.15, -0.05, 0), Color(0.2, 0.2, 0.22))
+			var screen := box(gun, Vector3(0.45, 0.3, 0.03), Vector3(-0.15, 0.1, 0.15), Color(0.3, 0.8, 1.0))
+			screen.name = "Screen"
+		"black_lotus":
+			box(gun, Vector3(0.3, 0.03, 0.2), Vector3(-0.15, -0.05, 0), Color(0.2, 0.2, 0.22))
+		"worker":
+			# shovel over the shoulder
+			cyl(gun, 0.03, 0.03, 1.1, Vector3(0.1, 0.4, -0.3), Color(0.5, 0.35, 0.2), Vector3(0.6, 0, 0), 6)
+			box(gun, Vector3(0.22, 0.28, 0.03), Vector3(0.1, 0.95, -0.7), METAL)
+		"terrorist":
+			box(gun, Vector3(0.12, 0.12, 0.12), Vector3(0, 0, 0), Color(0.8, 0.2, 0.1))   # the trigger
 		_:
 			box(gun, Vector3(0.06, 0.1, 0.6), Vector3(0, 0, 0.1), DARK)

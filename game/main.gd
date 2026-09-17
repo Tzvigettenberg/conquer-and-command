@@ -288,7 +288,7 @@ func _host() -> void:
 		lobby_opts["map"] = MapGen.map_id(str(args["map"]))
 	lobby_opts["observers"] = []
 	_ensure_slots()
-	lobby_opts["slots"][0] = {"kind": "human", "peer": 1, "name": my_name, "level": "", "team": 0}
+	lobby_opts["slots"][0] = {"kind": "human", "peer": 1, "name": my_name, "level": "", "team": 0, "faction": str(args.get("faction", "random"))}
 	if args.has("observe"):
 		_set_observer(1, true)
 	_apply_opts_ui()
@@ -371,7 +371,26 @@ func _ensure_slots() -> void:
 	lobby_opts["slots"] = slots
 
 func _empty_slot() -> Dictionary:
-	return {"kind": "open", "peer": 0, "name": "", "level": "medium", "team": -1}
+	return {"kind": "open", "peer": 0, "name": "", "level": "medium", "team": -1, "faction": "random"}
+
+func _faction_picker(slot: int, is_host: bool) -> OptionButton:
+	var ob := OptionButton.new()
+	var opts := [["random", "Random"]]
+	for f in Data.FACTION_ORDER:
+		opts.append([f, Data.FACTIONS[f]["name"]])
+	var slots: Array = lobby_opts["slots"]
+	var cur := str(slots[slot].get("faction", "random"))
+	for i in range(opts.size()):
+		ob.add_item(opts[i][1])
+		ob.set_item_metadata(i, opts[i][0])
+		if opts[i][0] == cur:
+			ob.select(i)
+	ob.tooltip_text = "USA: air power and lasers.  China: hordes, flame, the Overlord, the Nuke.  GLA: no power needed, tunnels, toxins, suicide bombers, SCUDs."
+	var mine: bool = slots[slot]["kind"] == "human" and int(slots[slot]["peer"]) == multiplayer.get_unique_id()
+	ob.mouse_filter = Control.MOUSE_FILTER_STOP if (is_host or mine) else Control.MOUSE_FILTER_IGNORE
+	ob.item_selected.connect(func(i: int) -> void:
+		_lobby_cmd({"t": "faction", "slot": slot, "faction": opts[i][0]}))
+	return ob
 
 func _find_slot(peer: int) -> int:
 	var slots: Array = lobby_opts.get("slots", [])
@@ -416,7 +435,7 @@ func _seat(peer: int, k: int) -> void:
 		if int(obs[i]["peer"]) == peer:
 			var nm: String = str(obs[i]["name"])
 			obs.remove_at(i)
-			lobby_opts["slots"][k] = {"kind": "human", "peer": peer, "name": nm, "level": "", "team": lobby_opts["slots"][k]["team"]}
+			lobby_opts["slots"][k] = {"kind": "human", "peer": peer, "name": nm, "level": "", "team": lobby_opts["slots"][k]["team"], "faction": str(lobby_opts["slots"][k].get("faction", "random"))}
 			return
 
 func _first_open() -> int:
@@ -501,15 +520,22 @@ func on_lobby_cmd(peer: int, c: Dictionary) -> void:
 				if int(slots[slot]["peer"]) == 1:
 					return
 				_kick(int(slots[slot]["peer"]), "The host closed your slot")
+			var fac := str(slots[slot].get("faction", "random"))
 			if k in ["easy", "medium", "hard"]:
-				slots[slot] = {"kind": "ai", "peer": -1, "name": "", "level": k, "team": slots[slot]["team"]}
+				slots[slot] = {"kind": "ai", "peer": -1, "name": "", "level": k, "team": slots[slot]["team"], "faction": fac}
 			else:
-				slots[slot] = {"kind": k, "peer": 0, "name": "", "level": "medium", "team": slots[slot]["team"]}
+				slots[slot] = {"kind": k, "peer": 0, "name": "", "level": "medium", "team": slots[slot]["team"], "faction": fac}
 		"team":
 			var owner_peer := int(slots[slot]["peer"]) if slots[slot]["kind"] == "human" else 1
 			if peer != 1 and peer != owner_peer:
 				return
 			slots[slot]["team"] = clampi(int(c["team"]), 0, MAX_PLAYERS - 1)
+		"faction":
+			var owner_peer := int(slots[slot]["peer"]) if slots[slot]["kind"] == "human" else 1
+			if peer != 1 and peer != owner_peer:
+				return
+			var f := str(c.get("faction", "random"))
+			slots[slot]["faction"] = f if (f == "random" or Data.FACTIONS.has(f)) else "random"
 		"move":
 			var from := _find_slot(peer)
 			if slots[slot]["kind"] != "open":
@@ -561,6 +587,7 @@ func _refresh_lobby() -> void:
 			l.text = "  %s%s" % [sl["name"], "  (host)" if int(sl["peer"]) == 1 else ""]
 			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			h.add_child(l)
+			h.add_child(_faction_picker(i, is_host))
 			h.add_child(_team_picker(i, is_host))
 			if is_host or int(sl["peer"]) == multiplayer.get_unique_id():
 				var ob := Button.new()
@@ -585,6 +612,7 @@ func _refresh_lobby() -> void:
 				l.modulate = Color(0.75, 0.75, 0.75) if sl["kind"] == "ai" else Color(0.5, 0.5, 0.5)
 				h.add_child(l)
 			if sl["kind"] == "ai":
+				h.add_child(_faction_picker(i, is_host))
 				h.add_child(_team_picker(i, is_host))
 		lobby_rows.add_child(h)
 	var observers: Array = lobby_opts.get("observers", [])
@@ -745,7 +773,7 @@ func on_client_hello(peer: int, pname: String, version: String) -> void:
 		lobby_opts["observers"].append({"peer": peer, "name": pname})
 		_set_status("%s joined as an observer (no open slot)." % pname)
 	else:
-		lobby_opts["slots"][open] = {"kind": "human", "peer": peer, "name": pname, "level": "", "team": lobby_opts["slots"][open]["team"]}
+		lobby_opts["slots"][open] = {"kind": "human", "peer": peer, "name": pname, "level": "", "team": lobby_opts["slots"][open]["team"], "faction": "random"}
 		_set_status("%s joined." % pname)
 	_refresh_lobby()
 
@@ -798,15 +826,19 @@ func _start_game() -> void:
 	if args.has("ai"):
 		ai_n = int(args["ai"])
 	var level := str(args.get("ai_level", "medium"))
+	var ai_facs: Array = str(args.get("ai_faction", "random")).split(",")
+	var ai_i := 0
 	for i in range(slots.size()):
 		if ai_n > 0 and slots[i]["kind"] == "open":
-			slots[i] = {"kind": "ai", "peer": -1, "name": "", "level": level, "team": slots[i]["team"]}
+			slots[i] = {"kind": "ai", "peer": -1, "name": "", "level": level, "team": slots[i]["team"], "faction": str(ai_facs[mini(ai_i, ai_facs.size() - 1)])}
+			ai_i += 1
 			ai_n -= 1
 	var peers := []
 	var names := []
 	var teams := []
 	var levels := []
 	var starts := []
+	var factions := []
 	var ai_k := 0
 	for i in range(slots.size()):
 		var sl: Dictionary = slots[i]
@@ -822,6 +854,7 @@ func _start_game() -> void:
 		teams.append(int(sl["team"]))
 		levels.append(str(sl["level"]) if sl["kind"] == "ai" else "")
 		starts.append(i)
+		factions.append(str(sl.get("faction", "random")))
 	if args.has("teams"):
 		teams = []
 		for t in str(args["teams"]).split(","):
@@ -835,7 +868,7 @@ func _start_game() -> void:
 	var w := World.new()
 	w.debug = args.has("debug") or args.has("simdebug")
 	session.world = w
-	w.start(session, peers, names, {"map": lobby_opts["map"], "cash": lobby_opts["cash"], "superweapons": lobby_opts["superweapons"], "teams": teams, "levels": levels, "slots": starts, "observers": observers})
+	w.start(session, peers, names, {"map": lobby_opts["map"], "cash": lobby_opts["cash"], "superweapons": lobby_opts["superweapons"], "teams": teams, "levels": levels, "slots": starts, "observers": observers, "factions": factions, "cheats": args.has("test")})
 	if args.has("simtest"):
 		if str(args["simtest"]) == "load":
 			w.probe_load()

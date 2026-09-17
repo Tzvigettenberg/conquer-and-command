@@ -171,18 +171,18 @@ func _build_visual(mine: bool) -> void:
 
 func _setup_loop() -> void:
 	var name := ""
-	match type:
-		"crusader", "paladin", "tomahawk", "avenger":
+	match str(def.get("snd", type)):
+		"crusader", "paladin", "tomahawk", "avenger", "tank":
 			name = "tank_engine"
-		"dozer":
+		"dozer", "truck":
 			name = "truck_engine"
 		"humvee", "ambulance":
 			name = "humvee_engine"
-		"comanche":
+		"comanche", "heli":
 			name = "helicopter_loop"
 		"chinook":
 			name = "chinook_loop"
-		"raptor", "stealth_fighter", "aurora":
+		"raptor", "stealth_fighter", "aurora", "jet":
 			name = "jet_loop"
 	if cat == "inf":
 		name = "footsteps"
@@ -492,6 +492,10 @@ func _idle_anims(now: float, dt: float) -> void:
 		match a["kind"]:
 			"spin":
 				n.rotate_y(dt * sp)
+			"spinz":
+				# gattling barrels: spin only while firing
+				if (flags & 2) != 0:
+					n.rotate_z(dt * sp)
 			"sweep":
 				if n == turret:
 					# defensive turret: follow the sim aim while engaged, sweep lazily when idle

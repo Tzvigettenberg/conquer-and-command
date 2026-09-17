@@ -6,6 +6,17 @@ extends RefCounted
 ## sweep, gun traverse, pump-jack nod, steam).
 
 const CONCRETE := Color(0.58, 0.57, 0.53)
+# China: grey concrete, red trim, pagoda roofs
+const CN_WALL := Color(0.52, 0.53, 0.5)
+const CN_WALL_DARK := Color(0.38, 0.39, 0.37)
+const CN_RED := Color(0.55, 0.15, 0.12)
+# GLA: adobe, rust, tarps
+const GLA_WALL := Color(0.72, 0.62, 0.44)
+const GLA_WALL_DARK := Color(0.56, 0.47, 0.33)
+const GLA_ROOF := Color(0.45, 0.36, 0.25)
+const GLA_TARP := Color(0.35, 0.45, 0.3)
+const GLA_PALACE := Color(0.8, 0.72, 0.55)
+const GLA_UNIFORM := Color(0.5, 0.42, 0.3)
 const CONCRETE_DARK := Color(0.42, 0.41, 0.39)
 const METAL := Color(0.36, 0.38, 0.42)
 const METAL_DARK := Color(0.22, 0.23, 0.26)
@@ -152,70 +163,11 @@ static func make(type: String, team: int) -> Node3D:
 			arm.position = Vector3(-1.5, 0, 0)
 			anim(root, crane, "sweep", 0.3)
 		"war_factory":
-			# large hangar with a wide door, roof vents, side crane rail
-			box(root, Vector3(11.5, 5.0, 11.5), Vector3(0, 2.5, 0), CONCRETE)
-			prism(root, Vector3(11.7, 2.0, 11.8), Vector3(0, 6.0, 0), ROOF)
-			band(root, 11.5, 11.5, 4.8, team, 0.4)
-			var door := box(root, Vector3(6.0, 3.6, 0.3), Vector3(0, 1.8, 5.75), METAL_DARK)
-			door.name = "Door"
-			box(root, Vector3(6.2, 0.4, 0.4), Vector3(0, 3.8, 5.8), WARN)
-			for i in range(2):
-				var lamp := sphere(root, 0.22, Vector3(-3.6 + i * 7.2, 4.4, 5.9), Color(1.0, 0.55, 0.1))
-				lamp.name = "Light%d" % i
-				lamp.visible = false
-			for i in range(3):
-				box(root, Vector3(1.2, 0.8, 1.2), Vector3(-3.5 + i * 3.5, 7.2, -2.0), METAL)
-			for i in range(2):
-				box(root, Vector3(0.8, 0.8, 0.1), Vector3(-4.0 + i * 8.0, 3.5, 5.8), GLASS)
-			var fan := cyl(root, 0.9, 0.9, 0.2, Vector3(3.5, 7.15, 2.5), METAL_DARK, 8)
-			anim(root, fan, "spin", 4.0)
+			_war_factory(root, team, tc, CONCRETE, METAL_DARK)
 		"airfield":
-			# apron, runway along the front (local +z row), four hangars along the back, tower + helipad at the right
-			box(root, Vector3(21.5, 0.12, 15.5), Vector3(0, 0.06, 0), CONCRETE_DARK)
-			box(root, Vector3(21.0, 0.05, 4.6), Vector3(0, 0.15, 4.5), Color(0.25, 0.25, 0.27))     # runway
-			for i in range(8):
-				box(root, Vector3(1.4, 0.03, 0.25), Vector3(-9.0 + i * 2.6, 0.2, 4.5), Color(0.9, 0.9, 0.85))
-			for i in range(2):
-				box(root, Vector3(21.0, 0.03, 0.2), Vector3(0, 0.2, 4.5 + (i * 2 - 1) * 2.2), WARN)
-			for i in range(9):
-				var rl := sphere(root, 0.12, Vector3(-10.0 + i * 2.5, 0.3, 6.8), Color(1.0, 0.95, 0.6))
-				anim(root, rl, "blink", 0.6 + i * 0.1)
-			# taxiway from the hangars to the runway start
-			box(root, Vector3(0.25, 0.03, 8.0), Vector3(-9.5, 0.2, 0.0), WARN)
-			box(root, Vector3(18.0, 0.03, 0.25), Vector3(-1.0, 0.2, -1.5), WARN)
-			for i in range(4):
-				var hx := -8.0 + i * 5.3
-				# hangar: two walls, roof, dark interior, open front toward +z
-				box(root, Vector3(4.6, 0.04, 4.8), Vector3(hx, 0.19, -4.5), Color(0.3, 0.3, 0.32))
-				box(root, Vector3(0.3, 3.2, 4.8), Vector3(hx - 2.2, 1.6, -4.7), CONCRETE)
-				box(root, Vector3(0.3, 3.2, 4.8), Vector3(hx + 2.2, 1.6, -4.7), CONCRETE)
-				box(root, Vector3(4.6, 0.3, 4.8), Vector3(hx, 3.3, -4.7), ROOF)
-				box(root, Vector3(4.6, 3.2, 0.25), Vector3(hx, 1.6, -7.0), CONCRETE_DARK)
-				prism(root, Vector3(4.9, 1.0, 4.9), Vector3(hx, 3.9, -4.7), ROOF)
-				box(root, Vector3(4.6, 0.5, 0.1), Vector3(hx, 3.1, -2.3), tc)      # team-colour lintel
-				var light := sphere(root, 0.16, Vector3(hx, 3.0, -2.2), Color(1.0, 0.95, 0.6))
-				anim(root, light, "blink", 0.8 + i * 0.2)
-			# helipad
-			box(root, Vector3(5.0, 0.04, 5.0), Vector3(8.5, 0.19, 4.5), Color(0.3, 0.3, 0.32))
-			box(root, Vector3(3.0, 0.03, 0.5), Vector3(8.5, 0.22, 4.5), WARN)
-			box(root, Vector3(0.5, 0.03, 2.4), Vector3(7.4, 0.22, 4.5), WARN)
-			box(root, Vector3(0.5, 0.03, 2.4), Vector3(9.6, 0.22, 4.5), WARN)
-			# tower
-			box(root, Vector3(2.4, 2.4, 2.4), Vector3(8.6, 1.2, 0.4), CONCRETE)
-			cyl(root, 0.6, 0.7, 4.0, Vector3(8.6, 4.4, 0.4), CONCRETE_DARK, 8)
-			box(root, Vector3(2.4, 1.4, 2.4), Vector3(8.6, 7.1, 0.4), GLASS)
-			box(root, Vector3(2.8, 0.3, 2.8), Vector3(8.6, 7.9, 0.4), ROOF)
-			var radar := Node3D.new()
-			radar.position = Vector3(8.6, 8.3, 0.4)
-			root.add_child(radar)
-			box(radar, Vector3(1.6, 0.5, 0.1), Vector3(0, 0.25, 0), METAL)
-			anim(root, radar, "spin", 2.5)
-			band(root, 2.4, 2.4, 2.3, team, 0.25)
-			# windsock
-			box(root, Vector3(0.08, 3.0, 0.08), Vector3(-10.2, 1.5, -7.2), METAL)
-			var sock := cyl(root, 0.15, 0.3, 1.0, Vector3(-9.7, 2.9, -7.2), Color(1.0, 0.5, 0.1), 6)
-			sock.rotation.z = -PI * 0.5
-			anim(root, sock, "nod", 1.5)
+			_airfield(root, team, tc, WARN)
+		"china_airfield":
+			_airfield(root, team, tc, Color(0.85, 0.2, 0.15))
 		"strategy_center":
 			# bunker with antenna farm and a rotating command dish
 			box(root, Vector3(11.5, 2.2, 9.5), Vector3(0, 1.1, 0), CONCRETE_DARK)
@@ -339,6 +291,338 @@ static func make(type: String, team: int) -> Node3D:
 			anim(root, dish, "spin", 0.3)
 			for i in range(4):
 				box(root, Vector3(1.0, 1.4, 1.0), Vector3(3.0 + (i % 2) * 2.5, 2.3, -2.5 + (i / 2) * 5.0), METAL_DARK)
+		# ================= China =================
+		"china_cc":
+			# wide block with a red pagoda roof, comms mast with radar, red star banner
+			box(root, Vector3(11.5, 3.0, 13.0), Vector3(0, 1.5, 0), CN_WALL)
+			box(root, Vector3(8.5, 2.6, 8.5), Vector3(-1.0, 4.3, 1.5), CN_WALL_DARK)
+			band(root, 11.5, 13.0, 3.1, team, 0.4)
+			_pagoda(root, Vector3(-1.0, 5.6, 1.5), 9.5, 9.5, CN_RED)
+			box(root, Vector3(3.0, 1.2, 6.0), Vector3(3.5, 3.6, -3.5), GLASS)
+			cyl(root, 0.3, 0.45, 8.0, Vector3(4.2, 7.0, 4.5), METAL, 8)
+			var dish := Node3D.new()
+			dish.position = Vector3(4.2, 11.2, 4.5)
+			root.add_child(dish)
+			cyl(dish, 1.5, 0.2, 0.5, Vector3.ZERO, METAL, 16).rotation.x = 0.9
+			anim(root, dish, "spin", 1.0)
+			_star(root, Vector3(-1.0, 8.9, 1.5), 1.2)
+			for i in range(3):
+				box(root, Vector3(0.6, 2.2, 0.6), Vector3(-4.5 + i * 1.6, 1.1, 6.0), METAL_DARK)
+			box(root, Vector3(0.12, 3.0, 0.12), Vector3(-4.8, 7.5, -5.5), METAL_DARK)
+			box(root, Vector3(1.6, 1.0, 0.06), Vector3(-4.0, 8.3, -5.5), tc)
+		"china_reactor":
+			# squat reactor hall, cooling tower with steam, red warning band, glowing core
+			box(root, Vector3(5.5, 3.0, 5.0), Vector3(-1.0, 1.5, 1.2), CN_WALL)
+			band(root, 5.5, 5.0, 3.0, team, 0.3)
+			cyl(root, 1.9, 2.6, 6.5, Vector3(1.8, 3.25, -1.6), CONCRETE, 16)
+			cyl(root, 1.5, 1.9, 0.6, Vector3(1.8, 6.6, -1.6), CN_RED, 16)
+			root.add_child(_steam(Vector3(1.8, 6.8, -1.6)))
+			sphere(root, 1.6, Vector3(-1.0, 3.6, 1.2), CN_WALL_DARK)
+			var core := sphere(root, 0.6, Vector3(-1.0, 4.9, 1.2), Color(0.5, 1.0, 0.4))
+			anim(root, core, "pulse", 2.5)
+			_star(root, Vector3(-1.0, 2.2, 3.71), 0.7)
+			for i in range(3):
+				cyl(root, 0.12, 0.12, 1.0, Vector3(-3.0 + i * 0.6, 1.5, -2.0), WARN, 6)
+		"china_barracks":
+			# long hall with a red tiled roof, drill yard with sandbags, flag
+			box(root, Vector3(9.5, 2.4, 6.0), Vector3(0, 1.2, -1.2), CN_WALL)
+			_pagoda(root, Vector3(0, 2.4, -1.2), 10.0, 6.4, CN_RED)
+			band(root, 9.5, 6.0, 2.3, team, 0.3)
+			box(root, Vector3(3.5, 1.8, 2.5), Vector3(-2.5, 0.9, 3.0), CN_WALL_DARK)
+			box(root, Vector3(3.6, 0.3, 2.7), Vector3(-2.5, 1.9, 3.0), CN_RED)
+			for i in range(4):
+				box(root, Vector3(0.8, 0.5, 0.6), Vector3(1.0 + i * 0.9, 0.25, 3.8), Color(0.55, 0.5, 0.35))
+			box(root, Vector3(0.1, 4.0, 0.1), Vector3(4.2, 2.0, 3.8), METAL_DARK)
+			box(root, Vector3(1.4, 0.9, 0.05), Vector3(3.5, 3.5, 3.8), CN_RED)
+			_star(root, Vector3(3.5, 3.5, 3.84), 0.35)
+			for i in range(3):
+				box(root, Vector3(1.0, 0.8, 0.1), Vector3(-3.0 + i * 3.0, 1.6, 1.85), GLASS)
+		"china_supply":
+			# truck apron with a loading ramp, crate stacks, warehouse with red roof
+			box(root, Vector3(9.6, 0.15, 9.6), Vector3(0, 0.08, 0), CONCRETE_DARK)
+			box(root, Vector3(4.5, 0.05, 5.5), Vector3(1.6, 0.17, 0), WARN)
+			box(root, Vector3(3.8, 0.05, 4.8), Vector3(1.6, 0.18, 0), CONCRETE_DARK)
+			box(root, Vector3(2.6, 3.0, 8.5), Vector3(-3.4, 1.5, 0), CN_WALL)
+			_pagoda(root, Vector3(-3.4, 3.0, 0), 3.0, 8.9, CN_RED)
+			band(root, 2.6, 8.5, 2.9, team, 0.3)
+			for i in range(4):
+				box(root, Vector3(1.1, 1.0, 1.1), Vector3(3.6 - (i % 2) * 1.2, 0.5 + (i / 2) * 1.0, -3.4), Color(0.7, 0.55, 0.3))
+			box(root, Vector3(2.6, 0.2, 2.0), Vector3(1.6, 0.6, 3.6), METAL)
+			box(root, Vector3(2.6, 0.5, 0.2), Vector3(1.6, 0.35, 2.6), METAL_DARK)
+		"china_factory":
+			_war_factory(root, team, tc, CN_WALL, CN_RED)
+			_star(root, Vector3(0, 4.8, 5.85), 0.6)
+		"propaganda_center":
+			# hall with a giant loudspeaker cluster on a mast, red banners, antenna
+			box(root, Vector3(9.5, 3.2, 9.5), Vector3(0, 1.6, 0), CN_WALL)
+			_pagoda(root, Vector3(0, 3.2, 0), 10.0, 10.0, CN_RED)
+			band(root, 9.5, 9.5, 3.1, team, 0.35)
+			cyl(root, 0.18, 0.25, 8.0, Vector3(0, 8.0, 0), METAL, 8)
+			var horns := Node3D.new()
+			horns.position = Vector3(0, 11.0, 0)
+			root.add_child(horns)
+			for i in range(4):
+				var a := i * PI * 0.5
+				var h := cyl(horns, 0.9, 0.25, 1.4, Vector3(sin(a) * 0.9, 0, cos(a) * 0.9), METAL_DARK, 10)
+				h.rotation = Vector3(PI * 0.5, a, 0)
+			anim(root, horns, "spin", 0.4)
+			for sx in [-1.0, 1.0]:
+				box(root, Vector3(0.06, 2.6, 1.6), Vector3(sx * 4.78, 1.9, 2.0), CN_RED)
+				_star(root, Vector3(sx * 4.82, 2.6, 2.0), 0.45, true)
+			var pulse := sphere(root, 0.5, Vector3(0, 12.3, 0), CN_RED)
+			anim(root, pulse, "pulse", 3.0)
+		"speaker_tower":
+			# lattice mast with four horns that slowly turn
+			box(root, Vector3(1.8, 0.4, 1.8), Vector3(0, 0.2, 0), CONCRETE_DARK)
+			band(root, 1.8, 1.8, 0.4, team, 0.15)
+			cyl(root, 0.14, 0.22, 7.0, Vector3(0, 3.7, 0), METAL, 8)
+			for i in range(3):
+				box(root, Vector3(1.2, 0.06, 1.2), Vector3(0, 1.5 + i * 2.0, 0), METAL_DARK)
+			var horns := Node3D.new()
+			horns.position = Vector3(0, 7.4, 0)
+			root.add_child(horns)
+			for i in range(4):
+				var a := i * PI * 0.5
+				var h := cyl(horns, 0.6, 0.18, 1.0, Vector3(sin(a) * 0.6, 0, cos(a) * 0.6), METAL_DARK, 10)
+				h.rotation = Vector3(PI * 0.5, a, 0)
+			anim(root, horns, "spin", 0.5)
+			var pulse := sphere(root, 0.3, Vector3(0, 8.2, 0), CN_RED)
+			anim(root, pulse, "pulse", 3.0)
+		"gattling_cannon":
+			# concrete base, rotating six-barrel gun in a shield
+			box(root, Vector3(3.6, 0.8, 3.6), Vector3(0, 0.4, 0), CONCRETE_DARK)
+			band(root, 3.6, 3.6, 0.75, team, 0.2)
+			var turret := Node3D.new()
+			turret.name = "Turret"
+			turret.position = Vector3(0, 0.8, 0)
+			root.add_child(turret)
+			cyl(turret, 0.9, 1.0, 0.7, Vector3(0, 0.35, 0), METAL, 12)
+			box(turret, Vector3(1.4, 1.0, 1.2), Vector3(0, 1.2, -0.2), CN_WALL_DARK)
+			box(turret, Vector3(1.5, 0.15, 0.3), Vector3(0, 1.8, -0.2), CN_RED)
+			var spin := Node3D.new()
+			spin.name = "Barrels"
+			spin.position = Vector3(0, 1.2, 0.5)
+			turret.add_child(spin)
+			for i in range(6):
+				var a := i * TAU / 6.0
+				cyl(spin, 0.08, 0.08, 2.4, Vector3(sin(a) * 0.22, cos(a) * 0.22, 1.2), METAL_DARK, 6).rotation.x = PI * 0.5
+			anim(root, spin, "spinz", 8.0)
+			root.set_meta("turret", turret)
+			anim(root, turret, "sweep", 0.4)
+		"bunker":
+			# low concrete pillbox with firing slits, sandbags on the roof
+			box(root, Vector3(5.4, 2.0, 5.4), Vector3(0, 1.0, 0), CONCRETE_DARK)
+			box(root, Vector3(5.6, 0.3, 5.6), Vector3(0, 2.1, 0), CONCRETE)
+			band(root, 5.4, 5.4, 1.95, team, 0.2)
+			for i in range(4):
+				var a := i * PI * 0.5
+				var slit := box(root, Vector3(2.6, 0.35, 0.1), Vector3(sin(a) * 2.7, 1.3, cos(a) * 2.7), Color(0.05, 0.05, 0.06))
+				slit.rotation.y = a
+			for i in range(8):
+				var a := i * TAU / 8.0
+				box(root, Vector3(1.2, 0.5, 0.6), Vector3(sin(a) * 2.2, 2.5, cos(a) * 2.2), Color(0.55, 0.5, 0.35), a)
+			box(root, Vector3(1.6, 0.9, 1.6), Vector3(0, 2.7, 0), CONCRETE)
+			_star(root, Vector3(0, 1.4, 2.71), 0.4)
+		"china_nuke":
+			# missile silo: heavy square pad, two blast doors that stand open, warhead tip, red lights
+			box(root, Vector3(11.5, 1.2, 11.5), Vector3(0, 0.6, 0), CONCRETE_DARK)
+			band(root, 11.5, 11.5, 1.15, team, 0.4)
+			cyl(root, 3.2, 3.2, 1.2, Vector3(0, 1.4, 0), METAL_DARK, 20)
+			cyl(root, 2.6, 2.6, 0.3, Vector3(0, 2.0, 0), Color(0.05, 0.05, 0.06), 20)
+			for sx in [-1.0, 1.0]:
+				var door := box(root, Vector3(3.2, 0.4, 6.8), Vector3(sx * 3.6, 2.6, 0), METAL)
+				door.rotation.z = -sx * 0.9
+				box(root, Vector3(3.0, 0.1, 6.6), Vector3(sx * 3.6, 2.85, 0), CN_RED).rotation.z = -sx * 0.9
+			var tip := cyl(root, 0.0, 0.9, 2.0, Vector3(0, 3.0, 0), Color(0.85, 0.85, 0.82), 12)
+			tip.name = "Warhead"
+			cyl(root, 0.9, 0.9, 1.4, Vector3(0, 1.3, 0), Color(0.85, 0.85, 0.82), 12)
+			for i in range(4):
+				var lamp := sphere(root, 0.22, Vector3(-4.8 + (i % 2) * 9.6, 1.5, -4.8 + (i / 2) * 9.6), CN_RED)
+				anim(root, lamp, "blink", 1.5 + i * 0.25)
+			box(root, Vector3(2.4, 2.6, 2.4), Vector3(4.2, 2.5, -4.2), CN_WALL)
+			box(root, Vector3(2.0, 0.8, 0.1), Vector3(4.2, 2.8, -2.95), GLASS)
+			_star(root, Vector3(-4.2, 1.21, 4.2), 1.0, false, true)
+		# ================= GLA =================
+		"gla_cc":
+			# walled adobe compound: main house, tower with a tarp, antenna, banner
+			box(root, Vector3(11.5, 0.9, 13.0), Vector3(0, 0.45, 0), GLA_WALL_DARK)
+			box(root, Vector3(11.5, 0.5, 0.5), Vector3(0, 1.1, 6.25), GLA_WALL)
+			box(root, Vector3(11.5, 0.5, 0.5), Vector3(0, 1.1, -6.25), GLA_WALL)
+			box(root, Vector3(0.5, 0.5, 13.0), Vector3(5.5, 1.1, 0), GLA_WALL)
+			box(root, Vector3(0.5, 0.5, 13.0), Vector3(-5.5, 1.1, 0), GLA_WALL)
+			box(root, Vector3(7.5, 3.4, 6.5), Vector3(-1.2, 2.6, -1.5), GLA_WALL)
+			box(root, Vector3(7.7, 0.3, 6.7), Vector3(-1.2, 4.4, -1.5), GLA_ROOF)
+			band(root, 7.5, 6.5, 4.2, team, 0.35)
+			box(root, Vector3(2.6, 6.0, 2.6), Vector3(3.6, 3.9, 3.6), GLA_WALL_DARK)
+			box(root, Vector3(3.2, 0.15, 3.2), Vector3(3.6, 7.0, 3.6), GLA_TARP)
+			cyl(root, 0.06, 0.08, 6.0, Vector3(3.6, 10.0, 3.6), METAL, 6)
+			var dish := Node3D.new()
+			dish.position = Vector3(-3.5, 5.2, -1.5)
+			root.add_child(dish)
+			cyl(dish, 1.1, 0.15, 0.4, Vector3.ZERO, METAL, 14).rotation.x = 0.8
+			anim(root, dish, "spin", 0.9)
+			for i in range(3):
+				box(root, Vector3(1.0, 0.7, 1.0), Vector3(-3.5 + i * 1.2, 1.25, 4.5), Color(0.62, 0.5, 0.3))
+			box(root, Vector3(0.1, 3.0, 0.1), Vector3(-4.6, 6.0, -4.5), METAL_DARK)
+			box(root, Vector3(1.6, 1.0, 0.06), Vector3(-3.8, 6.9, -4.5), tc)
+		"supply_stash":
+			# tent over crate piles, a truck-tyre wall and a tarp lean-to
+			box(root, Vector3(7.6, 0.14, 7.6), Vector3(0, 0.07, 0), GLA_WALL_DARK)
+			for i in range(4):
+				cyl(root, 0.06, 0.08, 3.4, Vector3(-2.6 + (i % 2) * 5.2, 1.7, -2.6 + (i / 2) * 5.2), METAL, 6)
+			prism(root, Vector3(6.4, 1.6, 6.4), Vector3(0, 4.0, 0), GLA_TARP)
+			box(root, Vector3(6.6, 0.12, 6.6), Vector3(0, 3.3, 0), GLA_TARP.darkened(0.2))
+			for i in range(6):
+				box(root, Vector3(1.0, 0.9, 1.0), Vector3(-1.6 + (i % 3) * 1.3, 0.55 + (i / 3) * 0.9, 0.4), Color(0.7, 0.55, 0.3))
+			for i in range(3):
+				cyl(root, 0.45, 0.45, 0.35, Vector3(3.0, 0.3 + i * 0.35, -2.8), Color(0.1, 0.1, 0.11), 10)
+			band(root, 7.6, 7.6, 0.2, team, 0.2)
+		"gla_barracks":
+			# adobe hut with a tent annexe and an obstacle course
+			box(root, Vector3(6.5, 2.6, 5.0), Vector3(-1.5, 1.3, -1.0), GLA_WALL)
+			box(root, Vector3(6.7, 0.3, 5.2), Vector3(-1.5, 2.75, -1.0), GLA_ROOF)
+			band(root, 6.5, 5.0, 2.6, team, 0.3)
+			prism(root, Vector3(3.6, 1.6, 4.0), Vector3(3.0, 1.6, 0.5), GLA_TARP)
+			box(root, Vector3(3.6, 0.9, 4.0), Vector3(3.0, 0.45, 0.5), GLA_TARP.darkened(0.15))
+			for i in range(4):
+				box(root, Vector3(0.8, 0.5, 0.6), Vector3(-3.5 + i * 0.9, 0.25, 3.5), Color(0.55, 0.5, 0.35))
+			box(root, Vector3(0.1, 3.6, 0.1), Vector3(1.6, 1.8, 3.6), METAL_DARK)
+			box(root, Vector3(1.2, 0.8, 0.05), Vector3(2.2, 3.1, 3.6), tc)
+			for i in range(2):
+				box(root, Vector3(0.9, 0.7, 0.1), Vector3(-3.0 + i * 3.0, 1.5, 1.55), Color(0.1, 0.1, 0.12))
+		"arms_dealer":
+			# open-fronted workshop with junk, a gantry crane and oil drums
+			box(root, Vector3(11.5, 0.3, 11.5), Vector3(0, 0.15, 0), GLA_WALL_DARK)
+			box(root, Vector3(11.5, 4.0, 0.5), Vector3(0, 2.0, -5.5), GLA_WALL)
+			box(root, Vector3(0.5, 4.0, 11.5), Vector3(-5.5, 2.0, 0), GLA_WALL)
+			box(root, Vector3(0.5, 4.0, 11.5), Vector3(5.5, 2.0, 0), GLA_WALL)
+			box(root, Vector3(11.8, 0.3, 11.8), Vector3(0, 4.15, 0), RUST)
+			prism(root, Vector3(11.8, 1.4, 12.0), Vector3(0, 5.0, 0), GLA_ROOF)
+			band(root, 11.5, 11.5, 4.0, team, 0.4)
+			var door := box(root, Vector3(6.0, 3.6, 0.3), Vector3(0, 1.8, 5.6), RUST)
+			door.name = "Door"
+			for i in range(2):
+				var lamp := sphere(root, 0.22, Vector3(-3.6 + i * 7.2, 3.6, 5.8), Color(1.0, 0.55, 0.1))
+				lamp.name = "Light%d" % i
+				lamp.visible = false
+			for i in range(3):
+				cyl(root, 0.45, 0.45, 1.1, Vector3(-4.2, 0.85, -3.5 + i * 1.1), Color(0.75, 0.25, 0.2), 10)
+			box(root, Vector3(0.2, 0.2, 9.0), Vector3(0, 3.7, 0), METAL)
+			var hook := Node3D.new()
+			hook.position = Vector3(0, 3.6, 1.0)
+			root.add_child(hook)
+			box(hook, Vector3(0.06, 1.6, 0.06), Vector3(0, -0.8, 0), METAL_DARK)
+			box(hook, Vector3(1.4, 0.6, 1.0), Vector3(0, -1.9, 0), RUST)
+			anim(root, hook, "nod", 0.6)
+			for i in range(3):
+				box(root, Vector3(0.9, 0.9, 0.9), Vector3(3.8, 0.75, -2.0 + i * 1.6), Color(0.35, 0.33, 0.3))
+		"palace":
+			# domed palace with four minarets, walled forecourt
+			box(root, Vector3(11.5, 1.0, 11.5), Vector3(0, 0.5, 0), GLA_WALL_DARK)
+			box(root, Vector3(8.5, 5.0, 8.5), Vector3(0, 3.5, 0), GLA_PALACE)
+			band(root, 8.5, 8.5, 6.0, team, 0.4)
+			var dome := sphere(root, 3.8, Vector3(0, 6.6, 0), Color(0.3, 0.55, 0.5))
+			dome.scale = Vector3(1.0, 0.8, 1.0)
+			cyl(root, 0.15, 0.3, 1.8, Vector3(0, 10.4, 0), Color(0.9, 0.75, 0.3), 8)
+			for i in range(4):
+				var x := -4.8 + (i % 2) * 9.6
+				var z := -4.8 + (i / 2) * 9.6
+				cyl(root, 0.7, 0.9, 9.0, Vector3(x, 4.5, z), GLA_PALACE, 10)
+				var cap := sphere(root, 0.95, Vector3(x, 9.3, z), Color(0.3, 0.55, 0.5))
+				cap.scale = Vector3(1.0, 1.2, 1.0)
+			for i in range(3):
+				var arch := box(root, Vector3(1.4, 2.6, 0.2), Vector3(-2.6 + i * 2.6, 1.3, 4.3), Color(0.15, 0.12, 0.1))
+				arch.name = "Arch%d" % i
+			for i in range(4):
+				var a := i * PI * 0.5
+				var slit := box(root, Vector3(2.4, 0.4, 0.12), Vector3(sin(a) * 4.3, 4.6, cos(a) * 4.3), Color(0.05, 0.05, 0.06))
+				slit.rotation.y = a
+		"black_market":
+			# bazaar stalls under tarps, crates, a lookout with a radio mast
+			box(root, Vector3(7.6, 0.14, 7.6), Vector3(0, 0.07, 0), GLA_WALL_DARK)
+			for i in range(3):
+				var z := -2.5 + i * 2.5
+				box(root, Vector3(5.0, 0.15, 1.6), Vector3(-0.8, 2.3, z), [GLA_TARP, Color(0.7, 0.3, 0.25), Color(0.3, 0.45, 0.6)][i])
+				for k in range(2):
+					cyl(root, 0.05, 0.06, 2.3, Vector3(-3.2 + k * 4.8, 1.15, z), METAL, 6)
+				box(root, Vector3(4.6, 0.8, 1.2), Vector3(-0.8, 0.5, z), Color(0.55, 0.42, 0.28))
+				for k in range(3):
+					box(root, Vector3(0.5, 0.4, 0.5), Vector3(-2.4 + k * 1.6, 1.1, z), Color(0.6 + k * 0.1, 0.5, 0.25))
+			box(root, Vector3(1.6, 3.4, 1.6), Vector3(2.9, 1.7, -2.6), GLA_WALL)
+			cyl(root, 0.05, 0.07, 4.0, Vector3(2.9, 5.4, -2.6), METAL, 6)
+			var pulse := sphere(root, 0.25, Vector3(2.9, 7.5, -2.6), Color(1.0, 0.9, 0.3))
+			anim(root, pulse, "blink", 1.2)
+			band(root, 7.6, 7.6, 0.2, team, 0.2)
+		"tunnel_network":
+			# sandbagged hole in the ground with a rocket launcher on a post
+			box(root, Vector3(3.8, 0.2, 3.8), Vector3(0, 0.1, 0), GLA_WALL_DARK)
+			cyl(root, 1.3, 1.3, 0.3, Vector3(0, 0.25, 0), Color(0.05, 0.04, 0.04), 16)
+			for i in range(10):
+				var a := i * TAU / 10.0
+				box(root, Vector3(1.1, 0.5, 0.5), Vector3(sin(a) * 1.7, 0.5, cos(a) * 1.7), Color(0.55, 0.5, 0.35), a)
+			box(root, Vector3(0.6, 0.15, 1.6), Vector3(0, 0.5, 1.2), Color(0.5, 0.38, 0.25))   # ladder / planks
+			var turret := Node3D.new()
+			turret.name = "Turret"
+			turret.position = Vector3(1.2, 0.8, -1.0)
+			root.add_child(turret)
+			cyl(turret, 0.12, 0.14, 1.4, Vector3(0, 0.7, 0), METAL, 8)
+			var tubes := Node3D.new()
+			tubes.position = Vector3(0, 1.5, 0)
+			tubes.rotation.x = -0.4
+			turret.add_child(tubes)
+			for k in range(2):
+				cyl(tubes, 0.14, 0.14, 1.6, Vector3(-0.2 + k * 0.4, 0, 0.3), METAL_DARK, 8).rotation.x = PI * 0.5
+				box(tubes, Vector3(0.18, 0.18, 0.1), Vector3(-0.2 + k * 0.4, 0, 1.12), tc)
+			root.set_meta("turret", turret)
+			anim(root, turret, "sweep", 0.35)
+		"stinger_site":
+			# sandbag ring with three stinger gunners on a common mount
+			for i in range(12):
+				var a := TAU * i / 12.0
+				box(root, Vector3(1.3, 0.8, 0.7), Vector3(cos(a) * 2.5, 0.4, sin(a) * 2.5), Color(0.55, 0.5, 0.35), -a)
+			box(root, Vector3(2.2, 0.2, 2.2), Vector3(0, 0.1, 0), GLA_WALL_DARK)
+			var turret := Node3D.new()
+			turret.name = "Turret"
+			turret.position = Vector3(0, 0.2, 0)
+			root.add_child(turret)
+			for k in range(3):
+				var a := (k - 1) * 0.6
+				var g := Node3D.new()
+				g.position = Vector3(sin(a) * 0.9, 0, cos(a) * 0.9 - 0.4)
+				g.rotation.y = a
+				turret.add_child(g)
+				box(g, Vector3(0.5, 0.6, 0.3), Vector3(0, 1.0, 0), GLA_UNIFORM)
+				sphere(g, 0.17, Vector3(0, 1.5, 0), Color(0.85, 0.68, 0.55))
+				box(g, Vector3(0.5, 0.2, 0.5), Vector3(0, 1.65, 0), Color(0.9, 0.85, 0.7))
+				box(g, Vector3(0.36, 0.7, 0.36), Vector3(0, 0.35, 0), GLA_UNIFORM.darkened(0.2))
+				var tube := cyl(g, 0.09, 0.09, 1.3, Vector3(0.3, 1.35, 0.2), METAL_DARK, 8)
+				tube.rotation.x = PI * 0.5 - 0.35
+			box(turret, Vector3(0.4, 0.3, 0.05), Vector3(0, 1.9, -0.9), tc)
+			root.set_meta("turret", turret)
+			anim(root, turret, "sweep", 0.3)
+		"demo_trap":
+			# barrel bomb half-buried under a tarp with a blinking detonator
+			box(root, Vector3(1.6, 0.12, 1.6), Vector3(0, 0.06, 0), GLA_WALL_DARK)
+			cyl(root, 0.45, 0.45, 0.7, Vector3(0, 0.35, 0), Color(0.5, 0.3, 0.15), 10)
+			box(root, Vector3(1.4, 0.06, 1.4), Vector3(0, 0.75, 0), GLA_TARP)
+			var lamp := sphere(root, 0.1, Vector3(0.4, 0.85, 0.4), Color(1.0, 0.2, 0.1))
+			anim(root, lamp, "blink", 2.0)
+		"scud_storm":
+			# nine launch tubes on a concrete pad, mounted on a fuel-tank cluster
+			box(root, Vector3(11.5, 1.0, 11.5), Vector3(0, 0.5, 0), CONCRETE_DARK)
+			band(root, 11.5, 11.5, 0.95, team, 0.4)
+			for i in range(9):
+				var x := -3.4 + (i % 3) * 3.4
+				var z := -3.4 + (i / 3) * 3.4
+				cyl(root, 0.6, 0.7, 1.0, Vector3(x, 1.5, z), METAL_DARK, 10)
+				var m := cyl(root, 0.42, 0.42, 5.0, Vector3(x, 3.6, z), Color(0.55, 0.5, 0.4), 10)
+				m.name = "Scud%d" % i
+				cyl(root, 0.0, 0.42, 1.0, Vector3(x, 6.6, z), Color(0.3, 0.6, 0.2), 10)
+			for i in range(3):
+				cyl(root, 0.6, 0.6, 1.3, Vector3(4.8, 1.65, -4.0 + i * 1.6), Color(0.35, 0.55, 0.3), 10)
+			box(root, Vector3(2.0, 2.2, 2.0), Vector3(-4.6, 2.1, 4.4), GLA_WALL)
+			var lamp := sphere(root, 0.25, Vector3(-4.6, 3.5, 4.4), Color(0.4, 1.0, 0.3))
+			anim(root, lamp, "blink", 1.0)
 		"supply_dock":
 			# supply depot: concrete pad, fuel drums, a forklift-sized shed and a loading crane.
 			# The crates themselves are added by Puppet (they vanish as the dock empties).
@@ -377,6 +661,97 @@ static func make(type: String, team: int) -> Node3D:
 			box(root, Vector3(fp.x * 0.9, 3.0, fp.y * 0.9), Vector3(0, 1.5, 0), CONCRETE)
 			band(root, fp.x * 0.9, fp.y * 0.9, 2.9, team, 0.3)
 	return root
+
+## USA / China airfield: apron, runway along the front, four hangars, tower + helipad. accent = marking colour.
+static func _airfield(root: Node3D, team: int, tc: Color, accent: Color) -> void:
+	# apron, runway along the front (local +z row), four hangars along the back, tower + helipad at the right
+	box(root, Vector3(21.5, 0.12, 15.5), Vector3(0, 0.06, 0), CONCRETE_DARK)
+	box(root, Vector3(21.0, 0.05, 4.6), Vector3(0, 0.15, 4.5), Color(0.25, 0.25, 0.27))     # runway
+	for i in range(8):
+		box(root, Vector3(1.4, 0.03, 0.25), Vector3(-9.0 + i * 2.6, 0.2, 4.5), Color(0.9, 0.9, 0.85))
+	for i in range(2):
+		box(root, Vector3(21.0, 0.03, 0.2), Vector3(0, 0.2, 4.5 + (i * 2 - 1) * 2.2), accent)
+	for i in range(9):
+		var rl := sphere(root, 0.12, Vector3(-10.0 + i * 2.5, 0.3, 6.8), Color(1.0, 0.95, 0.6))
+		anim(root, rl, "blink", 0.6 + i * 0.1)
+	# taxiway from the hangars to the runway start
+	box(root, Vector3(0.25, 0.03, 8.0), Vector3(-9.5, 0.2, 0.0), accent)
+	box(root, Vector3(18.0, 0.03, 0.25), Vector3(-1.0, 0.2, -1.5), accent)
+	for i in range(4):
+		var hx := -8.0 + i * 5.3
+		# hangar: two walls, roof, dark interior, open front toward +z
+		box(root, Vector3(4.6, 0.04, 4.8), Vector3(hx, 0.19, -4.5), Color(0.3, 0.3, 0.32))
+		box(root, Vector3(0.3, 3.2, 4.8), Vector3(hx - 2.2, 1.6, -4.7), CONCRETE)
+		box(root, Vector3(0.3, 3.2, 4.8), Vector3(hx + 2.2, 1.6, -4.7), CONCRETE)
+		box(root, Vector3(4.6, 0.3, 4.8), Vector3(hx, 3.3, -4.7), ROOF)
+		box(root, Vector3(4.6, 3.2, 0.25), Vector3(hx, 1.6, -7.0), CONCRETE_DARK)
+		prism(root, Vector3(4.9, 1.0, 4.9), Vector3(hx, 3.9, -4.7), ROOF)
+		box(root, Vector3(4.6, 0.5, 0.1), Vector3(hx, 3.1, -2.3), tc)      # team-colour lintel
+		var light := sphere(root, 0.16, Vector3(hx, 3.0, -2.2), Color(1.0, 0.95, 0.6))
+		anim(root, light, "blink", 0.8 + i * 0.2)
+	# helipad
+	box(root, Vector3(5.0, 0.04, 5.0), Vector3(8.5, 0.19, 4.5), Color(0.3, 0.3, 0.32))
+	box(root, Vector3(3.0, 0.03, 0.5), Vector3(8.5, 0.22, 4.5), accent)
+	box(root, Vector3(0.5, 0.03, 2.4), Vector3(7.4, 0.22, 4.5), accent)
+	box(root, Vector3(0.5, 0.03, 2.4), Vector3(9.6, 0.22, 4.5), accent)
+	# tower
+	box(root, Vector3(2.4, 2.4, 2.4), Vector3(8.6, 1.2, 0.4), CONCRETE)
+	cyl(root, 0.6, 0.7, 4.0, Vector3(8.6, 4.4, 0.4), CONCRETE_DARK, 8)
+	box(root, Vector3(2.4, 1.4, 2.4), Vector3(8.6, 7.1, 0.4), GLASS)
+	box(root, Vector3(2.8, 0.3, 2.8), Vector3(8.6, 7.9, 0.4), ROOF)
+	var radar := Node3D.new()
+	radar.position = Vector3(8.6, 8.3, 0.4)
+	root.add_child(radar)
+	box(radar, Vector3(1.6, 0.5, 0.1), Vector3(0, 0.25, 0), METAL)
+	anim(root, radar, "spin", 2.5)
+	band(root, 2.4, 2.4, 2.3, team, 0.25)
+	# windsock
+	box(root, Vector3(0.08, 3.0, 0.08), Vector3(-10.2, 1.5, -7.2), METAL)
+	var sock := cyl(root, 0.15, 0.3, 1.0, Vector3(-9.7, 2.9, -7.2), Color(1.0, 0.5, 0.1), 6)
+	sock.rotation.z = -PI * 0.5
+	anim(root, sock, "nod", 1.5)
+
+## Vehicle plant: big hangar with a wide door (Door / Light0-1 animate), roof vents, fan.
+static func _war_factory(root: Node3D, team: int, tc: Color, wall: Color, door_col: Color) -> void:
+	# large hangar with a wide door, roof vents, side crane rail
+	box(root, Vector3(11.5, 5.0, 11.5), Vector3(0, 2.5, 0), wall)
+	prism(root, Vector3(11.7, 2.0, 11.8), Vector3(0, 6.0, 0), ROOF)
+	band(root, 11.5, 11.5, 4.8, team, 0.4)
+	var door := box(root, Vector3(6.0, 3.6, 0.3), Vector3(0, 1.8, 5.75), door_col)
+	door.name = "Door"
+	box(root, Vector3(6.2, 0.4, 0.4), Vector3(0, 3.8, 5.8), WARN)
+	for i in range(2):
+		var lamp := sphere(root, 0.22, Vector3(-3.6 + i * 7.2, 4.4, 5.9), Color(1.0, 0.55, 0.1))
+		lamp.name = "Light%d" % i
+		lamp.visible = false
+	for i in range(3):
+		box(root, Vector3(1.2, 0.8, 1.2), Vector3(-3.5 + i * 3.5, 7.2, -2.0), METAL)
+	for i in range(2):
+		box(root, Vector3(0.8, 0.8, 0.1), Vector3(-4.0 + i * 8.0, 3.5, 5.8), GLASS)
+	var fan := cyl(root, 0.9, 0.9, 0.2, Vector3(3.5, 7.15, 2.5), METAL_DARK, 8)
+	anim(root, fan, "spin", 4.0)
+
+
+## Sloped Chinese roof: a flat prism with upturned eave slabs.
+static func _pagoda(root: Node3D, pos: Vector3, w: float, d: float, col: Color) -> void:
+	prism(root, Vector3(w + 0.6, 1.1, d + 0.6), pos + Vector3(0, 0.55, 0), col)
+	for sx in [-1.0, 1.0]:
+		var eave := box(root, Vector3(0.9, 0.12, d + 0.8), pos + Vector3(sx * (w * 0.5 + 0.55), 0.25, 0), col.darkened(0.1))
+		eave.rotation.z = sx * 0.35
+	box(root, Vector3(w * 0.4, 0.3, 0.3), pos + Vector3(0, 1.2, 0), col.darkened(0.2))
+
+## Red star emblem (flat) on a wall or the ground.
+static func _star(root: Node3D, pos: Vector3, r: float, side := false, flat := false) -> void:
+	for i in range(5):
+		var a := i * TAU / 5.0
+		var arm := box(root, Vector3(r * 0.35, r * 1.0, 0.04), pos, Color(0.95, 0.2, 0.15))
+		if flat:
+			arm.rotation = Vector3(-PI * 0.5, a, 0)
+		elif side:
+			arm.rotation = Vector3(0, PI * 0.5, a)
+		else:
+			arm.rotation.z = a
+		arm.position = pos
 
 static func _steam(pos: Vector3) -> CPUParticles3D:
 	var p := CPUParticles3D.new()

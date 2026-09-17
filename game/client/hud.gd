@@ -463,7 +463,7 @@ func _process(dt: float) -> void:
 		for p in sw:
 			var rem := float(sw[p])
 			var who := "Your" if int(p) == view.my_index else "ENEMY"
-			parts.append("%s Particle Cannon: %s" % [who, "READY" if rem <= 0.0 else "%d:%02d" % [int(rem) / 60, int(rem) % 60]])
+			parts.append("%s %s: %s" % [who, view.sw_name(int(p)), "READY" if rem <= 0.0 else "%d:%02d" % [int(rem) / 60, int(rem) % 60]])
 		sw_label.text = "   ".join(parts)
 		_update_powers(st)
 	_update_queue()
@@ -502,7 +502,7 @@ func _process_observer(dt: float, st: Dictionary) -> void:
 		for p in sw:
 			var rem := float(sw[p])
 			var who: String = view.names[int(p)] if int(p) < view.names.size() else "P%d" % (int(p) + 1)
-			parts.append("%s Particle Cannon: %s" % [who, "READY" if rem <= 0.0 else "%d:%02d" % [int(rem) / 60, int(rem) % 60]])
+			parts.append("%s %s: %s" % [who, view.sw_name(int(p)), "READY" if rem <= 0.0 else "%d:%02d" % [int(rem) / 60, int(rem) % 60]])
 		sw_label.text = "   ".join(parts)
 		var board: Array = st.get("board", [])
 		if not board.is_empty():
@@ -519,8 +519,9 @@ func _process_observer(dt: float, st: Dictionary) -> void:
 				var pow := ""
 				if bool(b.get("low", false)):
 					pow = "  [color=#ff6a55]LOW POWER[/color]"
-				var line := "[color=#%s]■[/color] [b]%s[/b]  (team %d)  [color=#ffe066]$%d[/color]   %d units   %d structures   %d kills%s%s" % [
-					col.to_html(false), str(b["name"]), int(b["team"]) + 1, int(b["cash"]), int(b["units"]), int(b["blds"]), int(b.get("killed", 0)), plan, pow]
+				var fac := str(Data.FACTIONS.get(str(b.get("faction", "usa")), {}).get("name", ""))
+				var line := "[color=#%s]■[/color] [b]%s[/b]  %s · team %d  [color=#ffe066]$%d[/color]   %d units   %d structures   %d kills%s%s" % [
+					col.to_html(false), str(b["name"]), fac, int(b["team"]) + 1, int(b["cash"]), int(b["units"]), int(b["blds"]), int(b.get("killed", 0)), plan, pow]
 				if bool(b.get("defeated", false)):
 					line = "[s]%s[/s]  [color=#ff6a55]DEFEATED[/color]" % line
 				lines.append(line)
@@ -731,8 +732,8 @@ func refresh_selection() -> void:
 			lines.append("Supplies: $%d" % (int(docks.get(p.id, p.boxes)) * Data.BOX_VALUE))
 		if p.cat == "air" and p.def.get("jet", false):
 			lines.append("Ammo: %d" % p.aux)
-		if p.type == "chinook" and (p.flags & 32) != 0:
-			lines.append("Carrying %d boxes" % p.aux)
+		if int(p.def.get("gatherer", 0)) > 0 and (p.flags & 32) != 0:
+			lines.append("Carrying %d box%s" % [p.aux, "" if p.aux == 1 else "es"])
 		if p.def.has("cargo"):
 			var cg: Array = view.pstate.get("cargo", {}).get(p.id, [])
 			var used := 0
@@ -797,7 +798,8 @@ func refresh_selection() -> void:
 					"cb": func() -> void: ctl.set_plan(single.id, pk), "enabled": pb[0] != pk})
 		if d.has("superweapon"):
 			var ready: bool = view.sw_remaining(single.id) <= 0.0
-			actions.append({"label": "FIRE\nParticle Cannon", "tip": "Select a target for the beam. Steer it with the mouse while it fires.", "cb": func() -> void: ctl.sw_mode(single.id), "enabled": ready})
+			var swtip := "Select a target for the beam. Steer it with the mouse while it fires." if d.get("sw_kind", "beam") == "beam" else "Select a target. Everyone will see it coming."
+			actions.append({"label": "FIRE\n%s" % d["name"], "tip": swtip, "cb": func() -> void: ctl.sw_mode(single.id), "enabled": ready})
 		if d.has("produces"):
 			actions.append({"label": "Set rally", "tip": "Click where new units should gather", "cb": func() -> void: ctl.rally_mode(single.id), "enabled": true})
 		if d.has("cargo") and not view.pstate.get("cargo", {}).get(single.id, []).is_empty():
@@ -813,7 +815,7 @@ func refresh_selection() -> void:
 		if has_builder:
 			for bt in Data.BUILDINGS:
 				var bd: Dictionary = Data.BUILDINGS[bt]
-				if bd.get("neutral", false):
+				if bd.get("neutral", false) or Data.faction_of(bt) != view.my_faction:
 					continue
 				var why: String = view.building_prereq_text(bt)
 				actions.append({"label": "%s\n$%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"])],
@@ -830,12 +832,14 @@ func refresh_selection() -> void:
 				actions.append({"label": "Unload (U)", "tip": "Let the passengers out (a Chinook lands first)", "cb": func() -> void: ctl.unload(), "enabled": true})
 			actions.append({"label": "Guard area (G)", "tip": "Click a spot to guard - hold and drag to size the area. Press G twice to guard right here. Aircraft loiter overhead and go home to rearm.", "cb": func() -> void: ctl.guard_mode(), "enabled": true})
 			var has_ranger := false
+			var can := false
 			for p in sel:
-				if p.type == "ranger":
+				if p.def.get("capture", false):
 					has_ranger = true
+					if p.def.get("capture_free", false) or view.has_upgrade("capture"):
+						can = true
 			if has_ranger:
-				var can: bool = view.has_upgrade("capture")
-				actions.append({"label": "Capture", "icon": "capture", "tip": "Rangers take over an enemy or neutral structure (20 s next to it)." + ("" if can else "\nRequires the Capture Building upgrade at the Barracks."), "cb": func() -> void: ctl.capture_mode(), "enabled": can})
+				actions.append({"label": "Capture", "icon": "capture", "tip": "Take over an enemy or neutral structure (20 s next to it)." + ("" if can else "\nRequires the Capture Building upgrade at the Barracks."), "cb": func() -> void: ctl.capture_mode(), "enabled": can})
 	for i in range(mini(actions.size(), grid_buttons.size())):
 		var a: Dictionary = actions[i]
 		var b := grid_buttons[i]
@@ -1025,7 +1029,7 @@ func _update_powers(st: Dictionary) -> void:
 			var b := Button.new()
 			b.custom_minimum_size = Vector2(170, 40)
 			b.add_theme_font_size_override("font_size", 12)
-			b.tooltip_text = "Fire the Particle Cannon: pick a target, then steer the beam with the mouse."
+			b.tooltip_text = "Fire the %s: pick a target%s." % [p.def["name"], ", then steer the beam with the mouse" if p.def.get("sw_kind", "beam") == "beam" else ""]
 			b.icon = view.icons.get_icon(p.type)
 			b.expand_icon = true
 			var bid := p.id
@@ -1035,10 +1039,10 @@ func _update_powers(st: Dictionary) -> void:
 		var b: Button = sw_buttons[p.id]
 		var rem := view.sw_remaining(p.id)
 		if rem > 0.0:
-			b.text = "Particle Cannon  %d:%02d" % [int(rem) / 60, int(rem) % 60]
+			b.text = "%s  %d:%02d" % [p.def["name"], int(rem) / 60, int(rem) % 60]
 			b.disabled = true
 		else:
-			b.text = "PARTICLE CANNON  READY"
+			b.text = "%s  READY" % str(p.def["name"]).to_upper()
 			b.disabled = false
 	for bid in sw_buttons.keys():
 		if not seen.has(bid):
@@ -1091,7 +1095,7 @@ func _fill_promo(st: Dictionary) -> void:
 		promo_list.add_child(row)
 		for pid in Data.POWERS:
 			var pd: Dictionary = Data.POWERS[pid]
-			if int(pd["rank"]) != tier:
+			if int(pd["rank"]) != tier or not view.power_for_me(pid):
 				continue
 			var lvl := int(owned.get(pid, 0))
 			var maxl := int(pd.get("levels", 1))

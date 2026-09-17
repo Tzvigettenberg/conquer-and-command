@@ -66,6 +66,35 @@ func _process(dt: float) -> void:
 				var k := a * a
 				n.position = f.lerp(to, k)
 				n.look_at(f.lerp(to, minf(k + 0.05, 1.0)), Vector3.UP)
+			"arc":
+				# ballistic missile: straight up out of the silo, over the top, down on the target
+				var f: Vector3 = it["from"]
+				var to: Vector3 = it["to"]
+				var apex: Vector3 = (f + to) * 0.5 + Vector3(0, it.get("height", 160.0), 0)
+				var p := _bez(f, apex, to, a)
+				var q := _bez(f, apex, to, minf(a + 0.01, 1.0))
+				n.position = p
+				if (q - p).length() > 0.01:
+					n.look_at(q, Vector3.UP)
+				if fmod(it["t"], 0.1) < dt:
+					var puff := Visuals.sphere(0.9 * it.get("size", 1.0), Color(0.85, 0.85, 0.85, 0.5))
+					puff.material_override = _own_mat(Color(0.85, 0.85, 0.85, 0.5))
+					puff.position = p
+					_add(puff, "puff", 2.5, {"grow": 1.5, "alpha": 0.45})
+			"zone":
+				var ramp := minf(a * 6.0, 1.0) * minf((1.0 - a) * 4.0, 1.0)
+				_fade(n, ramp * 0.55)
+				n.rotation.y += dt * 0.15
+			"mushroom":
+				var cap := n.get_node_or_null("Cap")
+				var stem := n.get_node_or_null("Stem")
+				var rise := minf(a * 2.5, 1.0)
+				if cap != null:
+					cap.position.y = 6.0 + rise * 34.0
+					cap.scale = Vector3.ONE * (0.6 + rise * 1.6 + a * 0.6)
+				if stem != null:
+					stem.scale = Vector3(1.0 + a * 0.6, 0.2 + rise * 1.0, 1.0 + a * 0.6)
+				_fade(n, minf(1.0, (1.0 - a) * 2.0) * 0.85)
 			"smoke":
 				n.position.y += dt * 1.5
 				n.scale = Vector3.ONE * (0.5 + a * 1.5) * it["size"]
@@ -403,6 +432,9 @@ func shot(from: Vector3, to: Vector3, wid: String, sid := -1) -> void:
 	var style: String = wd.get("style", "bullet")
 	var spd := float(wd.get("speed", 0.0))
 	var d := from.distance_to(to)
+	if style == "flame":
+		flame(from, to, bool(wd.get("toxin", false)))
+		return
 	muzzle(from, to)
 	match style:
 		"bullet":
@@ -494,6 +526,12 @@ func impact(pos: Vector3, style: String) -> void:
 			size = 4.0
 		"beam":
 			size = 1.5
+		"flame":
+			burst("fire", pos + Vector3(0, 0.4, 0), 0.5)
+			return
+		"nuke":
+			nuke_blast(pos)
+			return
 	if style == "bullet":
 		var p := Visuals.sphere(0.3, Color(1.0, 0.8, 0.5, 0.8))
 		p.material_override = _own_mat(Color(1.0, 0.8, 0.5, 0.8))
@@ -747,6 +785,61 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 			ring.material_override = _own_mat(Color(0.4, 0.8, 1.0, 0.7))
 			ring.position = pos + Vector3(0, 0.3, 0)
 			_add(ring, "beam", 2.0)
+		"artillery_barrage":
+			strike_marker(pos, 3.0, Color(1.0, 0.6, 0.2, 0.9))
+			var n := 6 + 4 * maxi(1, level)
+			for i in range(n):
+				var delay := 3.0 + 0.35 * i - 1.2
+				var tp := pos + Vector3(randf_range(-14, 14), 0, randf_range(-14, 14))
+				_later(maxf(delay, 0.0), func() -> void:
+					bomb_drop(tp + Vector3(randf_range(-6, 6), 60, randf_range(-6, 6)), tp, 1.2))
+		"carpet_bomb":
+			strike_marker(pos, 8.0, Color(1.0, 0.4, 0.2, 0.9))
+			var plane := Units.cargo_plane(-1)
+			plane.scale = Vector3.ONE * 1.2
+			var dir := Vector3(cos(heading), 0, sin(heading))
+			var from := pos - dir * 220.0 + Vector3(0, 55, 0)
+			var to := pos + dir * 220.0 + Vector3(0, 55, 0)
+			plane.look_at_from_position(from, to, Vector3.UP)
+			plane.rotate_y(PI)
+			_add(plane, "jet", 11.0, {"from": from, "to": to, "props": plane.find_children("Propeller*", "Node3D", true, false)})
+			for i in range(-4, 4):
+				var delay := 8.0 + 0.3 * (i + 4) - 1.6
+				var tp := pos + dir * (i * 9.0)
+				_later(delay, func() -> void:
+					bomb_drop(tp + Vector3(0, 54, 0) - dir * 12.0, tp, 1.6))
+			_later(6.0, func() -> void: Audio.I.sfx("plane_pass", pos + Vector3(0, 40, 0), 4.0))
+		"anthrax_bomb":
+			strike_marker(pos, 6.0, Color(0.5, 1.0, 0.3, 0.9))
+			var plane := Visuals.make_model("mig", -1)
+			plane.scale = Vector3.ONE * 1.5
+			var from := pos + Vector3(-200, 45, 30)
+			var to := pos + Vector3(200, 45, -30)
+			plane.look_at_from_position(from, to, Vector3.UP)
+			plane.rotate_y(PI)
+			_add(plane, "jet", 8.0, {"from": from, "to": to})
+			_later(4.2, func() -> void:
+				bomb_drop(pos + Vector3(-6, 44, 1), pos, 1.8)
+				Audio.I.sfx("bomb_whistle", pos + Vector3(0, 20, 0), 2.0, 0.0, 0.5))
+		"rebel_ambush":
+			strike_marker(pos, 2.0, Color(0.5, 1.0, 0.3, 0.9))
+			_later(2.0, func() -> void:
+				burst("dust", pos, 3.0))
+		"sneak_attack":
+			strike_marker(pos, 6.0, Color(0.5, 1.0, 0.3, 0.9))
+			_later(6.0, func() -> void:
+				burst("dust", pos, 4.0))
+		"frenzy":
+			var ring := Visuals.ring(25.0, Color(1.0, 0.3, 0.2, 0.8), 0.6)
+			ring.material_override = _own_mat(Color(1.0, 0.3, 0.2, 0.8))
+			ring.position = pos + Vector3(0, 0.3, 0)
+			_add(ring, "beam", 2.5)
+		"cash_hack":
+			floating_text(pos + Vector3(0, 6, 0), "$ HACKED", Color(1.0, 0.9, 0.3))
+			var ring := Visuals.ring(6.0, Color(1.0, 0.9, 0.3, 0.8), 0.4)
+			ring.material_override = _own_mat(Color(1.0, 0.9, 0.3, 0.8))
+			ring.position = pos + Vector3(0, 0.3, 0)
+			_add(ring, "beam", 2.0)
 
 ## Team beacon: a tall pulsing pillar visible to allies for a while.
 func beacon(pos: Vector3, col: Color) -> void:
@@ -784,6 +877,150 @@ func track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void:
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		n.add_child(m)
 	_add(n, "track", 30.0)
+
+static func _bez(a: Vector3, b: Vector3, c: Vector3, t: float) -> Vector3:
+	var u := 1.0 - t
+	return a * (u * u) + b * (2.0 * u * t) + c * (t * t)
+
+## Flamethrower / toxin sprayer: a burst of fire (or green mist) from the nozzle toward the target.
+func flame(from: Vector3, to: Vector3, toxin: bool) -> void:
+	var p := CPUParticles3D.new()
+	p.position = from
+	p.mesh = _psphere()
+	p.one_shot = true
+	p.local_coords = false
+	p.amount = 18
+	p.lifetime = 0.55
+	p.explosiveness = 0.85
+	var dir := (to - from).normalized()
+	p.direction = dir
+	p.spread = 9.0
+	var d := from.distance_to(to)
+	p.initial_velocity_min = d / 0.5
+	p.initial_velocity_max = d / 0.42
+	p.gravity = Vector3(0, -1.5, 0)
+	p.scale_amount_min = 0.5
+	p.scale_amount_max = 1.5
+	p.scale_amount_curve = _curve([0.4, 1.0, 1.4, 0.6])
+	var g := Gradient.new()
+	if toxin:
+		g.set_color(0, Color(0.5, 1.0, 0.3, 0.9))
+		g.set_color(1, Color(0.2, 0.6, 0.15, 0.0))
+	else:
+		g.set_color(0, Color(1.0, 0.85, 0.3, 1.0))
+		g.add_point(0.4, Color(1.0, 0.4, 0.1, 0.9))
+		g.set_color(1, Color(0.2, 0.15, 0.12, 0.0))
+	p.color_ramp = g
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	p.material_override = m
+	p.emitting = true
+	_add(p, "particles", 1.2)
+
+## Lingering radiation (yellow-green) or toxin (green) field on the ground.
+func zone(kind: String, pos: Vector3, r: float, seconds: float) -> void:
+	var n := Node3D.new()
+	n.position = pos + Vector3(0, 0.22, 0)
+	var col := Color(0.85, 1.0, 0.25, 0.5) if kind == "radiation" else Color(0.3, 0.95, 0.35, 0.5)
+	var disc := Visuals.disc(r, col)
+	disc.material_override = _own_mat(col)
+	n.add_child(disc)
+	var ring := Visuals.ring(r, Color(col.r, col.g, col.b, 0.8), 0.4)
+	ring.material_override = _own_mat(Color(col.r, col.g, col.b, 0.8))
+	n.add_child(ring)
+	var p := CPUParticles3D.new()
+	p.mesh = _psphere()
+	p.amount = int(clampf(r * 1.5, 8, 40))
+	p.lifetime = 3.0
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = r * 0.9
+	p.direction = Vector3.UP
+	p.spread = 30.0
+	p.initial_velocity_min = 0.4
+	p.initial_velocity_max = 1.2
+	p.gravity = Vector3(0, 0.3, 0)
+	p.scale_amount_min = 0.8
+	p.scale_amount_max = 2.0
+	var g := Gradient.new()
+	g.set_color(0, Color(col.r, col.g, col.b, 0.0))
+	g.add_point(0.3, Color(col.r, col.g, col.b, 0.35))
+	g.set_color(1, Color(col.r, col.g, col.b, 0.0))
+	p.color_ramp = g
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	p.material_override = m
+	n.add_child(p)
+	_add(n, "zone", seconds)
+
+## Nuclear detonation: white flash, fireball, rings, and a mushroom cloud that climbs.
+func nuke_blast(pos: Vector3) -> void:
+	explosion(pos, 9.0)
+	var n := Node3D.new()
+	n.position = pos
+	var stem := Visuals.sphere(1.0, Color(0.45, 0.4, 0.35, 0.85))
+	stem.name = "Stem"
+	stem.material_override = _own_mat(Color(0.45, 0.4, 0.35, 0.85))
+	stem.scale = Vector3(6.0, 1.0, 6.0)
+	stem.position.y = 8.0
+	var sm := stem.mesh as SphereMesh
+	sm.radius = 6.0
+	sm.height = 40.0
+	n.add_child(stem)
+	var cap := Visuals.sphere(14.0, Color(0.6, 0.5, 0.42, 0.9))
+	cap.name = "Cap"
+	cap.material_override = _own_mat(Color(0.6, 0.5, 0.42, 0.9))
+	cap.position.y = 6.0
+	n.add_child(cap)
+	var glow := Visuals.sphere(7.0, Color(1.0, 0.55, 0.2, 0.7))
+	glow.material_override = _own_mat(Color(1.0, 0.55, 0.2, 0.7))
+	glow.position.y = 5.0
+	cap.add_child(glow)
+	_add(n, "mushroom", 14.0)
+	for i in range(3):
+		var ring := Visuals.ring(4.0 + i * 3.0, Color(1.0, 0.9, 0.6, 0.8), 1.0)
+		ring.material_override = _own_mat(Color(1.0, 0.9, 0.6, 0.8))
+		ring.position = pos + Vector3(0, 0.4, 0)
+		_add(ring, "ring", 2.0 + i * 0.6, {"size": 3.0 + i * 2.0})
+	burst("smoke", pos + Vector3(0, 6, 0), 9.0)
+	burst("dust", pos, 9.0)
+
+## Superweapon launch: a missile climbs out of the silo and comes down on the target
+## (nuke: one big warhead; scud: a salvo of nine).
+func sw_launch(kind: String, from: Vector3, to: Vector3, flight: float) -> void:
+	if kind == "nuke":
+		var m := Node3D.new()
+		var body := Visuals.box(Vector3(1.4, 1.4, 7.0), Color(0.85, 0.85, 0.82))
+		m.add_child(body)
+		var nose := Visuals.box(Vector3(1.0, 1.0, 1.6), Color(0.8, 0.2, 0.15))
+		nose.position.z = 4.2
+		m.add_child(nose)
+		var fl := Visuals.sphere(1.2, Color(1.0, 0.7, 0.3, 0.9))
+		fl.material_override = _own_mat(Color(1.0, 0.7, 0.3, 0.9))
+		fl.position.z = -4.0
+		m.add_child(fl)
+		m.position = from + Vector3(0, 6, 0)
+		_add(m, "arc", flight, {"from": from + Vector3(0, 6, 0), "to": to, "height": 220.0, "size": 2.0})
+		strike_marker(to, flight, Color(1.0, 0.3, 0.2, 0.9))
+	else:
+		strike_marker(to, flight + 4.0, Color(0.5, 1.0, 0.3, 0.9))
+		for i in range(9):
+			var delay := i * 0.5
+			var target := to + Vector3(randf_range(-9, 9), 0, randf_range(-9, 9))
+			_later(delay, func() -> void:
+				var m := Node3D.new()
+				var body := Visuals.box(Vector3(0.7, 0.7, 4.0), Color(0.55, 0.5, 0.4))
+				m.add_child(body)
+				var nose := Visuals.box(Vector3(0.5, 0.5, 0.9), Color(0.3, 0.6, 0.2))
+				nose.position.z = 2.4
+				m.add_child(nose)
+				m.position = from + Vector3(randf_range(-3, 3), 4, randf_range(-3, 3))
+				_add(m, "arc", flight, {"from": m.position, "to": target, "height": 140.0, "size": 1.0})
+				Audio.I.sfx("missile_launch", from, 2.0, 0.0, 0.2))
 
 func _later(delay: float, cb: Callable) -> void:
 	get_tree().create_timer(delay).timeout.connect(cb)

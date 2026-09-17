@@ -121,6 +121,8 @@ func _process(dt: float) -> void:
 				match a["kind"]:
 					"spin":
 						node.rotate_y(dt * float(a["speed"]))
+					"spinz":
+						pass
 					"sweep":
 						node.rotation.y = sin(t * float(a["speed"])) * 0.9
 					"nod":
