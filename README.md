@@ -99,7 +99,8 @@ Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
   version and joins with a click (password prompt for locked rooms). Client in `game/room_list.gd`, server in
   `tools/room-api/` - one Cloudflare Worker with **no database**: a room exists only while its host heartbeats (every 10 s,
   dropped after 45 s), the host's address is read from the request and only handed back by `/join` after the password check.
-  `RoomList.SERVICE` empty = the feature is off and the menu says so. Hosting still needs UDP 7788 reachable (port forward /
+  Live at `https://cc-rooms.zerobudget.workers.dev` (deploy with `cd tools/room-api && wrangler deploy`, credentials in
+  `~/.frontline/keys.env`). `RoomList.SERVICE` empty = the feature is off and the menu hides the room fields and says so. Hosting still needs UDP 7788 reachable (port forward /
   mesh VPN); LAN just works.
 - **GLA tech tree (Zero Hour)**: Palace gates Black Market, Angry Mob, Jarmen Kell, Rocket Buggy, Bomb Truck, SCUD
   Launcher (+ SCUD promotion) and SCUD Storm; Demo Trap needs the Arms Dealer. Upgrades: Arm the Mob, Camouflage, Toxin

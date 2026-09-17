@@ -3,7 +3,7 @@ extends Node3D
 ## Entry point: main menu, host/join lobby, then hands over to Session + ClientView.
 
 const PORT := 7788
-const GAME_VERSION := "0.3.0"
+const GAME_VERSION := "0.3.1"
 const GAME_TITLE := "CONQUER & COMMAND"
 const GAME_SUBTITLE := "ZERO BUDGET"
 const MAX_PLAYERS := 6

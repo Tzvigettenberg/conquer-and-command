@@ -12,7 +12,7 @@ extends Node
 ## SERVICE empty = this build has no room list: the menu says so and everyone joins by IP.
 ## Override at runtime with --room_api=https://host/path (handy for testing a new backend).
 
-const SERVICE := ""
+const SERVICE := "https://cc-rooms.zerobudget.workers.dev"
 const HEARTBEAT := 10.0
 
 signal rooms_changed(rooms: Array)
