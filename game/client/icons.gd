@@ -154,7 +154,7 @@ func _power_model(pid: String) -> String:
 		"spy_satellite":
 			return "command_center"
 		"a10":
-			return "raptor"
+			return "a10"
 		"emergency_repair":
 			return "dozer"
 		"paradrop":

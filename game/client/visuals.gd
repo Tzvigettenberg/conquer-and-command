@@ -1,26 +1,9 @@
 class_name Visuals
 extends RefCounted
-## Model loading with Synty prefab lookup and primitive fallbacks. Everything is
-## fitted to the simulation's footprint / length so gameplay never depends on art.
+## All models are our own procedural low-poly pieces (Units / Buildings), fitted to the
+## simulation's footprint / length so gameplay never depends on art.
 
-static var _cache: Dictionary = {}
 static var _mat_cache: Dictionary = {}
-static var missing_assets := false
-
-static func prefab(rel: String) -> PackedScene:
-	if rel == "":
-		return null
-	if _cache.has(rel):
-		return _cache[rel]
-	var path := Data.PREFAB + rel
-	var ps: PackedScene = null
-	if ResourceLoader.exists(path):
-		ps = load(path)
-	else:
-		missing_assets = true
-	_cache[rel] = ps
-	return ps
-
 static func team_mat(owner: int, alpha := 1.0) -> StandardMaterial3D:
 	var key := "%d_%.2f" % [owner, alpha]
 	if _mat_cache.has(key):
@@ -132,6 +115,16 @@ static func make_extras(type: String, keys: Array, team: int, aabb: AABB) -> Nod
 				Buildings.box(root, Vector3(0.1, 4.5, 0.1), Vector3(aabb.position.x + 0.6, 2.25, aabb.end.z - 0.6), metal)
 				Buildings.box(root, Vector3(1.4, 0.8, 0.05), Vector3(aabb.position.x + 1.3, 4.0, aabb.end.z - 0.6), tc)
 				any = true
+		"china_nuke", "scud_storm":
+			if keys.has("sw_ready"):
+				# armed: red (nuke) / green (scud) warning beacons pulse on the pad corners
+				var col := Color(1.0, 0.25, 0.15) if type == "china_nuke" else Color(0.4, 1.0, 0.3)
+				for i in range(4):
+					var lamp := Buildings.sphere(root, 0.45, Vector3(-4.0 + (i % 2) * 8.0, 2.4, -4.0 + (i / 2) * 8.0), col)
+					(lamp.material_override as StandardMaterial3D).emission_enabled = true
+					(lamp.material_override as StandardMaterial3D).emission = col
+					(lamp.material_override as StandardMaterial3D).emission_energy_multiplier = 2.0
+				any = true
 		"particle_cannon":
 			if keys.has("sw_ready"):
 				# charged: a glowing orb on the spire and a halo
@@ -153,6 +146,8 @@ static func make_extras(type: String, keys: Array, team: int, aabb: AABB) -> Nod
 	return root
 
 static func make_model(type: String, owner: int) -> Node3D:
+	if type == "a10":
+		return Units.a10(owner)
 	var def := Data.def(type)
 	var is_bld := Data.is_building(type)
 	if is_bld:
@@ -163,28 +158,7 @@ static func make_model(type: String, owner: int) -> Node3D:
 		return Units.make(type, owner)
 	var root := Node3D.new()
 	root.name = "Model"
-	var ps := prefab(def.get("model", ""))
-	if ps != null:
-		var inst := ps.instantiate()
-		strip_physics(inst)
-		var holder := Node3D.new()
-		holder.name = "Mesh"
-		holder.add_child(inst)
-		root.add_child(holder)
-		var aabb := local_aabb(inst)
-		var size := aabb.size
-		var s := 1.0
-		if def.get("cat", "") == "inf":
-			s = float(def.get("length", 1.8)) / maxf(size.y, 0.01)   # infantry: fit by height
-		else:
-			var l := float(def.get("length", 4.0))
-			s = l / maxf(maxf(size.x, size.z), 0.01)
-		holder.scale = Vector3.ONE * s
-		var center := aabb.get_center()
-		holder.position = Vector3(-center.x * s, -aabb.position.y * s, -center.z * s)
-		_setup_turret(root, inst)
-	else:
-		root.add_child(_fallback(type, owner))
+	root.add_child(_fallback(type, owner))
 	if def.get("builder", false):
 		Buildings.dozer_kit(root, owner, float(def.get("length", 4.4)))
 	return root
@@ -213,9 +187,19 @@ static func _rock(root: Node3D, fp: Vector2i, seed_yaw: float) -> void:
 		mi.rotation = Vector3(rng.randf_range(-0.2, 0.2), rng.randf() * TAU, rng.randf_range(-0.2, 0.2))
 		mi.material_override = flat_mat(base.lightened(rng.randf_range(-0.12, 0.12)), false)
 		root.add_child(mi)
-	var slab := box(Vector3(w, 0.5, d), base.darkened(0.15))
-	slab.position.y = 0.25
-	root.add_child(slab)
+	# a few pebbles around the base instead of a slab
+	for i in range(4):
+		var pb := MeshInstance3D.new()
+		var pm := SphereMesh.new()
+		pm.radius = 0.5
+		pm.height = 1.0
+		pm.radial_segments = 6
+		pm.rings = 3
+		pb.mesh = pm
+		pb.scale = Vector3(rng.randf_range(0.4, 0.9), rng.randf_range(0.25, 0.5), rng.randf_range(0.4, 0.9))
+		pb.position = Vector3(rng.randf_range(-w * 0.55, w * 0.55), 0.1, rng.randf_range(-d * 0.55, d * 0.55))
+		pb.material_override = flat_mat(base.lightened(rng.randf_range(-0.1, 0.15)), false)
+		root.add_child(pb)
 
 ## Blocky tree in one cell: trunk + two or three canopy blocks (cactus in the desert).
 static func _tree(root: Node3D, yaw: float, rel: String) -> void:
@@ -433,43 +417,7 @@ static func make_prop(rel: String, fp: Vector2i, yaw: float, kind: String) -> No
 	if kind == "ruin" and fp != Vector2i.ZERO:
 		_ruin(root, fp, yaw)
 		return root
-	var ps := prefab(rel)
-	if ps != null:
-		var inst := ps.instantiate()
-		strip_physics(inst)
-		var pivot := Node3D.new()
-		pivot.rotation.y = yaw
-		pivot.add_child(inst)
-		var aabb := local_aabb(pivot)
-		var s := 1.0
-		if fp != Vector2i.ZERO:
-			var w := fp.x * 2.0
-			var h := fp.y * 2.0
-			s = minf(w / maxf(aabb.size.x, 0.01), h / maxf(aabb.size.z, 0.01))
-			if kind == "tree":
-				s = clampf(s * 1.6, 0.6, 2.5)
-			elif kind == "rock":
-				s = s * 1.0
-			elif kind == "mountain":
-				s = s * 1.0
-		var holder := Node3D.new()
-		holder.scale = Vector3(s, s * (0.65 if kind == "mountain" else 1.0), s)
-		var c := aabb.get_center()
-		holder.position = Vector3(-c.x * s, -aabb.position.y * s * (0.65 if kind == "mountain" else 1.0), -c.z * s)
-		holder.add_child(pivot)
-		root.add_child(holder)
-	elif fp != Vector2i.ZERO:
-		var col := Color(0.45, 0.42, 0.38)
-		if kind == "tree":
-			col = Color(0.2, 0.45, 0.2)
-		elif kind == "mountain":
-			col = Color(0.5, 0.42, 0.35)
-		var hgt := 3.0 + fp.x * 0.5 if kind != "mountain" else 6.0 + fp.x * 0.6
-		var mi := box(Vector3(fp.x * 2.0 * 0.95, hgt, fp.y * 2.0 * 0.95), col)
-		mi.position.y = hgt * 0.5
-		root.add_child(mi)
-	else:
-		root.rotation.y = yaw
+	_deco(root, yaw, rel)
 	return root
 
 ## Bounding box of a model in its own space (used for click picking and icons).
@@ -480,16 +428,6 @@ static func model_aabb(model: Node3D) -> AABB:
 static func make_wreck(type: String) -> Node3D:
 	var def := Data.def(type)
 	var root := Node3D.new()
-	var rel: String = def.get("wreck", "")
-	if rel == "" and Data.is_building(type):
-		var m: String = def.get("model", "")
-		var guess := m.replace(".tscn", "_Destroyed_01.tscn")
-		if ResourceLoader.exists(Data.PREFAB + guess):
-			rel = guess
-		else:
-			guess = m.replace("_01.tscn", "_Destroyed_01.tscn")
-			if ResourceLoader.exists(Data.PREFAB + guess):
-				rel = guess
 	if not Data.is_building(type):
 		# charred, squashed copy of our own model
 		var m := Units.make(type, -1)
@@ -499,24 +437,30 @@ static func make_wreck(type: String) -> Node3D:
 		m.rotation.z = 0.12
 		root.add_child(m)
 		return root
-	var ps := prefab(rel)
-	if ps != null:
-		var inst := ps.instantiate()
-		strip_physics(inst)
-		var aabb := local_aabb(inst)
-		var s := 1.0
-		if Data.is_building(type):
-			var fp: Vector2 = Data.footprint_size(type)
-			s = minf(fp.x * 0.9 / maxf(aabb.size.x, 0.01), fp.y * 0.9 / maxf(aabb.size.z, 0.01))
-		else:
-			s = float(def.get("length", 4.0)) / maxf(maxf(aabb.size.x, aabb.size.z), 0.01)
-		inst.scale = Vector3.ONE * s
-		var c := aabb.get_center()
-		inst.position = Vector3(-c.x * s, -aabb.position.y * s, -c.z * s)
-		root.add_child(inst)
-	else:
-		var sz := Data.footprint_size(type) if Data.is_building(type) else Vector2.ONE * float(def.get("length", 4.0)) * 0.6
-		var mi := box(Vector3(sz.x * 0.7, 0.8, sz.y * 0.7), Color(0.15, 0.13, 0.12))
-		mi.position.y = 0.4
-		root.add_child(mi)
+	# structure: burnt-out rubble sized to the footprint - broken wall stubs, slabs, a girder
+	var fp: Vector2 = Data.footprint_size(type)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(type)
+	var char := Color(0.16, 0.14, 0.13)
+	var ash := Color(0.28, 0.26, 0.24)
+	var hgt := minf(float(def.get("height", 6.0)) * 0.35, 3.5)
+	for sx in [-1.0, 1.0]:
+		var wall := box(Vector3(0.5, hgt * rng.randf_range(0.5, 1.0), fp.y * rng.randf_range(0.35, 0.7)), char)
+		wall.position = Vector3(sx * fp.x * 0.42, wall.mesh.size.y * 0.5, rng.randf_range(-0.2, 0.2) * fp.y)
+		root.add_child(wall)
+		var wall2 := box(Vector3(fp.x * rng.randf_range(0.3, 0.6), hgt * rng.randf_range(0.3, 0.8), 0.5), ash)
+		wall2.position = Vector3(rng.randf_range(-0.2, 0.2) * fp.x, wall2.mesh.size.y * 0.5, sx * fp.y * 0.42)
+		root.add_child(wall2)
+	for i in range(5):
+		var slab := box(Vector3(rng.randf_range(1.0, 2.5), rng.randf_range(0.3, 0.8), rng.randf_range(1.0, 2.5)), ash if i % 2 == 0 else char)
+		slab.position = Vector3(rng.randf_range(-0.35, 0.35) * fp.x, slab.mesh.size.y * 0.5, rng.randf_range(-0.35, 0.35) * fp.y)
+		slab.rotation = Vector3(rng.randf_range(-0.3, 0.3), rng.randf() * TAU, rng.randf_range(-0.3, 0.3))
+		root.add_child(slab)
+	var girder := box(Vector3(0.25, 0.25, minf(fp.x, fp.y) * 0.7), Color(0.3, 0.22, 0.16))
+	girder.position = Vector3(0, 1.2, 0)
+	girder.rotation = Vector3(0.5, 0.8, 0.3)
+	root.add_child(girder)
+	var floor := box(Vector3(fp.x * 0.95, 0.12, fp.y * 0.95), char)
+	floor.position.y = 0.06
+	root.add_child(floor)
 	return root

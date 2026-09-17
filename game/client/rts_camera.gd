@@ -129,10 +129,10 @@ func _process(dt: float) -> void:
 				v.y += 1
 			elif mp.y > vs.y - EDGE:
 				v.y -= 1
-	if Input.is_key_pressed(KEY_Q) or Input.is_key_pressed(KEY_KP_4):
+	if Input.is_key_pressed(KEY_KP_4) or Input.is_key_pressed(KEY_BRACKETLEFT):
 		yaw += dt * 1.5
 		_apply()
-	if Input.is_key_pressed(KEY_E) or Input.is_key_pressed(KEY_KP_6):
+	if Input.is_key_pressed(KEY_KP_6) or Input.is_key_pressed(KEY_BRACKETRIGHT):
 		yaw -= dt * 1.5
 		_apply()
 	if Input.is_key_pressed(KEY_KP_8):

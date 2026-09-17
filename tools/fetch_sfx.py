@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch CC0 / CC-BY sound effects from Freesound for Frontline.
+"""Fetch CC0 / CC-BY sound effects from Freesound for Conquer & Command: Zero Budget.
 
 Usage: FREESOUND_KEY=... python3 tools/fetch_sfx.py [name ...]
 Writes audio/sfx/<name>.ogg plus audio/sfx/CREDITS.md. Only re-downloads entries

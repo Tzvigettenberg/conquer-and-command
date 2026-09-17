@@ -336,14 +336,26 @@ func _paint_road(a: Vector2, b: Vector2) -> void:
 					if v > road_img.get_pixel(x, y).r:
 						road_img.set_pixel(x, y, Color(v, 0, 0))
 
+var prop_nodes: Array = []   # [{node, p}] so props can hide under the shroud
+
 func _build_props() -> void:
 	for pr in map["props"]:
-		if pr.get("kind", "") == "mountain":
-			continue   # drawn as raised terrain
+		if pr.get("kind", "") == "mountain" or pr.get("kind", "") == "civ":
+			continue   # drawn as raised terrain / spawned as a garrisonable entity
 		var n := Visuals.make_prop(pr["m"], pr["fp"], pr["yaw"], pr.get("kind", ""))
 		var p: Vector2 = pr["p"]
 		n.position = Vector3(p.x, 0, p.y)
 		add_child(n)
+		n.visible = false
+		prop_nodes.append({"node": n, "p": p})
+
+## Trees, rocks and ruins only show once the ground under them has been explored.
+func _update_prop_visibility() -> void:
+	for it in prop_nodes:
+		var n: Node3D = it["node"]
+		var ex := is_explored(it["p"])
+		if n.visible != ex:
+			n.visible = ex
 
 func _build_fog() -> void:
 	fog_cells = int(ceil(size / Vision.FCELL))
@@ -389,6 +401,7 @@ func update_fog(bits: PackedByteArray) -> void:
 		var y := i / fog_cells
 		fog_img.set_pixel(x, y, Color(float(v), float(explored[i]), 0.0))
 	fog_tex.update(fog_img)
+	_update_prop_visibility()
 
 func fog_visible(p: Vector2) -> bool:
 	var x := clampi(int(p.x / Vision.FCELL), 0, fog_cells - 1)
@@ -411,3 +424,4 @@ func reveal_all() -> void:
 	visible_cells.fill(1)
 	fog_img.fill(Color(1, 1, 0))
 	fog_tex.update(fog_img)
+	_update_prop_visibility()

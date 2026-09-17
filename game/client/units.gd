@@ -10,7 +10,7 @@ const BODY := Color(0.56, 0.54, 0.44)       # USA desert tan
 const BODY_DARK := Color(0.42, 0.41, 0.34)
 const METAL := Color(0.3, 0.31, 0.34)
 const DARK := Color(0.16, 0.16, 0.18)
-const GLASS := Color(0.3, 0.55, 0.8)
+const GLASS := Color(0.42, 0.5, 0.54)
 const RUBBER := Color(0.12, 0.12, 0.13)
 const SKIN := Color(0.85, 0.68, 0.55)
 const UNIFORM := Color(0.36, 0.4, 0.3)
@@ -96,6 +96,12 @@ static func make(type: String, team: int) -> Node3D:
 			_jet(root, tc, l, "aurora")
 		"ranger", "missile_defender", "pathfinder", "burton":
 			_soldier(root, tc, type)
+		"scout_drone", "battle_drone", "hellfire_drone", "spy_drone":
+			_drone(root, tc, type)
+		"sentry_drone":
+			_sentry_drone(root, tc, l)
+		"microwave_tank":
+			_microwave_tank(root, tc, l)
 		# ---- China ----
 		"china_dozer":
 			_dozer(root, tc, l, CN_BODY, CN_DARK)
@@ -270,6 +276,59 @@ static func _star_decal(root: Node3D, pos: Vector3, r: float) -> void:
 	for i in range(5):
 		var arm := box(root, Vector3(r * 0.3, r * 0.02, r), pos, CN_RED, Vector3(0, i * TAU / 5.0, 0))
 		arm.position = pos
+
+## Tiny quad-rotor escort drone (scout: camera pod, battle: gun, hellfire: two missiles, spy: big lens).
+static func _drone(root: Node3D, tc: Color, type: String) -> void:
+	var body := box(root, Vector3(0.5, 0.22, 0.5), Vector3(0, 0.5, 0), METAL)
+	box(root, Vector3(0.3, 0.06, 0.3), Vector3(0, 0.63, 0), tc)
+	for i in range(4):
+		var a := i * PI * 0.5 + PI * 0.25
+		var arm := box(root, Vector3(0.08, 0.05, 0.55), Vector3(sin(a) * 0.35, 0.5, cos(a) * 0.35), DARK)
+		arm.rotation.y = a
+		_rotor(root, "Rotor%d" % i, Vector3(sin(a) * 0.62, 0.58, cos(a) * 0.62), 0.28, 2)
+	match type:
+		"scout_drone", "spy_drone":
+			Buildings.sphere(root, 0.12 if type == "scout_drone" else 0.18, Vector3(0, 0.36, 0.2), Color(0.2, 0.5, 0.9))
+		"battle_drone":
+			box(root, Vector3(0.06, 0.06, 0.5), Vector3(0, 0.36, 0.3), DARK)
+		"hellfire_drone":
+			for sx in [-1.0, 1.0]:
+				cyl(root, 0.05, 0.05, 0.45, Vector3(sx * 0.2, 0.36, 0.05), Color(0.85, 0.85, 0.8), Vector3(PI * 0.5, 0, 0), 6).name = "Missile%d" % int(sx + 1)
+	body.name = "Body"
+
+static func _sentry_drone(root: Node3D, tc: Color, l: float) -> void:
+	# low six-wheeled robot with a sensor mast and a small gun
+	var w := l * 0.7
+	box(root, Vector3(w, 0.5, l * 0.9), Vector3(0, 0.55, 0), BODY_DARK)
+	box(root, Vector3(w * 0.8, 0.12, l * 0.6), Vector3(0, 0.86, 0), tc)
+	for sz in [-1.0, 0.0, 1.0]:
+		for sx in [-1.0, 1.0]:
+			wheel(root, 0.28, 0.2, Vector3(sx * w * 0.5, 0.28, sz * l * 0.32), "Wheel%s%d" % ["L" if sx < 0 else "R", int(sz + 1)])
+	cyl(root, 0.05, 0.05, 1.2, Vector3(-w * 0.25, 1.4, -l * 0.2), METAL, Vector3.ZERO, 6)
+	Buildings.sphere(root, 0.16, Vector3(-w * 0.25, 2.05, -l * 0.2), Color(0.2, 0.6, 1.0)).name = "Sensor"
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(w * 0.15, 0.85, 0.1)
+	root.add_child(turret)
+	box(turret, Vector3(0.3, 0.25, 0.4), Vector3(0, 0.15, 0), METAL)
+	box(turret, Vector3(0.06, 0.06, 0.9), Vector3(0, 0.18, 0.5), DARK)
+	root.set_meta("turret", turret)
+
+static func _microwave_tank(root: Node3D, tc: Color, l: float) -> void:
+	_tank(root, tc, l, false)
+	var old := root.get_meta("turret") as Node3D
+	old.queue_free()
+	var w := l * 0.62
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.3, -0.1)
+	root.add_child(turret)
+	box(turret, Vector3(w * 0.4, 0.4, l * 0.3), Vector3(0, 0.2, 0), BODY)
+	var dish := cyl(turret, 1.3, 0.3, 0.5, Vector3(0, 0.75, 0.3), Color(0.8, 0.82, 0.85), Vector3(-PI * 0.4, 0, 0), 14)
+	dish.name = "Dish"
+	var em := Buildings.sphere(turret, 0.2, Vector3(0, 0.95, 0.75), Color(0.6, 0.9, 1.0))
+	em.name = "Emitter"
+	root.set_meta("turret", turret)
 
 # ---------------------------------------------------------------------------
 # China vehicles
@@ -761,6 +820,33 @@ static func _jet(root: Node3D, tc: Color, l: float, kind: String) -> void:
 		root.add_child(gear)
 		box(gear, Vector3(0.07, 0.7, 0.07), gp, METAL)
 		cyl(gear, 0.16, 0.16, 0.12, gp - Vector3(0, 0.35, 0), RUBBER, Vector3(0, 0, PI * 0.5), 8)
+
+## A-10 Warthog for the strike flyover (not a playable unit): straight wings, twin
+## tail-mounted engines, twin fins, the big nose gun.
+static func a10(team: int) -> Node3D:
+	var root := Node3D.new()
+	var tc := _tc(team)
+	var l := 8.0
+	var body := Color(0.45, 0.48, 0.45)
+	var body2 := Color(0.32, 0.35, 0.33)
+	var w := 1.1
+	var y := 1.05
+	box(root, Vector3(w, w * 0.9, l * 0.55), Vector3(0, y, 0), body)
+	prism(root, Vector3(w, w * 0.8, l * 0.22), Vector3(0, y - 0.05, l * 0.38), body2, Vector3(-PI * 0.5, 0, 0))
+	box(root, Vector3(w * 0.7, w * 0.5, l * 0.16), Vector3(0, y + w * 0.6, l * 0.14), GLASS)
+	cyl(root, 0.16, 0.16, 1.8, Vector3(0, y - 0.25, l * 0.5), DARK, Vector3(PI * 0.5, 0, 0), 8).name = "Gun"
+	box(root, Vector3(l * 0.95, 0.12, l * 0.16), Vector3(0, y - 0.1, 0.2), body)          # straight wing
+	for sx in [-1.0, 1.0]:
+		box(root, Vector3(l * 0.4, 0.05, l * 0.05), Vector3(sx * l * 0.28, y - 0.06, 0.1), tc)
+		var eng := cyl(root, 0.42, 0.42, 2.2, Vector3(sx * 1.1, y + 0.7, -l * 0.28), body2, Vector3(PI * 0.5, 0, 0), 10)
+		eng.name = "Engine%d" % int(sx + 1)
+		cyl(root, 0.3, 0.3, 0.2, Vector3(sx * 1.1, y + 0.7, -l * 0.42), Color(0.9, 0.5, 0.2), Vector3(PI * 0.5, 0, 0), 8)
+		box(root, Vector3(0.1, 1.4, l * 0.12), Vector3(sx * 1.6, y + 1.0, -l * 0.44), body2)   # twin fins
+	box(root, Vector3(3.6, 0.08, l * 0.1), Vector3(0, y + 0.3, -l * 0.44), body)               # tailplane
+	for i in range(4):
+		var sx := -1.0 if i % 2 == 0 else 1.0
+		cyl(root, 0.1, 0.1, 1.2, Vector3(sx * (1.4 + (i / 2) * 1.0), y - 0.45, 0.2), Color(0.85, 0.85, 0.8), Vector3(PI * 0.5, 0, 0), 6).name = "Missile%d" % i
+	return root
 
 ## Cargo plane for the supply drop flyover (not a playable unit).
 static func cargo_plane(team: int) -> Node3D:

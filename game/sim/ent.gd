@@ -62,6 +62,7 @@ var capture_t := 0.0
 var upg_done: Dictionary = {}  # per-building upgrades (control rods)
 var pads: Array = []           # airfield: entity ids parked
 var sold := false
+var sell_t := 0.0              # seconds until the sale goes through
 
 # ---- gatherer / jets ----
 var carry := 0                 # boxes carried
@@ -156,6 +157,12 @@ var cargo: Array[int] = []     # transports: ids of the units inside
 var inside_id := -1            # riding in this transport (-1 = not)
 var linked_until := -1.0       # patriot: designated by a linked battery until this time
 var pad_user := -1             # supply center: the chinook currently on the pad
+var host_id := -1              # drones: the vehicle this drone escorts
+var drone_id := -1             # vehicles: the drone escorting it (-1 = none)
+var expire_t := -1.0           # spy drone: sim time it disappears
+var ability_t := -100.0        # detention camp etc.: next time the special ability may fire
+var crush_t := -1.0            # crusher charging an infantry target until this time (-1 = not charging)
+var shuffles := 0              # consecutive un-stick attempts on the current path
 var frenzy_t := -100.0         # China Frenzy: +30% damage until this sim time
 var horde := false             # China horde bonus active (cached)
 var horde_tick := -100         # tick the horde check last ran

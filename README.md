@@ -1,4 +1,4 @@
-# Frontline — 1v1 RTS (Generals-style)
+# Conquer & Command: Zero Budget
 
 Top-down RTS built in Godot 4.7, modelled on Command & Conquer Generals: Zero Hour
 (USA faction, mirror match). Server-authoritative multiplayer from day one:
@@ -19,11 +19,11 @@ host rejects mismatched versions.
 Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0.1.
 
 ### Shareable build (no Godot needed)
-`build/Frontline.exe` is a single-file Windows build (everything embedded, ~230 MB; `build/Frontline_v0.1.0_win64.zip` ~90 MB). Send the zip to a
+`build/ConquerAndCommand.exe` is a single-file Windows build (everything embedded, ~230 MB; `build/ConquerAndCommand_ZeroBudget_v0.2.0_win64.zip` ~90 MB). Send the zip to a
 friend, they double-click it. Rebuild after code changes with the editor (Project → Export → Windows Desktop,
 templates installed once via Editor → Manage Export Templates) or headless:
 ```
-godot --headless --path . --export-release "Windows Desktop" build/Frontline.exe
+godot --headless --path . --export-release "Windows Desktop" build/ConquerAndCommand.exe
 ```
 Both sides must run the same version (`GAME_VERSION` in `game/main.gd`); the host rejects mismatches.
 Internet play: the host forwards **UDP 7788** on their router and shares their public IP, or everybody joins a
@@ -94,6 +94,14 @@ becomes an observer automatically (*Play* takes them back into a slot). Observer
 `audio/music` — 14 Kevin MacLeod tracks (menu, game, victory, defeat), CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
 
+## What's in (M8) - "Zero Budget"
+- Renamed: **Conquer & Command: Zero Budget** (v0.2.0). Zero Hour-style front end (gunmetal panels, brass rules, amber titles, angled buttons).
+- Generals hotkeys: Q / W / E select combat units / aircraft / same type on screen (tap twice for the whole map), X scatters, Ctrl+Up next builder, camera rotates with [ ], numpad or middle-drag (Q/E no longer rotate). A + minimap click (or a double-click on the minimap) attack-moves there. Whole promotion cards are clickable.
+- USA additions: escort drones bought per vehicle (Scout $100 detects stealth, Battle $200 gun + repairs, Hellfire $500 missiles - one per vehicle, buy again if it dies), Sentry Drone, Microwave Tank (cooks garrisons), Detention Camp (Intelligence reveals every enemy for 12 s), Spy Drone and Spectre Gunship powers, Countermeasures / Chemical Suits / Sentry Drone Guns upgrades. A-10 Warthogs are actual Warthogs now.
+- Garrisonable civilian buildings on every map (village in the middle, farmsteads on each approach): walk infantry in, they fire from the windows and are immune to everything except flame, toxins, microwaves and radiation, which reach inside. Enemies auto-target buildings with a hostile garrison; a flag shows who holds it.
+- Sim fixes: selling keeps the building standing for a few seconds (SELLING label) instead of un-building it; units on a job no longer give up when boxed in and shuffle sideways to un-stick; garrisoning a Firebase / Bunker works (units close the last metre); unlocks show up on open command cards immediately; jets attack-move properly (fly there, circle 15 s hunting, then home) so AI planes stop taxiing in circles; Aurora is untouchable and supersonic on the way in, slow and vulnerable after the drop; tanks charge and crush nearby infantry; Chinooks winch supplies from a hover (only AA can touch them) and only land to pick up passengers; strikes and superweapons reveal their area to the owner while they happen; the particle beam is steered by clicks (right-click leaves it) and crawls slowly.
+- Client: beams reach from the heavens and back up from the spire; particle cannon rings light up one by one when charged (nuke / SCUD pads get beacons); stealth pulses in and out of view; structures out of sight go dim and frozen with no bars or animation; trees, rocks and ruins stay hidden under unexplored shroud; brighter selection rings with corner brackets, and a drag box lights up what it will grab; explosions scale with the hit (infantry rockets are puffs now); no more team-blue windows, no slabs under rocks; the last Synty remnants are gone (own rubble wrecks); a proper thunk when units board; every click on a unit answers with a voice line.
+
 ## What's in (M7)
 - Two new factions, China and GLA, with full Zero Hour-style rosters (26 units, 21 structures, 10 upgrades, 10 general's powers, two superweapons), each with its own procedural models, a faction picker per lobby slot (humans and AIs, Random by default), faction-aware bots with their own build orders, and per-faction mechanics: China hordes, hackers, paired Red Guards, packed Troop Crawlers, ground supply trucks, propaganda healing; GLA no-power base, worker builders/haulers, suicide units, tunnel network pooling, demo traps, black market income, junk repair, cash bounty.
 - New sim systems: lingering damage zones (radiation / toxin), suicide weapons, ballistic superweapons (nuke, SCUD storm), flame weapons, garrison unload fix, transports that spawn loaded.
@@ -104,7 +112,7 @@ Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
 - Observer mode: humans can step out of the slot list and watch (AI vs AI works with nobody playing). Observers get every entity, no fog, all events and a live scoreboard; commands from observers are dropped by the sim. Lobby: Observe / Play buttons, "Watching:" on the map preview, full lobby → auto-observer.
 - Composite Armor is stat-only again (no bolt-on plates).
 - Fixed a particle burst being added to the FX tree twice (console spam during big fights).
-- `export_presets.cfg` + `build/Frontline.exe`: single-file Windows build to share with friends.
+- `export_presets.cfg` + `build/ConquerAndCommand.exe`: single-file Windows build to share with friends.
 
 ## What's in (M6.1)
 - Transports (Generals rules): Humvee carries 5 infantry who fire from inside; Chinook has 8 slots (infantry 1, vehicles 3) and lands to load; Firebase garrisons 4 infantry who fire from the sandbags (you see them). Right-click the transport with units selected to load, U / "Unload" to let them out.

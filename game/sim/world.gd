@@ -35,6 +35,7 @@ var events: Array = []             # pending FX events for this snapshot
 var strikes: Array = []            # delayed general's powers
 var beams: Array = []              # active particle cannon beams
 var zones: Array = []              # lingering radiation / toxin fields [{kind, p, r, dps, until}]
+var gunships: Array = []           # Spectre gunships on station [{p, owner, until, next, next_big}]
 var next_sid := 1                  # shot ids (client matches projectiles for mid-air intercepts)
 var spatial: Dictionary = {}
 var known: Array = []              # per player: id -> last tick included
@@ -95,7 +96,7 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 	# map obstacles
 	for pr in map["props"]:
 		var fp: Vector2i = pr["fp"]
-		if fp != Vector2i.ZERO:
+		if fp != Vector2i.ZERO and pr.get("kind", "") != "civ":
 			grid.set_cells(PathGrid.footprint_cells(pr["p"], fp), true)
 	for rd in map.get("ridges", []):
 		grid.set_cells(PathGrid.capsule_cells(rd["a"], rd["b"], float(rd["w"]) + 0.5), true)
@@ -104,6 +105,8 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 		e.boxes = d["boxes"]
 	for p in map["derricks"]:
 		spawn("oil_derrick", -1, p)
+	for cv in map.get("civ", []):
+		spawn(cv["type"], -1, PathGrid.snap_center(cv["p"], Data.BUILDINGS[cv["type"]]["fp"], float(cv.get("yaw", 0.0))), true, float(cv.get("yaw", 0.0)))
 	for i in range(players.size()):
 		var sl: int = players[i]["slot"]
 		var s: Vector2 = map["starts"][sl]
@@ -214,6 +217,10 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 		return
 	e.alive = false
 	dead_list.append(e)
+	if e.drone_id >= 0:
+		var dr: Ent = ents.get(e.drone_id)
+		if dr != null and dr.alive:
+			destroy(dr, "killed", killer)
 	var other_tunnel: Ent = null
 	if e.def.get("tunnel", false):
 		for o: Ent in ents.values():
@@ -335,7 +342,7 @@ func _recompute_power(p: int) -> void:
 	var prod := 0
 	var use := 0
 	for e: Ent in ents.values():
-		if not e.alive or e.owner != p or not e.is_building or not e.complete:
+		if not e.alive or e.owner != p or not e.is_building or not e.complete or e.sold:
 			continue
 		var pw := int(e.def.get("power", 0))
 		if pw > 0:
@@ -446,6 +453,7 @@ func step(dt: float) -> void:
 	_tick_strikes()
 	_tick_beams(dt)
 	_tick_zones(dt)
+	_tick_gunships(dt)
 	for b in bots:
 		b.think(dt)
 	if tick % 10 == 0:
@@ -485,6 +493,13 @@ func _tick_unit(e: Ent, dt: float) -> void:
 		e.last_pos = e.pos
 		if car.def.get("fire_ports", false) and e.has_weapons():
 			_tick_passenger(e, car, dt)
+		return
+	if e.def.get("drone", false):
+		_tick_drone(e, dt)
+		e.last_pos = e.pos
+		return
+	if e.expire_t > 0.0 and time > e.expire_t:
+		destroy(e, "expired")
 		return
 	if e.is_jet():
 		_tick_jet(e, dt)
@@ -555,6 +570,24 @@ func _tick_unit(e: Ent, dt: float) -> void:
 			_do_capture(e, dt)
 	e.last_pos = e.pos
 
+## Escort drone: circles its vehicle, shoots what the vehicle fights (or anything close), repairs it.
+func _tick_drone(e: Ent, dt: float) -> void:
+	var host: Ent = ents.get(e.host_id)
+	if host == null or not host.alive:
+		destroy(e, "killed", null)
+		return
+	var ang := time * 1.6 + float(e.id)
+	e.pos = host.pos + Vector2(sin(ang), cos(ang)) * 2.6
+	e.alt = float(e.def.get("alt", 5.0)) + host.alt
+	e.yaw = wrapf(ang + PI * 0.5, -PI, PI)
+	e.state = "idle"
+	if e.def.has("repairs") and host.hp < host.max_hp:
+		host.hp = minf(host.max_hp, host.hp + float(e.def["repairs"]) * dt)
+	for i in range(e.cds.size()):
+		e.cds[i] = maxf(0.0, e.cds[i] - dt)
+	if e.has_weapons():
+		_tick_passenger(e, host, dt)
+
 ## Idle dozers fix up damaged friendly structures nearby on their own.
 func _dozer_auto_repair(e: Ent) -> void:
 	var best: Ent = null
@@ -578,6 +611,7 @@ func _dozer_auto_repair(e: Ent) -> void:
 func _next_order(e: Ent) -> void:
 	e.state = "idle"
 	e.target_id = -1
+	e.crush_t = -1.0
 	e.path = PackedVector2Array()
 	e.path_i = 0
 	if not e.resume.is_empty():
@@ -720,31 +754,46 @@ func _follow_path(e: Ent, dt: float) -> bool:
 		return true
 	var last := e.path_i == e.path.size() - 1
 	var wp := e.path[e.path_i]
-	if last and not e.is_air():
-		# crowd arrival: give up when close and boxed in by stopped friends
+	if last and not e.is_air() and (e.state == "move" or e.state == "amove" or e.state == "guard"):
+		# crowd arrival: a plain move gives up when close and boxed in by parked friends
+		# (units on a job - boarding, building, gathering - keep pushing through)
 		var dg := e.pos.distance_to(wp)
 		if dg < 4.0 + e.radius * 2.0:
 			for o: Ent in query(e.pos, e.radius + 1.0):
-				if o != e and not o.is_building and o.owner == e.owner and o.state != "move" and o.state != "amove" and o.pos.distance_to(e.pos) < e.radius + o.radius + 0.3:
+				if o != e and not o.is_building and o.owner == e.owner and not _is_travelling(o) and o.pos.distance_to(e.pos) < e.radius + o.radius + 0.3:
 					return true
 	if _move_toward(e, wp, dt, last):
 		e.path_i += 1
 		if e.path_i >= e.path.size():
 			return true
-	# stuck detection: shove parked friends out of the way, then re-path
+	# stuck detection: shove parked friends out of the way, shuffle sideways, then re-path
 	if e.pos.distance_to(e.last_pos) < e.speed * dt * 0.1:
 		e.stuck_t += dt
 		if e.stuck_t > 0.8:
 			_nudge_idle_friends(e)
 		if e.stuck_t > 1.5:
 			e.stuck_t = 0.0
+			e.shuffles += 1
 			var goal := e.path[e.path.size() - 1]
-			_set_path(e, goal)
-			if e.path.size() <= 1:
+			if e.shuffles % 2 == 1:
+				# sidestep to a random free spot nearby, then carry on to the goal
+				var side := grid.center_of(grid.nearest_free(grid.cell_of(e.pos + Vector2.from_angle(randf() * TAU) * randf_range(2.5, 5.0))))
+				_set_path(e, side)
+				e.path.append(goal)
+			else:
+				_set_path(e, goal)
+			if e.path.size() <= 1 and e.shuffles > 4:
+				e.shuffles = 0
 				return true
 	else:
 		e.stuck_t = 0.0
+		if e.path_i > 0:
+			e.shuffles = 0
 	return false
+
+## Units that are on their way somewhere (as opposed to parked) - they don't count as a crowd.
+func _is_travelling(o: Ent) -> bool:
+	return o.state in ["move", "amove", "board", "gather", "build", "repair", "capture", "attack", "attack_ground", "unload"]
 
 func _set_path(e: Ent, goal: Vector2) -> void:
 	e.path_i = 0
@@ -784,8 +833,13 @@ func _auto_acquire(e: Ent, dt: float) -> bool:
 	var best: Ent = null
 	var best_score := 1e18
 	for o: Ent in query(centre, rng):
-		if o == e or not o.alive or allied(o.owner, e.owner) or o.owner < 0:
+		if o == e or not o.alive or allied(o.owner, e.owner):
 			continue
+		if o.owner < 0:
+			# neutral: only a civilian building with enemies holed up inside is worth shooting
+			var go := _garrison_owner(o) if o.def.get("garrison", false) else -1
+			if go < 0 or allied(go, e.owner):
+				continue
 		if _is_stealthed(o) and not o.detected:
 			continue
 		if _pick_weapon(e, o) < 0:
@@ -907,6 +961,14 @@ func _do_attack(e: Ent, dt: float) -> void:
 	if e.def.get("turret", false):
 		if not _aim_turret(e, want, dt) and d <= rng:
 			return   # still traversing
+	if e.def.get("crusher", false) and t.def.get("crushable", false) and d < 14.0 and e.can_move() and (e.crush_t < 0.0 or time < e.crush_t) and not t.is_air():
+		# tanks run infantry down when they are close enough: drive straight through them
+		if e.crush_t < 0.0:
+			e.crush_t = time + 4.0
+		if e.cds[wi] <= 0.0 and d <= rng:
+			_fire(e, wi, t)
+		_move_toward(e, t.pos, dt)
+		return
 	if d <= rng and d >= min_rng - t.radius:
 		# in range: aim and fire
 		if e.def.get("turret", false):
@@ -1227,9 +1289,22 @@ func _apply_hit(attacker: Ent, wid: String, target: Ent, pos: Vector2, dmg: floa
 func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 	if not t.alive:
 		return
+	if _supersonic(t):
+		return   # Aurora on its bombing run: nothing can touch it until the bomb is gone
 	var mult := Data.armor_mult(t.def.get("armor", ""), dtype)
-	if t.owner < 0 and t.def.get("neutral", false) and not t.def.get("capturable", false):
+	if t.owner < 0 and t.def.get("neutral", false) and not t.def.get("capturable", false) and not t.def.get("garrison", false):
 		return
+	if t.def.get("garrison", false) and dtype in ["FLAME", "RADIATION"] and not t.cargo.is_empty():
+		# fire, toxins and microwaves get in through the windows: the garrison burns, the walls barely notice
+		for id in t.cargo.duplicate():
+			var occ: Ent = ents.get(id)
+			if occ != null and occ.alive:
+				_damage(occ, amount * 1.5, dtype, attacker)
+		mult *= 0.2
+	if t.owner >= 0 and t.is_air() and dtype in ["INFANTRY_MISSILE", "JET_MISSILES", "AA", "EXPLOSION"] and players[t.owner]["upgrades"].has("countermeasures"):
+		mult *= 0.75
+	if t.owner >= 0 and t.cat() == "inf" and dtype in ["FLAME", "RADIATION"] and players[t.owner]["upgrades"].has("chemical_suits") and attacker == null:
+		mult *= 0.25   # suits help against lingering clouds; a flamethrower still burns
 	if _plan_of(t) == "hold":
 		mult *= 0.9
 	elif t.is_building and t.def.get("plans", false) and t.plan == "hold" and t.plan_t <= 0.0:
@@ -1242,7 +1317,7 @@ func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 			session.s_msg(pl["peer"], "%s under attack!" % ("Base" if t.is_building else "Units"))
 			events.append({"k": "alert", "p": t.pos, "d": [t.pos.x, t.pos.y], "o": t.owner, "only": t.owner})
 		# units that are being shot from outside their reach go and find the shooter
-		if not t.is_building and (t.state == "idle" or t.state == "guard") and t.has_weapons() and attacker.alive and _pick_weapon(t, attacker) >= 0 and not t.is_jet():
+		if not t.is_building and not t.def.get("drone", false) and (t.state == "idle" or t.state == "guard") and t.has_weapons() and attacker.alive and _pick_weapon(t, attacker) >= 0 and not t.is_jet():
 			if t.state == "guard":
 				t.resume = {"state": "guard", "goal": t.guard_pos, "r": t.guard_radius}
 			else:
@@ -1370,12 +1445,20 @@ func _tick_jet(e: Ent, dt: float) -> void:
 		"fly":
 			_jet_fly(e, dt, home)
 
+## Aurora with its bomb still aboard, in the air: supersonic dash, invulnerable.
+func _supersonic(e: Ent) -> bool:
+	if not e.def.get("supersonic", false) or not e.is_jet() or e.flight != "fly":
+		return false
+	return e.clip.size() > 0 and e.clip[0] > 0 and (e.state == "attack" or e.state == "attack_ground" or e.state == "amove")
+
 func _jet_steer(e: Ent, to: Vector2, dt: float, spd_mult := 1.0) -> void:
 	var want := atan2(to.x - e.pos.x, to.y - e.pos.y)
 	var turn := deg_to_rad(float(e.def.get("turn", 120.0))) * dt
 	var diff := wrapf(want - e.yaw, -PI, PI)
 	e.yaw = wrapf(e.yaw + clampf(diff, -turn, turn), -PI, PI)
 	var spd := e.speed * spd_mult
+	if e.def.get("supersonic", false):
+		spd *= 1.7 if _supersonic(e) else 0.6   # Aurora: a dash in, a limp home
 	e.pos += Vector2(sin(e.yaw), cos(e.yaw)) * spd * dt
 	e.pos.x = clampf(e.pos.x, 2.0, map_size - 2.0)
 	e.pos.y = clampf(e.pos.y, 2.0, map_size - 2.0)
@@ -1420,6 +1503,18 @@ func _jet_fly(e: Ent, dt: float, home: Ent) -> void:
 			_jet_steer(e, e.goal, dt)
 			if e.pos.distance_to(e.goal) < 10.0:
 				_next_order(e)
+		"amove":
+			# fly to the spot hunting for targets on the way; circle there for a while before heading home
+			if _auto_acquire(e, dt):
+				return
+			if e.pos.distance_to(e.goal) > 14.0:
+				e.timer = 0.0
+				_jet_steer(e, e.goal, dt)
+			else:
+				e.timer += dt
+				_jet_loiter(e, e.goal, dt)
+				if e.timer > 15.0:
+					_next_order(e)
 		"guard":
 			if not _auto_acquire(e, dt):
 				_jet_loiter(e, e.guard_pos, dt)
@@ -1566,8 +1661,25 @@ func _cargo_ids(t: Ent) -> Array:
 				out.append(id)
 	return out
 
+## Owner of whoever is inside a neutral civilian building (-1 = empty).
+func _garrison_owner(b: Ent) -> int:
+	for id in b.cargo:
+		var u: Ent = ents.get(id)
+		if u != null and u.alive:
+			return u.owner
+	return -1
+
 func _can_board(u: Ent, t: Ent) -> bool:
-	if t == null or not t.alive or u == t or not t.def.has("cargo") or not allied(u.owner, t.owner):
+	if t == null or not t.alive or u == t or not t.def.has("cargo"):
+		return false
+	if t.def.get("garrison", false):
+		# civilian building: anyone may move in while it's empty or held by friends
+		var go := _garrison_owner(t)
+		if go >= 0 and not allied(go, u.owner):
+			return false
+		if u.cat() != "inf":
+			return false
+	elif not allied(u.owner, t.owner):
 		return false
 	if t.is_building and not t.complete:
 		return false
@@ -1682,9 +1794,9 @@ func _tick_passenger(e: Ent, car: Ent, dt: float) -> void:
 	var wd: Dictionary = Data.WEAPONS[e.weapon_ids()[wi]]
 	if edge_dist(car.pos, t) <= _range(e, wd) and e.cds[wi] <= 0.0 and (int(wd.get("clip", 0)) == 0 or e.clip[wi] > 0):
 		_fire(e, wi, t)
-		# the tracer comes from the vehicle on screen
+		# the tracer comes from the vehicle on screen (drones fire from where they hover)
 		var ev: Dictionary = events[events.size() - 1]
-		if ev["k"] == "shot":
+		if ev["k"] == "shot" and not e.def.get("drone", false):
 			ev["d"][0] = car.id
 
 # ---- gathering ----------------------------------------------------------------
@@ -1728,9 +1840,9 @@ func _do_gather(e: Ent, dt: float) -> void:
 			if d > dock.radius + 2.0:
 				_move_toward(e, dock.pos + (e.pos - dock.pos).normalized() * (dock.radius + 1.0), dt)
 				return
-			# land beside the crates, then load one box at a time
-			e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
-			if e.alt > 0.9:
+			# hover over the crates and winch them up one at a time (only AA can touch it up here)
+			e.alt = move_toward(e.alt, 6.0, 5.0 * dt)
+			if e.alt > 7.0:
 				return
 		elif not _approach_building(e, dock, dt, 2.5):
 			return
@@ -1771,9 +1883,9 @@ func _do_gather(e: Ent, dt: float) -> void:
 				_move_toward(e, c.pos, dt)
 				return
 			c.pad_user = e.id
-			# land on the H and unload
-			e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
-			if e.alt > 0.9:
+			# hover over the H and lower the load
+			e.alt = move_toward(e.alt, 6.0, 5.0 * dt)
+			if e.alt > 7.0:
 				return
 		else:
 			if not _approach_building(e, c, dt, 3.0):
@@ -1811,7 +1923,9 @@ func _approach_building(e: Ent, b: Ent, dt: float, reach := 4.2) -> bool:
 	if e.path.is_empty() or e.repath_t <= 0.0:
 		e.repath_t = 2.0
 		_set_path(e, grid.center_of(grid.approach_cell(e.pos, b.cells)))
-	_follow_path(e, dt)
+	if _follow_path(e, dt) and d < reach + 4.0:
+		# at the end of the path but still a step short: close the last metre directly
+		_move_toward(e, b.pos, dt)
 	return false
 
 func _do_build(e: Ent, dt: float) -> void:
@@ -1912,9 +2026,12 @@ func _tick_building(e: Ent, dt: float) -> void:
 			e.capture_t = 0.0
 			e.capture_by = -1
 	if e.sold:
-		e.progress -= dt / maxf(float(e.def["time"]) * 0.35, 2.0)
-		if e.progress <= 0.0:
+		# selling: the structure stays up while the deal goes through, then it is gone
+		e.sell_t -= dt
+		if e.sell_t <= 0.0:
 			var refund := float(e.def["cost"]) * Data.REFUND
+			if not e.complete:
+				refund = float(e.def["cost"]) * (1.0 - clampf(e.progress, 0.0, 1.0))   # cancelled site: unspent money back
 			players[e.owner]["cash"] += refund
 			session.s_msg(players[e.owner]["peer"], "%s sold for $%d" % [e.def["name"], int(refund)])
 			destroy(e, "sold")
@@ -2149,6 +2266,38 @@ func _tick_strikes() -> void:
 				shots.append({"t": time, "wid": "scud_storm", "tid": -1, "pos": p, "dmg": 320.0, "aid": -1, "owner": s["owner"]})
 	strikes = keep
 
+## AC-130 on station: cannon bursts at anything hostile below, a howitzer round every few seconds.
+func _tick_gunships(dt: float) -> void:
+	if gunships.is_empty():
+		return
+	var keep := []
+	for g in gunships:
+		if time >= g["until"]:
+			continue
+		keep.append(g)
+		g["next"] -= dt
+		g["next_big"] -= dt
+		if g["next"] > 0.0:
+			continue
+		g["next"] = 0.45
+		var own: int = g["owner"]
+		var p: Vector2 = g["p"]
+		var targets := []
+		for o: Ent in query(p, 26.0):
+			if o.alive and o.owner >= 0 and not allied(o.owner, own) and not (o.is_air() and o.alt > 1.0):
+				targets.append(o)
+		if targets.is_empty():
+			continue
+		var t: Ent = targets[randi() % targets.size()]
+		var big: bool = g["next_big"] <= 0.0
+		if big:
+			g["next_big"] = 3.0
+		var wid := "spectre_howitzer" if big else "spectre_gun"
+		var hitp := t.pos + Vector2(randf_range(-1.5, 1.5), randf_range(-1.5, 1.5))
+		events.append({"k": "gunship_shot", "p": hitp, "d": [p.x, p.y, hitp.x, hitp.y, 1 if big else 0], "o": own, "all": true})
+		shots.append({"t": time + 0.25, "wid": wid, "tid": t.id, "pos": hitp, "dmg": float(Data.WEAPONS[wid]["dmg"]), "aid": -1, "owner": own})
+	gunships = keep
+
 ## Radiation and toxin fields keep hurting whatever stands in them.
 func _tick_zones(dt: float) -> void:
 	if zones.is_empty():
@@ -2180,11 +2329,12 @@ func _tick_beams(dt: float) -> void:
 			continue
 		var steer: Vector2 = players[b["owner"]]["sw_steer"]
 		if steer.x >= 0.0 and b.get("steer", true):
-			b["p"] = (b["p"] as Vector2).move_toward(steer, 7.0 * dt)
+			b["p"] = (b["p"] as Vector2).move_toward(steer, 4.5 * dt)
 		b["next"] -= dt
 		if b["next"] <= 0.0:
 			b["next"] = 0.25
 			var pos: Vector2 = b["p"]
+			_reveal(b["owner"], pos, 18.0, 2.0)
 			events.append({"k": "beam", "p": pos, "d": [pos.x, pos.y, int(b.get("bid", -1)), b["owner"]], "o": b["owner"], "all": true})
 			for o: Ent in query(pos, 6.0):
 				if o.alive and o.owner >= 0:
@@ -2232,7 +2382,9 @@ func _update_vision() -> void:
 		e.detected = false
 	var detectors: Array = []
 	for e: Ent in ents.values():
-		if e.alive and e.owner >= 0 and not e.is_building and not e.is_air() and players[e.owner]["plan"] == "search":
+		if not e.alive or e.owner < 0 or e.is_building:
+			continue
+		if e.def.get("detector", false) or (not e.is_air() and players[e.owner]["plan"] == "search"):
 			detectors.append(e)
 	if not detectors.is_empty():
 		for e: Ent in ents.values():
@@ -2375,6 +2527,8 @@ func _snapshot_to(peer: int, p: int, kn: Dictionary) -> void:
 			aux2 = 1 if (bd != null and bd.alive and bd.state == "build" and bd.target_id == e.id) else 0
 		elif e.is_building:
 			aux2 = e.capture_by + 1 if e.capture_by >= 0 and e.capture_t > 0.0 else 0
+			if e.sold:
+				aux2 = 255
 		elif e.clip.size() > 1:
 			aux2 = e.clip[1]
 		buf.put_u8(aux2)
@@ -2465,8 +2619,18 @@ func _send_pstates() -> void:
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": _steering_beam(p), "sw_bld": sw_bld,
 			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
-			"faction": pl["faction"], "factions": _factions_array(),
+			"faction": pl["faction"], "factions": _factions_array(), "drones": {}, "intel": {}, "garrison": {},
 		}
+		for e: Ent in ents.values():
+			if e.alive and e.is_building and e.def.get("garrison", false) and not e.cargo.is_empty():
+				# everyone can see who is holed up where (like the flag on a garrisoned building)
+				var types := []
+				for cid in e.cargo:
+					var cu: Ent = ents.get(cid)
+					if cu != null and cu.alive:
+						types.append(cu.type)
+				st["cargo"][e.id] = types
+				st["garrison"][e.id] = _garrison_owner(e)
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
 		for e: Ent in ents.values():
@@ -2492,6 +2656,12 @@ func _send_pstates() -> void:
 					st["plan_bld"][e.id] = [e.plan, clampf(1.0 - e.plan_t / Data.PLAN_SWITCH, 0.0, 1.0)]
 				if e.def.get("runway", false):
 					st["air_load"][e.id] = [_airfield_load(e), int(e.def.get("pads", 4))]
+				if e.def.has("intel"):
+					st["intel"][e.id] = maxf(0.0, e.ability_t - time)
+			elif e.drone_id >= 0:
+				var dr: Ent = ents.get(e.drone_id)
+				if dr != null and dr.alive:
+					st["drones"][e.id] = dr.type
 			st["hp"][e.id] = [int(e.hp), int(e.max_hp)]
 			var cids: Array = _cargo_ids(e) if e.def.has("cargo") else []
 			if not cids.is_empty():
@@ -2512,7 +2682,7 @@ func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> D
 		"cds": {}, "upgrades": [], "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 		"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": false, "sw_bld": sw_bld,
 		"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": false, "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
-		"board": [], "faction": "", "factions": _factions_array(),
+		"board": [], "faction": "", "factions": _factions_array(), "drones": {}, "intel": {}, "garrison": {},
 	}
 	var units := []
 	var blds := []
@@ -2555,6 +2725,8 @@ func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> D
 				if cu != null and cu.alive:
 					types.append(cu.type)
 			st["cargo"][e.id] = types
+			if e.def.get("garrison", false):
+				st["garrison"][e.id] = _garrison_owner(e)
 		if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
 			st["guard"][e.id] = [e.guard_pos.x, e.guard_pos.y, e.guard_radius]
 	for p in range(players.size()):
@@ -2653,7 +2825,7 @@ func cmd(p: int, c: Dictionary) -> void:
 		"unload":
 			for id in c.get("ids", []):
 				var e: Ent = ents.get(int(id))
-				if e != null and e.alive and e.owner == p and e.def.has("cargo") and not _cargo_ids(e).is_empty():
+				if e != null and e.alive and (e.owner == p or (e.def.get("garrison", false) and _garrison_owner(e) == p)) and e.def.has("cargo") and not _cargo_ids(e).is_empty():
 					if e.is_building:
 						# garrisons / tunnels let everyone out on the spot
 						var st := e.state
@@ -2689,6 +2861,20 @@ func cmd(p: int, c: Dictionary) -> void:
 			_cmd_power(p, c)
 		"sw":
 			_cmd_superweapon(p, c)
+		"drone":
+			_cmd_drone(p, c)
+		"intel":
+			var b: Ent = ents.get(int(c.get("id", -1)))
+			if b != null and b.alive and b.owner == p and b.complete and b.def.has("intel") and time >= b.ability_t and b.powered:
+				var it: Dictionary = b.def["intel"]
+				b.ability_t = time + float(it["cd"])
+				var n := 0
+				for o: Ent in ents.values():
+					if o.alive and o.owner >= 0 and not allied(o.owner, p):
+						_reveal(p, o.pos, 9.0, float(it["dur"]))
+						n += 1
+				session.s_msg(players[p]["peer"], "Intelligence: %d enemy positions revealed" % n)
+				events.append({"k": "strike", "p": b.pos, "d": ["intel", b.pos.x, b.pos.y, 0.0], "o": p, "only": p})
 		"sw_steer":
 			players[p]["sw_steer"] = Vector2(float(c["x"]), float(c["y"]))
 		"sw_stop":
@@ -2967,9 +3153,7 @@ func _cmd_sell(p: int, c: Dictionary) -> void:
 	b.research.clear()
 	players[p]["cash"] += refund
 	b.sold = true
-	if b.complete:
-		b.progress = 1.0
-	b.complete = false
+	b.sell_t = clampf(float(b.def["time"]) * 0.2, 3.0, 8.0) if b.complete else 0.5
 	b.builder_id = -1
 	_recompute_power(p)
 	session.s_msg(players[p]["peer"], "Selling %s" % b.def["name"])
@@ -3020,6 +3204,12 @@ func _cmd_buy_power(p: int, c: Dictionary) -> void:
 	pl["powers"][pid] = lvl + 1
 	session.s_msg(pl["peer"], "%s acquired" % pd["name"])
 
+## Temporary vision for the owner of a strike so they can watch it land (spy-satellite style).
+func _reveal(p: int, pos: Vector2, r: float, dur: float) -> void:
+	if p < 0 or p >= visions.size():
+		return
+	visions[p].reveals.append({"pos": pos, "radius": r, "until": time + dur})
+
 func _cmd_power(p: int, c: Dictionary) -> void:
 	var pid: String = c.get("pid", "")
 	if not Data.POWERS.has(pid):
@@ -3041,6 +3231,7 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 		"a10":
 			var heading := randf() * TAU
+			_reveal(p, pos, 30.0, 12.0)
 			strikes.append({"k": "a10", "p": pos, "t": time + 3.2, "owner": p, "level": int(pl["powers"][pid]), "heading": heading})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, heading, int(pl["powers"][pid])], "o": p, "all": true})
 		"emergency_repair":
@@ -3048,10 +3239,23 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 				if o.alive and o.owner == p and not o.is_building and o.cat() != "inf":
 					o.hp = o.max_hp
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
+		"spy_drone":
+			var dr := spawn("spy_drone", p, pos)
+			dr.alt = float(dr.def.get("alt", 24.0))
+			dr.expire_t = time + float(dr.def.get("lifetime", 90.0))
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
+		"spectre_gunship":
+			_reveal(p, pos, 40.0, 26.0)
+			gunships.append({"p": pos, "owner": p, "until": time + 24.0, "next": 4.0, "next_big": 6.0})
+			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
+			for o in range(players.size()):
+				if o != p:
+					session.s_msg(players[o]["peer"], "Warning: enemy gunship on station!")
 		"paradrop":
 			strikes.append({"k": "paradrop", "p": pos, "t": time + 6.0, "owner": p})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 		"fuel_air_bomb":
+			_reveal(p, pos, 40.0, 14.0)
 			strikes.append({"k": "fab", "p": pos, "t": time + 5.5, "owner": p})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 			for o in range(players.size()):
@@ -3076,6 +3280,7 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 			session.s_msg(vp["peer"], "Warning: $%d stolen by a Cash Hack!" % int(amt))
 			events.append({"k": "strike", "p": victim.pos, "d": [pid, victim.pos.x, victim.pos.y, 0.0], "o": p, "all": true})
 		"artillery_barrage":
+			_reveal(p, pos, 25.0, 12.0)
 			var lvl := int(pl["powers"][pid])
 			strikes.append({"k": "barrage", "p": pos, "t": time + 3.0, "owner": p, "level": lvl, "radius": float(pd["radius"])})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0, lvl], "o": p, "all": true})
@@ -3085,6 +3290,7 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 					o.frenzy_t = time + 30.0
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 		"carpet_bomb":
+			_reveal(p, pos, 45.0, 16.0)
 			var heading := randf() * TAU
 			strikes.append({"k": "carpet", "p": pos, "t": time + 8.0, "owner": p, "heading": heading})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, heading], "o": p, "all": true})
@@ -3097,6 +3303,7 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 			strikes.append({"k": "ambush", "p": pos, "t": time + 2.0, "owner": p, "n": 3 + lvl * 2})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0, lvl], "o": p, "all": true})
 		"anthrax_bomb":
+			_reveal(p, pos, 35.0, 14.0)
 			strikes.append({"k": "anthrax", "p": pos, "t": time + 6.0, "owner": p})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 			for o in range(players.size()):
@@ -3106,6 +3313,32 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 			strikes.append({"k": "sneak", "p": pos, "t": time + 6.0, "owner": p})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 
+## Buy an escort drone for a vehicle (USA): one per vehicle, replaceable when it's shot down.
+func _cmd_drone(p: int, c: Dictionary) -> void:
+	var host: Ent = ents.get(int(c.get("id", -1)))
+	var kind := str(c.get("kind", ""))
+	if host == null or not host.alive or host.owner != p or host.is_building or host.cat() != "veh" or host.def.get("drone", false):
+		return
+	if not Data.UNITS.has(kind) or not Data.UNITS[kind].get("drone", false) or players[p]["faction"] != "usa":
+		return
+	var old: Ent = ents.get(host.drone_id)
+	if old != null and old.alive:
+		session.s_msg(players[p]["peer"], "That vehicle already has a drone")
+		return
+	var pl: Dictionary = players[p]
+	var cost := float(Data.UNITS[kind]["cost"])
+	if pl["cash"] < cost:
+		session.s_msg(pl["peer"], "Insufficient funds")
+		return
+	pl["cash"] -= cost
+	var dr := spawn(kind, p, host.pos + Vector2(2, 0))
+	dr.alt = float(dr.def.get("alt", 5.0))
+	dr.host_id = host.id
+	host.drone_id = dr.id
+	pl["stats"]["units_built"] += 1
+	session.s_msg(pl["peer"], "%s attached" % Data.UNITS[kind]["name"])
+	events.append({"k": "produced", "p": host.pos, "d": [host.id, dr.id], "o": p})
+
 func _cmd_superweapon(p: int, c: Dictionary) -> void:
 	var b: Ent = ents.get(int(c.get("id", -1)))
 	if b == null or not b.alive or b.owner != p or not b.def.has("superweapon") or not b.sw_ready or not b.powered:
@@ -3114,6 +3347,7 @@ func _cmd_superweapon(p: int, c: Dictionary) -> void:
 	b.sw_ready = false
 	b.sw_t = 0.0
 	var kind := str(b.def.get("sw_kind", "beam"))
+	_reveal(p, pos, 45.0, 30.0)
 	match kind:
 		"nuke":
 			# launch, then a long flight; everybody sees the missile
@@ -3154,6 +3388,66 @@ func probe_load() -> void:
 	for i in range(200):
 		step(TICK)
 	print("[Probe] after unload: inside=%d heli=%s cargo=%s tank=%s" % [tank.inside_id, heli.state, str(heli.cargo), tank.state])
+
+## --simtest=garrison: four Missile Defenders board a Humvee, four more a Firebase.
+func probe_garrison() -> void:
+	bots.clear()
+	var s: Vector2 = map["starts"][players[0]["slot"]]
+	var hv := spawn("humvee", 0, s + Vector2(24, 0))
+	var fb := spawn("firebase", 0, PathGrid.snap_center(s + Vector2(0, 26), Data.BUILDINGS["firebase"]["fp"]), true)
+	grid.flush()
+	var mds := []
+	for i in range(8):
+		mds.append(spawn("missile_defender", 0, s + Vector2(10 + (i % 4) * 2, 8 + (i / 4) * 2)))
+	cmd(0, {"t": "load", "ids": [mds[0].id, mds[1].id, mds[2].id, mds[3].id], "tid": hv.id})
+	cmd(0, {"t": "load", "ids": [mds[4].id, mds[5].id, mds[6].id, mds[7].id], "tid": fb.id})
+	for i in range(1600):
+		step(TICK)
+		if i % 200 == 0:
+			var states := []
+			for m in mds:
+				states.append("%s/%d" % [m.state, m.inside_id])
+			print("[Probe] t=%d humvee cargo=%s firebase cargo=%s mds=%s md7=%s edge=%.1f path=%d/%d %s stuck=%.1f shuffles=%d" % [i, str(hv.cargo), str(fb.cargo), str(states), mds[7].pos.round(), edge_dist(mds[7].pos, fb), mds[7].path_i, mds[7].path.size(), str(mds[7].path), mds[7].stuck_t, mds[7].shuffles])
+	print("[Probe] RESULT humvee=%d/5 firebase=%d/4" % [hv.cargo.size(), fb.cargo.size()])
+
+## --simtest=content: civilian garrison, drones, spy drone, gunship, intel, selling.
+func probe_content() -> void:
+	bots.clear()
+	var s: Vector2 = map["starts"][players[0]["slot"]]
+	var civ: Ent = null
+	for e: Ent in ents.values():
+		if e.alive and e.def.get("garrison", false) and (civ == null or e.pos.distance_to(s) < civ.pos.distance_to(s)):
+			civ = e
+	print("[Probe] nearest civilian building: %s at %s" % [civ.type if civ else "none", civ.pos if civ else Vector2.ZERO])
+	var rangers := []
+	for i in range(4):
+		rangers.append(spawn("ranger", 0, civ.pos + Vector2(8 + i, 8)))
+	var ids := []
+	for r in rangers:
+		ids.append(r.id)
+	cmd(0, {"t": "load", "ids": ids, "tid": civ.id})
+	var tank := spawn("crusader", 0, s + Vector2(20, 0))
+	players[0]["cash"] = 20000.0
+	cmd(0, {"t": "drone", "id": tank.id, "kind": "battle_drone"})
+	cmd(0, {"t": "drone", "id": tank.id, "kind": "hellfire_drone"})   # second one must be refused
+	players[0]["powers"]["spy_drone"] = 1
+	players[0]["powers"]["spectre_gunship"] = 1
+	cmd(0, {"t": "power", "pid": "spy_drone", "x": civ.pos.x + 30, "y": civ.pos.y})
+	var enemy := spawn("battlemaster", 1, civ.pos + Vector2(-16, 0))
+	var enemy2 := spawn("rebel", 1, civ.pos + Vector2(-14, 4))
+	cmd(0, {"t": "power", "pid": "spectre_gunship", "x": enemy.pos.x, "y": enemy.pos.y})
+	var camp := spawn("detention_camp", 0, PathGrid.snap_center(s + Vector2(0, 30), Data.BUILDINGS["detention_camp"]["fp"]), true)
+	grid.flush()
+	cmd(0, {"t": "intel", "id": camp.id})
+	var bar := spawn("barracks", 0, PathGrid.snap_center(s + Vector2(-30, 0), Data.BUILDINGS["barracks"]["fp"]), true)
+	grid.flush()
+	cmd(0, {"t": "sell", "id": bar.id})
+	for i in range(1400):
+		step(TICK)
+		if i % 200 == 0:
+			var dr: Ent = ents.get(tank.drone_id)
+			print("[Probe] t=%d civ cargo=%s garrison_owner=%d civ_hp=%.0f drone=%s enemy_hp=%.0f/%s rebel=%s spy=%d gunships=%d barracks=%s" % [i, str(civ.cargo), _garrison_owner(civ), civ.hp, (dr.type + "@" + str(dr.pos.round())) if dr and dr.alive else "none", enemy.hp, enemy.state, ("alive" if enemy2.alive else "dead"), count_type(0, "spy_drone", false), gunships.size(), ("sold" if not bar.alive else "%.1fs" % bar.sell_t)])
+	print("[Probe] RESULT garrison=%d cash=%d" % [civ.cargo.size(), int(players[0]["cash"])])
 
 func probe_ridge() -> void:
 	bots.clear()

@@ -63,6 +63,7 @@ static func build(id: String = "desert2", _players := 2) -> Dictionary:
 		"props": [],        # [{m, p, yaw, s, fp, kind}] fp = blocked cells (Vector2i), Vector2i.ZERO = decoration only
 		"ridges": [],       # [{a, b, w, h}] impassable mountain ridges (capsules), raised terrain on the client
 		"roads": [],        # [{a, b}] purely visual
+		"civ": [],          # [{type, p, yaw}] garrisonable civilian structures (spawned as neutral entities)
 	}
 	var centre := Vector2(S * 0.5, S * 0.5)
 	var frames: Array = []   # [s, u, v]
@@ -95,15 +96,29 @@ static func build(id: String = "desert2", _players := 2) -> Dictionary:
 	# centre: derricks and a ruined village
 	for d in [Vector2(-14, 14), Vector2(14, -14)]:
 		_add_derrick(m, [centre + d], S)
+	# the village: intact houses and shops you can garrison (Generals-style), a couple of ruins for cover
 	var houses := [
-		{"d": Vector2(-30, -14), "fp": Vector2i(4, 4), "m": "Buildings/SM_Bld_Village_House_01_Destroyed.tscn"},
-		{"d": Vector2(30, 14), "fp": Vector2i(4, 4), "m": "Buildings/SM_Bld_Village_House_01_Destroyed.tscn"},
-		{"d": Vector2(14, -30), "fp": Vector2i(4, 3), "m": "Buildings/SM_Bld_Village_House_03_Destroyed.tscn"},
-		{"d": Vector2(-14, 30), "fp": Vector2i(4, 3), "m": "Buildings/SM_Bld_Village_House_03_Destroyed.tscn"},
-		{"d": Vector2(0, 0), "fp": Vector2i(3, 3), "m": "Buildings/SM_Bld_Village_Well_01.tscn"},
+		{"d": Vector2(-30, -14), "type": "civ_house"},
+		{"d": Vector2(30, 14), "type": "civ_house"},
+		{"d": Vector2(14, -30), "type": "civ_shop"},
+		{"d": Vector2(-14, 30), "type": "civ_shop"},
+		{"d": Vector2(0, 0), "type": "civ_tower"},
 	]
 	for h in houses:
-		m["props"].append({"m": h["m"], "p": centre + h["d"], "yaw": 0.0 if h["d"].x <= 0 else PI, "s": 1.0, "fp": h["fp"], "kind": "ruin"})
+		m["civ"].append({"type": h["type"], "p": centre + h["d"], "yaw": 0.0 if h["d"].x <= 0 else PI})
+	for d in [Vector2(-34, 16), Vector2(34, -16)]:
+		m["props"].append({"m": "", "p": centre + d, "yaw": 0.0 if d.x <= 0 else PI, "s": 1.0, "fp": Vector2i(4, 3), "kind": "ruin"})
+	# a farmstead on each approach: a house and a shop flanking the road out of the base
+	for fr in frames:
+		var s: Vector2 = fr[0]
+		var u: Vector2 = fr[1]
+		var v: Vector2 = fr[2]
+		for cand in [[s + u * 92.0 + v * 26.0, "civ_house"], [s + u * 100.0 - v * 30.0, "civ_shop"], [s + u * 60.0 + v * 70.0, "civ_tower"]]:
+			var p: Vector2 = cand[0]
+			if _inside(p, S, 14.0) and _clear_spot(m, p, 16.0, true):
+				m["civ"].append({"type": cand[1], "p": p, "yaw": atan2(u.x, u.y)})
+				var fp: Vector2i = Data.BUILDINGS[cand[1]]["fp"]
+				m["props"].append({"m": "", "p": p, "yaw": 0.0, "s": 1.0, "fp": fp, "kind": "civ"})   # reserves the ground for the clear-spot checks
 	# rock formations shaping the lanes between neighbouring bases
 	var rock_models := ["Environment/SM_Env_Rock_01.tscn", "Environment/SM_Env_Rock_02.tscn", "Environment/SM_Env_Rock_03.tscn", "Environment/SM_Env_Rock_04.tscn"]
 	for i in range(frames.size()):

@@ -370,6 +370,14 @@ func _production() -> void:
 				continue
 			w.cmd(p, {"t": "produce", "id": b.id, "type": pick})
 			cash -= float(Data.UNITS[pick]["cost"])
+	if fd["cc"] == "command_center" and cash > 1800 and level != "easy":
+		# USA: drones for the armour when money allows
+		for u in _own_units():
+			if u.cat() == "veh" and u.drone_id < 0 and not u.def.get("builder", false) and int(u.def.get("gatherer", 0)) == 0 and rng.randf() < 0.15:
+				var kind := "battle_drone" if rng.randf() < 0.6 else "hellfire_drone"
+				w.cmd(p, {"t": "drone", "id": u.id, "kind": kind})
+				cash -= float(Data.UNITS[kind]["cost"])
+				break
 	for b: Ent in _role("airfield"):
 		if b.prod.is_empty() and cash > 2200 and w._airfield_load(b) < 4 and not (fd["air"] as Array).is_empty():
 			var pick := _choose(fd["air"], b)

@@ -75,7 +75,7 @@ func _process(dt: float) -> void:
 				var q := _bez(f, apex, to, minf(a + 0.01, 1.0))
 				n.position = p
 				if (q - p).length() > 0.01:
-					n.look_at(q, Vector3.UP)
+					n.look_at(q, _up_for(q - p))
 				if fmod(it["t"], 0.1) < dt:
 					var puff := Visuals.sphere(0.9 * it.get("size", 1.0), Color(0.85, 0.85, 0.85, 0.5))
 					puff.material_override = _own_mat(Color(0.85, 0.85, 0.85, 0.5))
@@ -107,6 +107,21 @@ func _process(dt: float) -> void:
 				n.position = f.lerp(to, a)
 				for pr in it.get("props", []):
 					(pr as Node3D).rotate_z(dt * 30.0)
+			"orbit":
+				# gunship: a slow banked circle around the target
+				var c: Vector3 = it["c"]
+				var r: float = it["r"]
+				var ang: float = it["t"] * it["speed"]
+				var p := c + Vector3(cos(ang) * r, 0, sin(ang) * r)
+				var nxt := c + Vector3(cos(ang + 0.05) * r, 0, sin(ang + 0.05) * r)
+				n.position = p
+				n.look_at(nxt, Vector3.UP)
+				n.rotate_y(PI)
+				n.rotate_object_local(Vector3(0, 0, 1), 0.4)
+				for pr in it.get("props", []):
+					(pr as Node3D).rotate_z(dt * 30.0)
+				if a > 0.9:
+					n.position.y += (a - 0.9) * 200.0
 			"para":
 				if it.has("to"):
 					var f2: Vector3 = it["from"]
@@ -433,7 +448,10 @@ func shot(from: Vector3, to: Vector3, wid: String, sid := -1) -> void:
 	var spd := float(wd.get("speed", 0.0))
 	var d := from.distance_to(to)
 	if style == "flame":
-		flame(from, to, bool(wd.get("toxin", false)))
+		flame(from, to, "toxin" if wd.get("toxin", false) else "fire")
+		return
+	if style == "microwave":
+		flame(from, to, "microwave")
 		return
 	muzzle(from, to)
 	match style:
@@ -499,10 +517,15 @@ func _beam_mesh(from: Vector3, to: Vector3, color: Color, width: float) -> Node3
 	mi.material_override = _own_mat(color)
 	mi.position.z = d * 0.5
 	n.add_child(mi)
-	n.position = from
 	if d > 0.01:
-		n.look_at(to, Vector3.UP)
+		n.look_at_from_position(from, to, _up_for(to - from))
+	else:
+		n.position = from
 	return n
+
+## An up vector that is never parallel to the beam (vertical beams would otherwise fail to orient).
+static func _up_for(dir: Vector3) -> Vector3:
+	return Vector3(1, 0, 0) if absf(dir.normalized().y) > 0.98 else Vector3.UP
 
 func muzzle(from: Vector3, to: Vector3) -> void:
 	var s := Visuals.sphere(0.35, Color(1.0, 0.85, 0.4, 0.9))
@@ -511,7 +534,7 @@ func muzzle(from: Vector3, to: Vector3) -> void:
 	s.position = from + dir * 1.2 + Vector3(0, 0.3, 0)
 	_add(s, "flash", 0.08)
 
-func impact(pos: Vector3, style: String) -> void:
+func impact(pos: Vector3, style: String, wid := "") -> void:
 	var size := 0.5
 	match style:
 		"bullet":
@@ -529,6 +552,8 @@ func impact(pos: Vector3, style: String) -> void:
 		"flame":
 			burst("fire", pos + Vector3(0, 0.4, 0), 0.5)
 			return
+		"microwave":
+			return
 		"nuke":
 			nuke_blast(pos)
 			return
@@ -538,6 +563,14 @@ func impact(pos: Vector3, style: String) -> void:
 		p.position = pos + Vector3(0, 0.6, 0)
 		_add(p, "flash", 0.1)
 		return
+	if wid != "" and Data.WEAPONS.has(wid):
+		# scale the blast to the hit: an infantry rocket is a puff, a cruise missile a fireball
+		var dmg := float(Data.WEAPONS[wid].get("dmg", 60.0))
+		size = clampf(0.3 + dmg / 120.0, 0.45, 4.5)
+		if style == "cruise":
+			size = maxf(size, 1.6)
+		elif style == "bomb":
+			size = maxf(size, 2.2)
 	explosion(pos, size)
 
 ## Explosion: bright core flash, a couple of fireballs, shockwave ring, debris
@@ -679,13 +712,13 @@ var pbeams: Dictionary = {}   # owner -> {node, core, up, target, t}
 func particle_beam(pos: Vector3, owner: int, spire: Vector3) -> void:
 	var key := owner
 	if not pbeams.has(key):
-		var outer := _beam_mesh(pos + Vector3(0, 160, 0), pos, Color(0.55, 0.85, 1.0, 0.55), 2.4)
-		var core := _beam_mesh(pos + Vector3(0, 160, 0), pos, Color(1.0, 1.0, 1.0, 1.0), 0.7)
+		var outer := _beam_mesh(pos + Vector3(0, 900, 0), pos, Color(0.55, 0.85, 1.0, 0.55), 2.4)
+		var core := _beam_mesh(pos + Vector3(0, 900, 0), pos, Color(1.0, 1.0, 1.0, 1.0), 0.7)
 		add_child(outer)
 		add_child(core)
 		var up: Node3D = null
 		if spire.x >= 0.0:
-			up = _beam_mesh(spire, spire + Vector3(0, 160, 0), Color(0.55, 0.85, 1.0, 0.7), 1.2)
+			up = _beam_mesh(spire, spire + Vector3(0, 900, 0), Color(0.55, 0.85, 1.0, 0.7), 1.2)
 			add_child(up)
 		pbeams[key] = {"outer": outer, "core": core, "up": up, "target": pos, "pos": pos, "t": 0.0, "life": 0.7}
 	var pb: Dictionary = pbeams[key]
@@ -712,11 +745,10 @@ func _tick_pbeams(dt: float) -> void:
 			continue
 		var p: Vector3 = (pb["pos"] as Vector3).move_toward(pb["target"], 12.0 * dt)
 		pb["pos"] = p
-		var top := p + Vector3(0, 160, 0)
+		var top := p + Vector3(0, 900, 0)
 		for k in ["outer", "core"]:
 			var n: Node3D = pb[k]
-			n.position = top
-			n.look_at(p, Vector3.UP)
+			n.look_at_from_position(top, p, Vector3(1, 0, 0))
 			var w := (2.4 if k == "outer" else 0.7) * (0.85 + 0.15 * sin(pb["t"] * 40.0))
 			n.get_child(0).scale = Vector3(w / (2.4 if k == "outer" else 0.7), w / (2.4 if k == "outer" else 0.7), 1.0)
 	for key in gone:
@@ -727,8 +759,7 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 		"a10":
 			strike_marker(pos, 4.0, Color(1.0, 0.8, 0.2, 0.9))
 			for i in range(maxi(1, level)):
-				var jet := Visuals.make_model("raptor", -1)
-				jet.scale = Vector3.ONE * 1.1
+				var jet := Units.a10(-1)
 				var dir := Vector3(cos(heading), 0, sin(heading))
 				var side := dir.cross(Vector3.UP) * ((i - 1) * 6.0)
 				var from := pos - dir * 160.0 + Vector3(0, 30, 0) + side
@@ -834,12 +865,39 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 			ring.material_override = _own_mat(Color(1.0, 0.3, 0.2, 0.8))
 			ring.position = pos + Vector3(0, 0.3, 0)
 			_add(ring, "beam", 2.5)
+		"spectre_gunship":
+			strike_marker(pos, 26.0, Color(1.0, 0.75, 0.3, 0.9))
+			var plane := Units.cargo_plane(-1)
+			plane.scale = Vector3.ONE * 1.1
+			plane.position = pos + Vector3(60, 70, 0)
+			var key := "%d,%d" % [int(pos.x), int(pos.z)]
+			gunship_nodes[key] = plane
+			_add(plane, "orbit", 27.0, {"c": pos + Vector3(0, 70, 0), "r": 60.0, "speed": 0.28, "props": plane.find_children("Propeller*", "Node3D", true, false)})
+		"spy_drone":
+			var ring := Visuals.ring(20.0, Color(0.6, 0.9, 1.0, 0.5), 0.4)
+			ring.material_override = _own_mat(Color(0.6, 0.9, 1.0, 0.5))
+			ring.position = pos + Vector3(0, 0.3, 0)
+			_add(ring, "beam", 3.0)
+		"intel":
+			floating_text(pos + Vector3(0, 8, 0), "INTELLIGENCE", Color(0.6, 0.9, 1.0))
 		"cash_hack":
 			floating_text(pos + Vector3(0, 6, 0), "$ HACKED", Color(1.0, 0.9, 0.3))
 			var ring := Visuals.ring(6.0, Color(1.0, 0.9, 0.3, 0.8), 0.4)
 			ring.material_override = _own_mat(Color(1.0, 0.9, 0.3, 0.8))
 			ring.position = pos + Vector3(0, 0.3, 0)
 			_add(ring, "beam", 2.0)
+
+## Spectre gunship rounds: a tracer from the circling plane down to the hit.
+var gunship_nodes: Dictionary = {}   # "x,y" -> plane node (so the tracer starts from the real plane)
+func gunship_shot(centre: Vector3, hit: Vector3, big: bool) -> void:
+	var key := "%d,%d" % [int(centre.x), int(centre.z)]
+	var from := centre + Vector3(60, 70, 0)
+	if gunship_nodes.has(key) and is_instance_valid(gunship_nodes[key]):
+		from = (gunship_nodes[key] as Node3D).position
+	var col := Color(1.0, 0.85, 0.4, 0.9) if not big else Color(1.0, 0.6, 0.2, 1.0)
+	var b := _beam_mesh(from, hit + Vector3(0, 0.5, 0), col, 0.12 if not big else 0.3)
+	_add(b, "beam", 0.25 if not big else 0.4)
+	Audio.I.sfx("gau8" if not big else "artillery_fire", hit + Vector3(0, 20, 0), -2.0 if not big else 2.0, 0.0, 0.15)
 
 ## Team beacon: a tall pulsing pillar visible to allies for a while.
 func beacon(pos: Vector3, col: Color) -> void:
@@ -883,7 +941,8 @@ static func _bez(a: Vector3, b: Vector3, c: Vector3, t: float) -> Vector3:
 	return a * (u * u) + b * (2.0 * u * t) + c * (t * t)
 
 ## Flamethrower / toxin sprayer: a burst of fire (or green mist) from the nozzle toward the target.
-func flame(from: Vector3, to: Vector3, toxin: bool) -> void:
+func flame(from: Vector3, to: Vector3, kind := "fire") -> void:
+	var toxin := kind == "toxin"
 	var p := CPUParticles3D.new()
 	p.position = from
 	p.mesh = _psphere()
@@ -906,6 +965,12 @@ func flame(from: Vector3, to: Vector3, toxin: bool) -> void:
 	if toxin:
 		g.set_color(0, Color(0.5, 1.0, 0.3, 0.9))
 		g.set_color(1, Color(0.2, 0.6, 0.15, 0.0))
+	elif kind == "microwave":
+		g.set_color(0, Color(0.7, 0.9, 1.0, 0.7))
+		g.set_color(1, Color(0.4, 0.6, 1.0, 0.0))
+		p.amount = 10
+		p.scale_amount_min = 0.3
+		p.scale_amount_max = 0.8
 	else:
 		g.set_color(0, Color(1.0, 0.85, 0.3, 1.0))
 		g.add_point(0.4, Color(1.0, 0.4, 0.1, 0.9))

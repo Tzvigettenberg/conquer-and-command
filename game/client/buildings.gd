@@ -21,7 +21,7 @@ const CONCRETE_DARK := Color(0.42, 0.41, 0.39)
 const METAL := Color(0.36, 0.38, 0.42)
 const METAL_DARK := Color(0.22, 0.23, 0.26)
 const ROOF := Color(0.3, 0.32, 0.33)
-const GLASS := Color(0.35, 0.55, 0.75)
+const GLASS := Color(0.42, 0.5, 0.54)
 const WARN := Color(0.9, 0.75, 0.15)
 const RUST := Color(0.5, 0.32, 0.2)
 
@@ -623,6 +623,65 @@ static func make(type: String, team: int) -> Node3D:
 			box(root, Vector3(2.0, 2.2, 2.0), Vector3(-4.6, 2.1, 4.4), GLA_WALL)
 			var lamp := sphere(root, 0.25, Vector3(-4.6, 3.5, 4.4), Color(0.4, 1.0, 0.3))
 			anim(root, lamp, "blink", 1.0)
+		"detention_camp":
+			# fenced yard with cells, a watchtower and a big satellite dish (the "intelligence" part)
+			box(root, Vector3(9.5, 0.2, 7.5), Vector3(0, 0.1, 0), CONCRETE_DARK)
+			box(root, Vector3(5.5, 2.6, 4.0), Vector3(-1.5, 1.3, -1.2), CONCRETE)
+			box(root, Vector3(5.7, 0.3, 4.2), Vector3(-1.5, 2.75, -1.2), ROOF)
+			band(root, 5.5, 4.0, 2.6, team, 0.3)
+			for i in range(3):
+				box(root, Vector3(0.8, 0.9, 0.1), Vector3(-3.2 + i * 1.7, 1.6, 0.85), Color(0.08, 0.08, 0.1))
+				for k in range(3):
+					box(root, Vector3(0.06, 0.9, 0.06), Vector3(-3.45 + i * 1.7 + k * 0.25, 1.6, 0.9), METAL)
+			for i in range(14):
+				var a := i * TAU / 14.0
+				cyl(root, 0.05, 0.05, 2.2, Vector3(sin(a) * 4.4, 1.1, cos(a) * 3.4), METAL, 5)
+			box(root, Vector3(1.6, 4.5, 1.6), Vector3(3.5, 2.25, 2.4), CONCRETE_DARK)
+			box(root, Vector3(2.0, 0.3, 2.0), Vector3(3.5, 4.6, 2.4), ROOF)
+			var dish := Node3D.new()
+			dish.position = Vector3(3.2, 3.0, -2.2)
+			root.add_child(dish)
+			cyl(dish, 1.6, 0.2, 0.5, Vector3(0, 0.4, 0), METAL, 16).rotation.x = 0.8
+			anim(root, dish, "spin", 0.7)
+		"civ_house":
+			# two-storey house: plaster walls, window rows, pitched roof, chimney
+			box(root, Vector3(7.4, 5.2, 7.4), Vector3(0, 2.6, 0), Color(0.78, 0.72, 0.6))
+			prism(root, Vector3(7.8, 2.0, 7.8), Vector3(0, 6.2, 0), Color(0.45, 0.28, 0.2))
+			box(root, Vector3(0.7, 1.6, 0.7), Vector3(2.4, 6.6, -2.0), Color(0.4, 0.3, 0.26))
+			for lvl in range(2):
+				for i in range(3):
+					for sz in [-1.0, 1.0]:
+						var win := box(root, Vector3(0.9, 0.9, 0.12), Vector3(-2.2 + i * 2.2, 1.5 + lvl * 2.4, sz * 3.72), Color(0.2, 0.28, 0.35))
+						win.name = "Window"
+					for sx in [-1.0, 1.0]:
+						box(root, Vector3(0.12, 0.9, 0.9), Vector3(sx * 3.72, 1.5 + lvl * 2.4, -2.2 + i * 2.2), Color(0.2, 0.28, 0.35))
+			box(root, Vector3(1.2, 2.0, 0.15), Vector3(0, 1.0, 3.75), Color(0.35, 0.22, 0.15))
+		"civ_shop":
+			# flat-roofed shop with an awning and a signboard
+			box(root, Vector3(7.4, 3.6, 5.4), Vector3(0, 1.8, 0), Color(0.72, 0.66, 0.56))
+			box(root, Vector3(7.6, 0.3, 5.6), Vector3(0, 3.75, 0), Color(0.35, 0.33, 0.3))
+			box(root, Vector3(7.0, 0.1, 1.6), Vector3(0, 2.6, 3.2), Color(0.7, 0.25, 0.2))
+			for i in range(4):
+				box(root, Vector3(1.3, 1.4, 0.12), Vector3(-2.7 + i * 1.8, 1.4, 2.72), Color(0.2, 0.3, 0.36))
+			for sx in [-1.0, 1.0]:
+				box(root, Vector3(0.12, 1.0, 1.4), Vector3(sx * 3.72, 2.2, -0.5), Color(0.2, 0.28, 0.35))
+			box(root, Vector3(3.0, 0.8, 0.1), Vector3(-1.5, 3.3, 2.75), Color(0.9, 0.8, 0.3))
+			box(root, Vector3(1.0, 0.3, 0.4), Vector3(2.8, 3.9, -1.5), METAL_DARK)
+		"civ_tower":
+			# four-storey apartment block with balconies
+			box(root, Vector3(5.4, 11.0, 5.4), Vector3(0, 5.5, 0), Color(0.68, 0.66, 0.62))
+			box(root, Vector3(5.6, 0.3, 5.6), Vector3(0, 11.15, 0), Color(0.35, 0.33, 0.3))
+			for lvl in range(4):
+				var yy := 1.5 + lvl * 2.6
+				for sz in [-1.0, 1.0]:
+					for i in range(2):
+						box(root, Vector3(1.1, 1.1, 0.12), Vector3(-1.2 + i * 2.4, yy, sz * 2.72), Color(0.2, 0.28, 0.35))
+					box(root, Vector3(4.6, 0.15, 0.7), Vector3(0, yy - 0.7, sz * 3.05), Color(0.5, 0.48, 0.45))
+				for sx in [-1.0, 1.0]:
+					for i in range(2):
+						box(root, Vector3(0.12, 1.1, 1.1), Vector3(sx * 2.72, yy, -1.2 + i * 2.4), Color(0.2, 0.28, 0.35))
+			box(root, Vector3(1.0, 1.4, 1.0), Vector3(1.6, 12.0, -1.6), Color(0.5, 0.48, 0.45))
+			cyl(root, 0.04, 0.04, 2.5, Vector3(-1.6, 12.5, 1.6), METAL, 5)
 		"supply_dock":
 			# supply depot: concrete pad, fuel drums, a forklift-sized shed and a loading crane.
 			# The crates themselves are added by Puppet (they vanish as the dock empties).

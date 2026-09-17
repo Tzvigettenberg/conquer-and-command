@@ -20,6 +20,7 @@ var game_over := false
 var args: Dictionary = {}
 var names: Array = []
 var last_snapshot_tick := 0
+var last_unlock_sig := ""
 var session: Session
 
 func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
@@ -38,7 +39,7 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	grid.setup(float(m["size"]))
 	for pr in m["props"]:
 		var fp: Vector2i = pr["fp"]
-		if fp != Vector2i.ZERO:
+		if fp != Vector2i.ZERO and pr.get("kind", "") != "civ":
 			grid.set_cells(PathGrid.footprint_cells(pr["p"], fp), true)
 	for rd in m.get("ridges", []):
 		grid.set_cells(PathGrid.capsule_cells(rd["a"], rd["b"], float(rd["w"]) + 0.5), true)
@@ -233,11 +234,10 @@ func on_state(bytes: PackedByteArray) -> void:
 		if p == null:
 			continue
 		p.apply_state(Vector2(x, y), alt, yaw, tyaw, hpf, flags, aux, aux2, now)
-	# hide units that stopped being replicated (left our vision)
+	# hide units that stopped being replicated (left our vision); structures go dim and still
 	for p in puppets.values():
-		if not p.is_building and not p.ghost and p.is_stale(now):
-			p.ghost = true
-			p.visible = false
+		if not p.ghost and p.is_stale(now):
+			p.set_ghost(true)
 			if p.selected:
 				ctl.selected.erase(p.id)
 				p.selected = false
@@ -276,7 +276,7 @@ func on_events(evs: Array) -> void:
 					fx.explosion(Vector3(d[1], 0, d[2]), 4.0 if str(d[0]) != "terrorist_bomb" else 2.5)
 					Audio.I.sfx("explosion_large", Vector3(d[1], 2, d[2]), 4.0, 0.0, 0.3)
 				else:
-					fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"))
+					fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"), str(d[0]))
 					Audio.I.impact(wd.get("style", "shell"), Vector3(d[1], float(d[3]), d[2]))
 			"pd":
 				# point-defence laser burns an incoming missile out of the air
@@ -306,7 +306,8 @@ func on_events(evs: Array) -> void:
 			"load", "unload":
 				var tp: Puppet = puppets.get(int(d[0]))
 				if tp != null:
-					Audio.I.sfx("metal_hit", tp.cur_pos, -8.0, 0.1, 0.2)
+					Audio.I.sfx("metal_hit", tp.cur_pos, 0.0, 0.1, 0.2)
+					Audio.I.sfx("ui_click", tp.cur_pos, -2.0, 0.0, 0.1)
 					if k == "load":
 						tp.flash_cargo()
 			"supply_drop":
@@ -351,8 +352,14 @@ func on_events(evs: Array) -> void:
 						Audio.I.sfx("plane_pass", Vector3(d[1], 30, d[2]), 4.0)
 					"cash_hack":
 						Audio.I.sfx("cash", Vector3(d[1], 2, d[2]), 0.0)
+					"spectre_gunship":
+						Audio.I.sfx("plane_pass", Vector3(d[1], 40, d[2]), 4.0)
+					"intel", "spy_drone":
+						Audio.I.sfx("satellite", Vector3(d[1], 5, d[2]), 0.0)
 			"zone":
 				fx.zone(str(d[0]), Vector3(d[1], 0, d[2]), float(d[3]), float(d[4]))
+			"gunship_shot":
+				fx.gunship_shot(Vector3(d[0], 0, d[1]), Vector3(d[2], 0, d[3]), int(d[4]) == 1)
 			"sw_launch":
 				fx.sw_launch(str(d[0]), Vector3(d[1], 0, d[2]), Vector3(d[3], 0, d[4]), float(d[5]))
 				Audio.I.sfx("superweapon_fire", Vector3(d[1], 5, d[2]), 6.0)
@@ -396,6 +403,8 @@ func _push_extras(st: Dictionary) -> void:
 	for pu in puppets.values():
 		var p: Puppet = pu
 		if p.team < 0:
+			if p.is_building and p.def.get("garrison", false):
+				p.set_garrison(st.get("cargo", {}).get(p.id, []), int(st.get("garrison", {}).get(p.id, -2)))
 			continue
 		var keys: Array = []
 		if p.team < all_upg.size():
@@ -405,17 +414,18 @@ func _push_extras(st: Dictionary) -> void:
 				keys.append(k)
 		if p.type == "strategy_center" and p.team < plans.size() and str(plans[p.team]) != "":
 			keys.append("plan_" + str(plans[p.team]))
-		if p.type == "particle_cannon" and (p.team == my_index and sw_remaining(p.id) <= 0.0 or p.team != my_index and sw_ready(p.team)):
+		if p.def.has("superweapon") and (p.team == my_index and sw_remaining(p.id) <= 0.0 or p.team != my_index and sw_ready(p.team)):
 			keys.append("sw_ready")
 		keys.sort()
 		p.set_extras(keys)
 		if p.is_building and p.def.has("cargo"):
-			p.set_garrison(st.get("cargo", {}).get(p.id, []))
+			p.set_garrison(st.get("cargo", {}).get(p.id, []), int(st.get("garrison", {}).get(p.id, -2)))
 
 ## Patriot data-links: cyan lines between batteries close enough to share targets.
 var link_nodes: Array = []
 var link_t := 0.0
 func _update_links(dt: float) -> void:
+	return   # data-link lines were more confusing than helpful; batteries still assist each other in the sim
 	link_t -= dt
 	if link_t > 0.0:
 		return
@@ -459,8 +469,14 @@ func on_chat(from: int, text: String, allies: bool) -> void:
 	hud.chat_line(from, text, allies)
 
 func on_pstate(st: Dictionary) -> void:
+	var unlock_sig := str(st.get("powers", {})) + str(st.get("upgrades", [])) + str(st.get("rank", 0))
 	pstate = st
 	_push_extras(st)
+	if unlock_sig != last_unlock_sig:
+		# a promotion or upgrade just landed: the command cards must re-evaluate what is unlocked
+		last_unlock_sig = unlock_sig
+		if hud != null:
+			hud.refresh_selection()
 	var docks: Dictionary = st.get("docks", {})
 	for id in docks:
 		var p: Puppet = puppets.get(int(id))

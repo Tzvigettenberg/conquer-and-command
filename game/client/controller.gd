@@ -115,7 +115,7 @@ func hint_text() -> String:
 		"sw":
 			return "PARTICLE CANNON: click a target, then steer with the mouse"
 	if view.pstate.get("beam", false):
-		return "Steering the particle beam - move the mouse"
+		return "Particle beam active - click where it should crawl to next (right-click to leave it)"
 	return ""
 
 func drag_rect() -> Rect2:
@@ -144,7 +144,7 @@ func set_selection(ids: Array) -> void:
 		Audio.I.ui("ui_select", -10.0)
 		var first: Puppet = view.puppets.get(ids[0])
 		if first != null and first.team == view.my_index and not first.is_building:
-			Audio.I.voice(first.type, "select")
+			Audio.I.voice(first.type, "select", true)   # always answer a click, like Generals
 
 func _puppet_at(screen: Vector2) -> Puppet:
 	var best: Puppet = null
@@ -183,7 +183,7 @@ func _select_box(r: Rect2, additive: bool) -> void:
 		ids = selected.duplicate()
 	for pu in view.puppets.values():
 		var p: Puppet = pu
-		if p.team != view.my_index or p.is_building or p.ghost:
+		if p.team != view.my_index or p.is_building or p.ghost or p.def.get("drone", false) or p.type == "spy_drone":
 			continue
 		if cam.is_behind(p.cur_pos):
 			continue
@@ -280,8 +280,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 					return
 				if view.pstate.get("beam", false):
-					# click ends beam steering; the beam keeps burning where it is
-					view.send({"t": "sw_stop"})
+					# each click gives the beam a new spot to crawl to (it is slow, like a unit on a leash)
+					var g := cam.ground_at(mb.position)
+					if g.x >= 0:
+						view.send({"t": "sw_steer", "x": g.x, "y": g.y})
+						view.fx.floating_text(Vector3(g.x, 0, g.y), "▼", Color(0.6, 0.9, 1.0))
 					get_viewport().set_input_as_handled()
 					return
 				drag_start = mb.position
@@ -317,6 +320,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 				if not was_drag:
 					if mode != "":
 						cancel_mode()
+					elif view.pstate.get("beam", false):
+						view.send({"t": "sw_stop"})   # leave the beam where it is
 					elif mb.ctrl_pressed:
 						_force_attack(mb.position)
 					else:
@@ -362,8 +367,22 @@ func _unhandled_input(ev: InputEvent) -> void:
 				if not _own_units_selected().is_empty():
 					amove_mode()
 			KEY_X:
-				if not _own_units_selected().is_empty():
-					force_mode()
+				# Generals: X scatters the selection (Ctrl+X keeps the old force-fire binding)
+				if k.ctrl_pressed:
+					if not _own_units_selected().is_empty():
+						force_mode()
+				else:
+					scatter()
+			KEY_Q:
+				# combat units on screen; tap twice for the whole map
+				_select_combat(false, _double_tap(KEY_Q))
+			KEY_W:
+				_select_combat(true, _double_tap(KEY_W))
+			KEY_E:
+				_select_same_type(_double_tap(KEY_E))
+			KEY_UP, KEY_DOWN:
+				if k.ctrl_pressed:
+					_select_next("builder", true)
 			KEY_U:
 				unload()
 			KEY_H:
@@ -410,16 +429,30 @@ func _notification(what: int) -> void:
 		if not dragging:
 			drag_start = Vector2(-1, -1)
 
+var drag_hover: Array = []   # puppets lit up because the drag box currently covers them
+
 func _process(dt: float) -> void:
-	if view.pstate.get("beam", false):
-		steer_t -= dt
-		if steer_t <= 0.0:
-			steer_t = 0.2
-			var g := cam.ground_at(mouse_pos)
-			if g.x >= 0:
-				view.send({"t": "sw_steer", "x": g.x, "y": g.y})
 	if mode == "":
 		_refresh_sig_if_needed()
+	_update_drag_hover()
+
+## While dragging a box, everything it would select lights up so you can see what you'll get.
+func _update_drag_hover() -> void:
+	var r := drag_rect()
+	var inside := []
+	if r.size != Vector2.ZERO:
+		for pu in view.puppets.values():
+			var p: Puppet = pu
+			if p.team != view.my_index or p.is_building or p.ghost or cam.is_behind(p.cur_pos):
+				continue
+			if r.has_point(cam.to_screen(p.cur_pos + Vector3(0, 0.8, 0))):
+				inside.append(p)
+	for p in drag_hover:
+		if is_instance_valid(p) and not inside.has(p) and p.id != hover_id:
+			p.hovered = false
+	for p in inside:
+		p.hovered = true
+	drag_hover = inside
 
 func _refresh_sig_if_needed() -> void:
 	var cash := str(view.pstate.get("cash", 0))
@@ -493,7 +526,7 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
 			return
-		if target.team == view.my_index and target.def.has("cargo") and not selected.has(target.id) and (not target.is_building or target.complete):
+		if (target.team == view.my_index or target.def.get("garrison", false)) and target.def.has("cargo") and not selected.has(target.id) and (not target.is_building or target.complete):
 			# load infantry (and vehicles into a Chinook)
 			var riders := _filter_ids(ids, func(p: Puppet) -> bool:
 				return p.id != target.id and not p.is_building and p.cat != "air" and (p.cat == "inf" or target.def.get("cargo_veh", false)))
@@ -557,6 +590,85 @@ func minimap_command(world: Vector2) -> void:
 	if ids.is_empty():
 		return
 	view.send({"t": "move", "ids": ids, "x": world.x, "y": world.y, "q": false})
+	_voice_for(ids, "move")
+
+## Left click on the minimap while in attack-move mode (or a double click): attack-move there.
+func minimap_attack_move(world: Vector2) -> void:
+	var ids := _own_units_selected()
+	if ids.is_empty():
+		return
+	view.send({"t": "amove", "ids": ids, "x": world.x, "y": world.y, "q": false})
+	view.fx.floating_text(Vector3(world.x, 0, world.y), "▼", Color(1.0, 0.5, 0.3))
+	_voice_for(ids, "attack")
+	if mode == "amove":
+		cancel_mode()
+
+var last_tap_key := -1
+var last_tap_t := -10.0
+func _double_tap(key: int) -> bool:
+	var now := Time.get_ticks_msec() / 1000.0
+	var dbl := key == last_tap_key and now - last_tap_t < 0.4
+	last_tap_key = key
+	last_tap_t = now
+	return dbl
+
+func _on_screen(p: Puppet) -> bool:
+	if cam.is_behind(p.cur_pos):
+		return false
+	var vs := get_viewport().get_visible_rect().size
+	var sp := cam.to_screen(p.cur_pos)
+	return sp.x >= 0 and sp.y >= 0 and sp.x <= vs.x and sp.y <= vs.y - Hud.BAR_H
+
+## Q / W: every combat unit (or every combat aircraft) on screen, or on the whole map.
+func _select_combat(air_only: bool, whole_map: bool) -> void:
+	var ids := []
+	for pu in view.puppets.values():
+		var p: Puppet = pu
+		if p.team != view.my_index or p.is_building or p.ghost:
+			continue
+		if not p.def.has("weapons") or p.def["weapons"].is_empty() or p.def.get("builder", false) or int(p.def.get("gatherer", 0)) > 0:
+			continue
+		if air_only and p.cat != "air":
+			continue
+		if not whole_map and not _on_screen(p):
+			continue
+		ids.append(p.id)
+	if not ids.is_empty():
+		set_selection(ids)
+		view.on_msg("%d %s selected%s" % [ids.size(), "aircraft" if air_only else "combat units", "" if not whole_map else " (whole map)"])
+
+## E: everything of the same type as the selection, on screen or on the whole map.
+func _select_same_type(whole_map: bool) -> void:
+	var types := {}
+	for p in selected_puppets():
+		if p.team == view.my_index and not p.is_building:
+			types[p.type] = true
+	if types.is_empty():
+		return
+	var ids := []
+	for pu in view.puppets.values():
+		var p: Puppet = pu
+		if p.team != view.my_index or p.is_building or p.ghost or not types.has(p.type):
+			continue
+		if not whole_map and not _on_screen(p):
+			continue
+		ids.append(p.id)
+	if not ids.is_empty():
+		set_selection(ids)
+
+## X: scatter - everyone picks a random spot a few metres away.
+func scatter() -> void:
+	var ids := _own_units_selected()
+	if ids.is_empty():
+		return
+	for id in ids:
+		var p: Puppet = view.puppets.get(id)
+		if p == null or p.cat == "air":
+			continue
+		var ang := randf() * TAU
+		var d := randf_range(6.0, 12.0)
+		view.send({"t": "move", "ids": [id], "x": p.cur_pos.x + cos(ang) * d, "y": p.cur_pos.z + sin(ang) * d, "q": false})
+	_voice_for(ids, "move")
 
 func _jump_home() -> void:
 	for pu in view.puppets.values():
@@ -794,6 +906,15 @@ func beacon_mode() -> void:
 func select_next_dozer() -> void:
 	_select_next("builder", true)
 
+func unload_building(bid: int) -> void:
+	view.send({"t": "unload", "ids": [bid]})
+
+func buy_drone(vid: int, kind: String) -> void:
+	view.send({"t": "drone", "id": vid, "kind": kind})
+
+func intel(bid: int) -> void:
+	view.send({"t": "intel", "id": bid})
+
 func set_plan(bid: int, plan: String) -> void:
 	view.send({"t": "plan", "id": bid, "plan": plan})
 	Audio.I.ui("ui_click", -6.0)
@@ -843,7 +964,7 @@ func guard() -> void:
 func unload() -> void:
 	var ids := []
 	for p in selected_puppets():
-		if p.team == view.my_index and p.def.has("cargo"):
+		if (p.team == view.my_index or p.def.get("garrison", false)) and p.def.has("cargo"):
 			ids.append(p.id)
 	if not ids.is_empty():
 		view.send({"t": "unload", "ids": ids})

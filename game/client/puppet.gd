@@ -40,6 +40,9 @@ var boxes := 0
 var ghost := false
 var aabb := AABB()
 var aux2 := 0
+var sell_shown := false
+var ring_meshes: Array = []
+var sell_label: Label3D = null
 var anims: Array = []
 var tyaw_changed_t := 0.0
 var capture_mat: StandardMaterial3D = null
@@ -74,7 +77,9 @@ var team_ring: MeshInstance3D
 var pad: MeshInstance3D = null
 var anim: AnimationPlayer = null
 var anim_state := ""
-var stealth_alpha := 1.0
+var stealth_alpha := 0.0
+var meshes: Array = []
+var rope: MeshInstance3D = null
 var track_dist := 0.0
 var crates: Array[Node3D] = []
 var blackout_mat: StandardMaterial3D = null
@@ -161,8 +166,9 @@ func _build_visual(mine: bool) -> void:
 	else:
 		team_ring = Visuals.disc(maxf(radius * 0.9, 0.8), Color(Data.TEAM_COLORS[team], 0.6) if team >= 0 else Color(0.5, 0.5, 0.5, 0.5))
 		add_child(team_ring)
-	sel_ring = Visuals.ring(radius * (1.15 if not is_building else 0.75), Color(0.3, 1.0, 0.3) if mine else Color(1.0, 0.9, 0.3))
+	sel_ring = Visuals.ring(radius * (1.25 if not is_building else 0.78), Color(0.35, 1.0, 0.35) if mine else Color(1.0, 0.9, 0.3), 0.32 if not is_building else 0.5)
 	sel_ring.visible = false
+	sel_ring.position.y = 0.12
 	add_child(sel_ring)
 	if cat == "inf":
 		_setup_anim()
@@ -283,7 +289,8 @@ func apply_state(pos: Vector2, alt: float, yaw: float, tyaw: float, hpf: float, 
 	if is_building and was_complete != complete:
 		_apply_construction()
 	last_update = now
-	ghost = false
+	if ghost:
+		set_ghost(false)
 
 func _apply_construction() -> void:
 	if not is_building:
@@ -319,12 +326,44 @@ func _process(dt: float) -> void:
 			loop = null
 	else:
 		_process_unit(dt, now)
-	var want_alpha := 0.45 if (flags & 4) != 0 else 1.0
-	if want_alpha != stealth_alpha:
-		stealth_alpha = want_alpha
+	# stealth: the whole model breathes in and out of view
+	var stealthed := (flags & 4) != 0
+	if stealthed or stealth_alpha < 1.0:
+		var fade := (0.45 + 0.35 * sin(now * 1.6 + id)) if stealthed else 0.0
+		if absf(fade - stealth_alpha) > 0.01 or (not stealthed and stealth_alpha > 0.0):
+			stealth_alpha = fade
+			if meshes.is_empty() and model != null:
+				meshes = model.find_children("*", "MeshInstance3D", true, false)
+			for mi in meshes:
+				if is_instance_valid(mi):
+					(mi as MeshInstance3D).transparency = fade
 		if team_ring:
-			team_ring.visible = want_alpha >= 1.0
+			team_ring.visible = not stealthed
+	# Chinook winching supplies: a cable down to the crates while it hovers low
+	if not is_building and int(def.get("gatherer", 0)) > 0 and cat == "air":
+		var winching := cur_pos.y > 2.5 and cur_pos.y < 8.0 and vel.length() < 2.0
+		if winching and rope == null:
+			rope = Visuals.box(Vector3(0.08, 1.0, 0.08), Color(0.25, 0.22, 0.2))
+			add_child(rope)
+			var hook := Visuals.box(Vector3(0.9, 0.5, 0.9), Color(0.72, 0.56, 0.3))
+			hook.name = "Hook"
+			rope.add_child(hook)
+		if rope != null:
+			rope.visible = winching
+			if winching:
+				var len := maxf(cur_pos.y - 1.2, 0.5)
+				rope.scale = Vector3(1, len, 1)
+				rope.position = Vector3(0, -len * 0.5, 0)
+				var hook := rope.get_node_or_null("Hook")
+				if hook != null:
+					hook.scale = Vector3(1, 1.0 / len, 1)
+					hook.position = Vector3(0, -0.5, 0)
+					hook.visible = (flags & 32) != 0
 	sel_ring.visible = selected or hovered
+	if sel_ring.visible:
+		# selected: solid bright ring; only hovered / boxed: a lighter pulse so the two never look alike
+		var pulse := 0.55 + 0.25 * sin(now * 5.0)
+		sel_ring.transparency = 0.0 if selected else clampf(1.0 - pulse, 0.0, 1.0)
 
 ## Construction site dressing: yellow scaffold posts and rails around the footprint,
 ## a progress bar and an UNFINISHED warning when nobody is building.
@@ -364,8 +403,9 @@ func _build_scaffold() -> void:
 ## Garrison: soldiers visibly manning the sandbags of a Firebase.
 var garrison_key := ""
 var garrison_node: Node3D = null
-func set_garrison(types: Array) -> void:
-	var key := ",".join(types)
+func set_garrison(types: Array, owner := -2) -> void:
+	var gteam := team if owner == -2 else owner
+	var key := ",".join(types) + "|%d" % gteam
 	if key == garrison_key:
 		return
 	garrison_key = key
@@ -376,13 +416,34 @@ func set_garrison(types: Array) -> void:
 		return
 	garrison_node = Node3D.new()
 	add_child(garrison_node)
-	for i in range(types.size()):
-		var m := Units.make(types[i], team)
-		var ang := i * TAU / 4.0 + PI * 0.25
-		m.position = Vector3(sin(ang) * 2.1, 0.5, cos(ang) * 2.1)
-		m.rotation.y = ang
-		m.scale = Vector3.ONE * 0.9
+	var fp: Vector2 = Data.footprint_size(type)
+	var civ: bool = def.get("garrison", false)
+	var n := types.size()
+	for i in range(n):
+		var m := Units.make(types[i], gteam)
+		var ang := i * TAU / maxf(n, 4.0) + PI * 0.25
+		if civ:
+			# civilians' windows: heads and rifles poke out along the walls, upstairs for the tall ones
+			var side := i % 4
+			var along := (float(i / 4) - 0.5) * fp.x * 0.5
+			var spots: Array = [Vector3(along, 1.2, fp.y * 0.5 - 0.2), Vector3(fp.x * 0.5 - 0.2, 1.2, along), Vector3(-along, 1.2, -fp.y * 0.5 + 0.2), Vector3(-fp.x * 0.5 + 0.2, 1.2, -along)]
+			m.position = spots[side]
+			var yaws: Array = [0.0, PI * 0.5, PI, -PI * 0.5]
+			m.rotation.y = yaws[side]
+			m.scale = Vector3.ONE * 0.9
+		else:
+			m.position = Vector3(sin(ang) * 2.1, 0.5, cos(ang) * 2.1)
+			m.rotation.y = ang
+			m.scale = Vector3.ONE * 0.9
 		garrison_node.add_child(m)
+	if civ:
+		# a flag in the occupants' colour on the roof
+		var pole := Visuals.box(Vector3(0.08, 2.4, 0.08), Color(0.2, 0.2, 0.22))
+		pole.position = Vector3(fp.x * 0.3, float(def.get("height", 6.0)) + 1.0, -fp.y * 0.3)
+		garrison_node.add_child(pole)
+		var flag := Visuals.box(Vector3(1.2, 0.7, 0.05), Data.TEAM_COLORS[gteam % Data.TEAM_COLORS.size()] if gteam >= 0 else Color.WHITE)
+		flag.position = pole.position + Vector3(0.65, 0.8, 0)
+		garrison_node.add_child(flag)
 
 func flash_cargo() -> void:
 	var l := Label3D.new()
@@ -411,7 +472,25 @@ func _door_anim(dt: float, now: float) -> void:
 		l.visible = open and fmod(now * 4.0, 1.0) < 0.5
 
 func _process_building(now: float) -> void:
+	if ghost:
+		return
 	_door_anim(get_process_delta_time(), now)
+	if def.has("superweapon") and model != null:
+		# focusing rings: dark while charging, then they light up one after another when it's ready
+		if ring_meshes.is_empty():
+			for mi in model.find_children("*", "MeshInstance3D", true, false):
+				if (mi as MeshInstance3D).mesh is TorusMesh:
+					ring_meshes.append(mi)
+		var ready := "sw_ready" in extras_key
+		var n := ring_meshes.size()
+		for i in range(n):
+			var mi: MeshInstance3D = ring_meshes[i]
+			if ready:
+				var phase := fmod(now * 1.5, float(n))
+				var lit := absf(phase - i) < 0.5 or absf(phase - i - n) < 0.5
+				mi.transparency = 0.0 if lit else 0.55
+			else:
+				mi.transparency = 0.45
 	if not complete:
 		var f := clampf(aux / 100.0, 0.02, 1.0)
 		model.scale = Vector3(1, f, 1)
@@ -515,6 +594,23 @@ func _idle_anims(now: float, dt: float) -> void:
 
 ## Being captured: flash between our colour and the capturing player's colour, with a beeping loop.
 func _capture_fx(now: float) -> void:
+	var selling := aux2 == 255 and is_building
+	if selling and not sell_shown:
+		sell_shown = true
+		sell_label = Label3D.new()
+		sell_label.text = "SELLING"
+		sell_label.font_size = 48
+		sell_label.pixel_size = 0.02
+		sell_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sell_label.modulate = Color(1.0, 0.85, 0.3)
+		sell_label.outline_size = 10
+		sell_label.position = Vector3(0, float(def.get("height", 4.0)) + 1.5, 0)
+		add_child(sell_label)
+	if selling:
+		var k := 0.6 + 0.4 * absf(sin(now * 4.0))
+		if model != null:
+			model.scale.y = k
+		return
 	var capturing := aux2 > 0 and complete
 	if capturing:
 		var cap_team := aux2 - 1
@@ -695,7 +791,23 @@ func _process_unit(dt: float, now: float) -> void:
 			e.emitting = on
 
 func is_stale(now: float) -> bool:
-	return not is_building and now - last_update > 0.7
+	return now - last_update > 0.7
+
+## Structure seen earlier but not right now: drawn dim and frozen (it may not even be there any more).
+func set_ghost(on: bool) -> void:
+	if ghost == on:
+		return
+	ghost = on
+	if not is_building:
+		visible = not on
+		return
+	if meshes.is_empty() and model != null:
+		meshes = model.find_children("*", "MeshInstance3D", true, false)
+	for mi in meshes:
+		if is_instance_valid(mi):
+			(mi as MeshInstance3D).transparency = 0.55 if on else 0.0
+	for ps in model.find_children("*", "CPUParticles3D", true, false):
+		(ps as CPUParticles3D).emitting = not on
 
 func detach_model() -> Node3D:
 	if model.get_parent() != null:

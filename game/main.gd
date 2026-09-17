@@ -3,7 +3,9 @@ extends Node3D
 ## Entry point: main menu, host/join lobby, then hands over to Session + ClientView.
 
 const PORT := 7788
-const GAME_VERSION := "0.1.0"
+const GAME_VERSION := "0.2.0"
+const GAME_TITLE := "CONQUER & COMMAND"
+const GAME_SUBTITLE := "ZERO BUDGET"
 const MAX_PLAYERS := 6
 
 static var I: Main = null
@@ -88,47 +90,75 @@ func _build_menu() -> void:
 	menu = CanvasLayer.new()
 	menu.layer = 5
 	add_child(menu)
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.theme = MenuTheme.build()
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu.add_child(root)
 	var bg := ColorRect.new()
 	bg.color = Color(0.02, 0.03, 0.05, 0.35)   # the 3D shell map shows through
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	menu.add_child(bg)
+	root.add_child(bg)
+	# letterbox bars top and bottom, Generals-style
+	for side in [Control.PRESET_TOP_WIDE, Control.PRESET_BOTTOM_WIDE]:
+		var bar := ColorRect.new()
+		bar.color = Color(0.03, 0.03, 0.04, 0.85)
+		bar.set_anchors_preset(side)
+		bar.custom_minimum_size = Vector2(0, 46)
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(bar)
+		var rule := ColorRect.new()
+		rule.color = MenuTheme.BRASS_DIM
+		rule.set_anchors_preset(side)
+		rule.custom_minimum_size = Vector2(0, 2)
+		if side == Control.PRESET_TOP_WIDE:
+			rule.position.y = 46
+		else:
+			rule.anchor_top = 1.0
+			rule.offset_top = -48
+			rule.offset_bottom = -46
+		rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(rule)
+	var ver := Label.new()
+	ver.text = "%s: %s  ·  v%s" % [GAME_TITLE, GAME_SUBTITLE, GAME_VERSION]
+	ver.add_theme_font_size_override("font_size", 12)
+	ver.add_theme_color_override("font_color", MenuTheme.TEXT_DIM)
+	ver.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	ver.position = Vector2(14, -34)
+	ver.anchor_top = 1.0
+	ver.anchor_bottom = 1.0
+	ver.offset_top = -34
+	ver.offset_bottom = -14
+	root.add_child(ver)
 	_show_menu_scene(true)
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	menu.add_child(center)
+	root.add_child(center)
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(520, 0)
-	var pst := StyleBoxFlat.new()
-	pst.bg_color = Color(0.05, 0.06, 0.08, 0.86)
-	pst.set_content_margin_all(14)
-	pst.set_corner_radius_all(6)
-	pst.border_color = Color(0.3, 0.35, 0.45)
-	pst.set_border_width_all(1)
-	panel.add_theme_stylebox_override("panel", pst)
+	panel.custom_minimum_size = Vector2(560, 0)
 	center.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
 	panel.add_child(v)
-	var title := Label.new()
-	title.text = "FRONTLINE"
-	title.add_theme_font_size_override("font_size", 40)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(title)
+	v.add_child(MenuTheme.headline(GAME_TITLE, 42))
 	var sub := Label.new()
-	sub.text = "Generals-style RTS  ·  v%s" % GAME_VERSION
+	sub.text = GAME_SUBTITLE
+	sub.add_theme_font_size_override("font_size", 20)
+	sub.add_theme_color_override("font_color", MenuTheme.TEXT)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.modulate = Color(0.7, 0.7, 0.7)
 	v.add_child(sub)
 
 	menu_box = VBoxContainer.new()
 	menu_box.add_theme_constant_override("separation", 8)
 	v.add_child(menu_box)
+	menu_box.add_child(MenuTheme.section("Commander"))
 	menu_box.add_child(_label("Callsign"))
 	name_edit = LineEdit.new()
 	name_edit.text = my_name
 	name_edit.placeholder_text = "Your name"
 	menu_box.add_child(name_edit)
+	menu_box.add_child(MenuTheme.section("Multiplayer"))
 	menu_box.add_child(_label("Host address (for Join)"))
 	ip_edit = LineEdit.new()
 	ip_edit.text = "127.0.0.1"
@@ -138,12 +168,14 @@ func _build_menu() -> void:
 	h.add_theme_constant_override("separation", 8)
 	menu_box.add_child(h)
 	var host_btn := Button.new()
-	host_btn.text = "Host game"
+	host_btn.text = "HOST GAME"
+	host_btn.custom_minimum_size = Vector2(0, 44)
 	host_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	host_btn.pressed.connect(_host)
 	h.add_child(host_btn)
 	var join_btn := Button.new()
-	join_btn.text = "Join game"
+	join_btn.text = "JOIN GAME"
+	join_btn.custom_minimum_size = Vector2(0, 44)
 	join_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	join_btn.pressed.connect(_join)
 	h.add_child(join_btn)
@@ -165,10 +197,11 @@ func _build_menu() -> void:
 	left.add_theme_constant_override("separation", 6)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(left)
+	left.add_child(MenuTheme.section("Game setup"))
 	lobby_list = Label.new()
-	lobby_list.text = "SLOTS  ·  click a spawn point on the map to move there"
+	lobby_list.text = "Slots  ·  click a spawn point on the map to move there"
 	lobby_list.add_theme_font_size_override("font_size", 12)
-	lobby_list.modulate = Color(0.7, 0.75, 0.8)
+	lobby_list.add_theme_color_override("font_color", MenuTheme.TEXT_DIM)
 	left.add_child(lobby_list)
 	lobby_rows = VBoxContainer.new()
 	lobby_rows.add_theme_constant_override("separation", 4)
@@ -201,11 +234,7 @@ func _build_menu() -> void:
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 4)
 	cols.add_child(right)
-	var pl := Label.new()
-	pl.text = "MAP"
-	pl.add_theme_font_size_override("font_size", 12)
-	pl.modulate = Color(0.7, 0.75, 0.8)
-	right.add_child(pl)
+	right.add_child(MenuTheme.section("Map"))
 	preview_rect = TextureRect.new()
 	preview_rect.custom_minimum_size = Vector2(PREVIEW_PX, PREVIEW_PX)
 	preview_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
@@ -231,6 +260,7 @@ func _build_menu() -> void:
 	lobby_box.add_child(hb)
 	start_btn = Button.new()
 	start_btn.text = "Start game"
+	start_btn.custom_minimum_size = Vector2(0, 44)
 	start_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	start_btn.pressed.connect(_on_start_pressed)
 	hb.add_child(start_btn)
@@ -243,9 +273,10 @@ func _build_menu() -> void:
 	status_label.text = ""
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_label.add_theme_color_override("font_color", MenuTheme.AMBER)
 	v.add_child(status_label)
 	var quit := Button.new()
-	quit.text = "Quit"
+	quit.text = "QUIT"
 	quit.pressed.connect(func() -> void: get_tree().quit())
 	v.add_child(quit)
 
@@ -872,6 +903,10 @@ func _start_game() -> void:
 	if args.has("simtest"):
 		if str(args["simtest"]) == "load":
 			w.probe_load()
+		elif str(args["simtest"]) == "garrison":
+			w.probe_garrison()
+		elif str(args["simtest"]) == "content":
+			w.probe_content()
 		else:
 			w.probe_ridge()
 		get_tree().quit()

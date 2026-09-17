@@ -706,7 +706,7 @@ func refresh_selection() -> void:
 		if view.observer:
 			info_body.text = "[color=#889]OBSERVER - you see the whole map and every general's cash, units and production. Click any unit or building for its details.\nArrows / edge / right-drag: scroll   Wheel: zoom   Middle-drag or Q / E: rotate camera   Enter: chat   Esc: menu[/color]"
 			return
-		info_body.text = "[color=#889]Left-drag: select   Right-click: move / attack   Ctrl+right-click or X: force attack   A: attack-move   S: stop   G: guard area (drag to size)\nN: next Dozer   B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center   Ctrl+1-9: groups   H: home   Ctrl+B: beacon   Enter: chat\nArrows / edge / right-drag: scroll   Wheel: zoom   Middle-drag or Q / E: rotate camera[/color]"
+		info_body.text = "[color=#889]Left-drag: select   Right-click: move / attack   Ctrl+right-click or Ctrl+X: force attack   A: attack-move (A + minimap click too)   S: stop   X: scatter   G: guard area (drag to size)\nQ / W / E: select combat units / aircraft / same type on screen (tap twice: whole map)   N or Ctrl+Up: next builder   B / F / I / C / Y: Barracks / Factory / Airfield / Command Center / Supply   Ctrl+1-9: groups   H: home   Ctrl+B: beacon   Enter: chat\nArrows / edge / right-drag: scroll   Wheel: zoom   Middle-drag, [ ] or numpad 4 / 6: rotate camera[/color]"
 		return
 	var mine: bool = sel[0].team == view.my_index and not view.observer
 	if sel.size() == 1:
@@ -734,6 +734,9 @@ func refresh_selection() -> void:
 			lines.append("Ammo: %d" % p.aux)
 		if int(p.def.get("gatherer", 0)) > 0 and (p.flags & 32) != 0:
 			lines.append("Carrying %d box%s" % [p.aux, "" if p.aux == 1 else "es"])
+		var dr: String = str(view.pstate.get("drones", {}).get(p.id, ""))
+		if dr != "":
+			lines.append("Drone: %s" % Data.UNITS[dr]["name"])
 		if p.def.has("cargo"):
 			var cg: Array = view.pstate.get("cargo", {}).get(p.id, [])
 			var used := 0
@@ -758,9 +761,14 @@ func refresh_selection() -> void:
 			parts.append("%d× %s" % [counts[t], Data.def(t)["name"]])
 		info_title.text = "%d units selected" % sel.size()
 		info_body.text = ", ".join(parts)
-	if not mine:
-		return
 	var actions := []
+	if not mine:
+		# a civilian building our infantry are holding: let them out from here
+		if sel.size() == 1 and sel[0].is_building and sel[0].def.get("garrison", false) and int(view.pstate.get("garrison", {}).get(sel[0].id, -1)) == view.my_index:
+			var gb: Puppet = sel[0]
+			actions.append({"label": "Unload (U)", "tip": "Send your garrison out", "cb": func() -> void: ctl.unload_building(gb.id), "enabled": true})
+			_apply_actions(actions)
+		return
 	var single: Puppet = sel[0] if sel.size() == 1 else null
 	var all_units := true
 	for p in sel:
@@ -800,6 +808,10 @@ func refresh_selection() -> void:
 			var ready: bool = view.sw_remaining(single.id) <= 0.0
 			var swtip := "Select a target for the beam. Steer it with the mouse while it fires." if d.get("sw_kind", "beam") == "beam" else "Select a target. Everyone will see it coming."
 			actions.append({"label": "FIRE\n%s" % d["name"], "tip": swtip, "cb": func() -> void: ctl.sw_mode(single.id), "enabled": ready})
+		if d.has("intel"):
+			var rem: float = float(view.pstate.get("intel", {}).get(single.id, 0.0))
+			actions.append({"label": "Intelligence\n%s" % ("READY" if rem <= 0.0 else "%d:%02d" % [int(rem) / 60, int(rem) % 60]), "icon": "spy_satellite",
+				"tip": "Reveal every enemy unit and structure for %d s (every %d s)." % [int(d["intel"]["dur"]), int(d["intel"]["cd"])], "cb": func() -> void: ctl.intel(single.id), "enabled": rem <= 0.0})
 		if d.has("produces"):
 			actions.append({"label": "Set rally", "tip": "Click where new units should gather", "cb": func() -> void: ctl.rally_mode(single.id), "enabled": true})
 		if d.has("cargo") and not view.pstate.get("cargo", {}).get(single.id, []).is_empty():
@@ -821,6 +833,16 @@ func refresh_selection() -> void:
 				actions.append({"label": "%s\n$%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"])],
 					"cb": func() -> void: ctl.begin_place(bt), "enabled": why == "" and view.can_afford(bd["cost"]), "why": why, "cost": int(bd["cost"])})
 		else:
+			if single != null and single.cat == "veh" and view.my_faction == "usa" and not single.def.get("drone", false):
+				# USA: one escort drone per vehicle (buy another if it gets shot down)
+				var have: String = str(view.pstate.get("drones", {}).get(single.id, ""))
+				if have != "":
+					actions.append({"label": "%s\nattached" % Data.UNITS[have]["name"], "icon": have, "tip": "%s\n%s" % [Data.UNITS[have]["name"], Data.UNITS[have]["desc"]], "cb": func() -> void: pass, "enabled": false})
+				else:
+					for dk in ["scout_drone", "battle_drone", "hellfire_drone"]:
+						var dd: Dictionary = Data.UNITS[dk]
+						actions.append({"label": "%s\n$%d" % [dd["name"], dd["cost"]], "icon": dk, "tip": "%s\n%s" % [dd["name"], dd["desc"]],
+							"cb": func() -> void: ctl.buy_drone(single.id, dk), "enabled": view.can_afford(dd["cost"]), "cost": int(dd["cost"])})
 			actions.append({"label": "Attack-move (A)", "tip": "Move and engage anything on the way", "cb": func() -> void: ctl.amove_mode(), "enabled": true})
 			actions.append({"label": "Force attack (X)", "tip": "Fire at a position or at anything, including neutral or own structures (Ctrl+right-click)", "cb": func() -> void: ctl.force_mode(), "enabled": true})
 			actions.append({"label": "Stop (S)", "tip": "Halt", "cb": func() -> void: ctl.stop(), "enabled": true})
@@ -840,6 +862,9 @@ func refresh_selection() -> void:
 						can = true
 			if has_ranger:
 				actions.append({"label": "Capture", "icon": "capture", "tip": "Take over an enemy or neutral structure (20 s next to it)." + ("" if can else "\nRequires the Capture Building upgrade at the Barracks."), "cb": func() -> void: ctl.capture_mode(), "enabled": can})
+	_apply_actions(actions)
+
+func _apply_actions(actions: Array) -> void:
 	for i in range(mini(actions.size(), grid_buttons.size())):
 		var a: Dictionary = actions[i]
 		var b := grid_buttons[i]
@@ -1136,12 +1161,19 @@ func _fill_promo(st: Dictionary) -> void:
 				st_l.add_theme_color_override("font_color", Color(0.5, 0.9, 0.6))
 				cv.add_child(st_l)
 			elif can:
-				var b := Button.new()
-				b.text = "Unlock (1 pt)" if lvl == 0 else "Upgrade (1 pt)"
-				b.pressed.connect(func() -> void:
+				# the whole card is the button: click the icon, the name, anything
+				st_l.text = "CLICK TO UNLOCK (1 pt)" if lvl == 0 else "CLICK TO UPGRADE (1 pt)"
+				st_l.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+				cv.add_child(st_l)
+				var hit := Button.new()
+				hit.flat = true
+				hit.set_anchors_preset(Control.PRESET_FULL_RECT)
+				hit.tooltip_text = "%s\n%s" % [pd["name"], pd["desc"]]
+				hit.pressed.connect(func() -> void:
 					Audio.I.ui("ui_click", -6.0)
 					ctl.buy_power(pid))
-				cv.add_child(b)
+				card.add_child(hit)
+				card.add_theme_stylebox_override("panel", _style(Color(0.16, 0.2, 0.26, 1.0), Color(1.0, 0.85, 0.3)))
 			else:
 				st_l.text = "Needs rank %d" % tier if rank < tier else "No points left"
 				st_l.add_theme_color_override("font_color", Color(0.9, 0.45, 0.4))
@@ -1192,7 +1224,7 @@ func _draw_minimap() -> void:
 				minimap.draw_rect(Rect2(x * cs, y * cs, cs + 0.5, cs + 0.5), Color(0, 0, 0, 0.45))
 	for pr in view.map["props"]:
 		var fp: Vector2i = pr["fp"]
-		if fp == Vector2i.ZERO:
+		if fp == Vector2i.ZERO or pr.get("kind", "") == "civ":
 			continue
 		var p: Vector2 = pr["p"]
 		var col := Color(0.35, 0.3, 0.25) if pr.get("kind", "") != "tree" else Color(0.2, 0.4, 0.2)
@@ -1244,11 +1276,15 @@ func _minimap_input(ev: InputEvent) -> void:
 			if not mb.pressed:
 				return
 			if mb.button_index == MOUSE_BUTTON_LEFT:
-				view.camera.jump_to(pos)
+				if ctl.mode == "amove" or mb.double_click:
+					ctl.minimap_attack_move(pos)   # A then click the map (or double-click it): attack-move there
+				else:
+					view.camera.jump_to(pos)
 			elif mb.button_index == MOUSE_BUTTON_RIGHT:
 				ctl.minimap_command(pos)
 		else:
-			view.camera.jump_to(pos)
+			if ctl.mode != "amove":
+				view.camera.jump_to(pos)
 
 # ---------------------------------------------------------------------------
 # Overlay: selection box, health bars, rally lines
@@ -1264,13 +1300,26 @@ func _draw_overlay() -> void:
 	var vs := overlay.size
 	for pu in view.puppets.values():
 		var p: Puppet = pu
-		if p.ghost and not p.is_building:
-			continue
+		if p.ghost:
+			continue   # out of sight: no bars, nothing that would betray what happened to it
 		var vis_all: bool = view.observer or p.team == view.my_index
 		var has_ammo: bool = vis_all and ((p.cat == "air" and p.def.get("jet", false)) or p.type == "comanche")
 		var show: bool = p.selected or p.hovered or (p.hp_frac < 0.999 and (vis_all or p.selected)) or (p.is_building and not p.complete) or has_ammo
 		if not show:
 			continue
+		if p.selected and not p.is_building:
+			# C&C-style corner brackets around every selected unit
+			var rect := p.screen_rect(cam)
+			if rect.size != Vector2.ZERO:
+				rect = rect.grow(4.0)
+				var l := minf(8.0, rect.size.x * 0.35)
+				var bc := Color(0.4, 1.0, 0.4, 0.95) if p.team == view.my_index else Color(1.0, 0.9, 0.3, 0.95)
+				for cx in [rect.position.x, rect.end.x]:
+					for cy in [rect.position.y, rect.end.y]:
+						var dx := l if cx == rect.position.x else -l
+						var dy := l if cy == rect.position.y else -l
+						overlay.draw_line(Vector2(cx, cy), Vector2(cx + dx, cy), bc, 2.0)
+						overlay.draw_line(Vector2(cx, cy), Vector2(cx, cy + dy), bc, 2.0)
 		var top := p.cur_pos + Vector3(0, float(p.def.get("height", 3.0)) if p.is_building else float(p.def.get("length", 2.0)) * 0.5 + 1.0, 0)
 		if cam.is_behind(top):
 			continue
