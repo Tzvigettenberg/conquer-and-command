@@ -137,19 +137,19 @@ static func make(type: String, team: int) -> Node3D:
 			box(root, Vector3(1.0, 0.05, 4.5), Vector3(-1.0, 0.17, 0), WARN)
 			box(root, Vector3(1.0, 0.05, 4.5), Vector3(3.4, 0.17, 0), WARN)
 			box(root, Vector3(3.2, 3.0, 8.5), Vector3(-3.0, 1.5, 0), CONCRETE)
-			prism(root, Vector3(3.4, 1.2, 8.7), Vector3(-3.0, 3.6, 0), ROOF)
+			prism(root, Vector3(3.3, 0.8, 8.6), Vector3(-3.0, 3.4, 0), ROOF)
 			band(root, 3.2, 8.5, 2.9, team, 0.3)
 			for i in range(2):
 				cyl(root, 0.8, 0.8, 1.8, Vector3(3.6, 0.9, -3.4 + i * 1.6), METAL, 10)
 			box(root, Vector3(0.25, 5.0, 0.25), Vector3(3.8, 2.5, 3.5), METAL)
-			var arm := box(root, Vector3(4.5, 0.25, 0.25), Vector3(1.8, 5.0, 3.5), METAL)
+			var arm := box(root, Vector3(3.4, 0.22, 0.22), Vector3(1.8, 5.0, 3.5), METAL)
 			arm.position = Vector3(3.8, 5.0, 3.5)
 			var crane := Node3D.new()
 			crane.position = Vector3(3.8, 5.0, 3.5)
 			root.add_child(crane)
 			arm.get_parent().remove_child(arm)
 			crane.add_child(arm)
-			arm.position = Vector3(-2.0, 0, 0)
+			arm.position = Vector3(-1.5, 0, 0)
 			anim(root, crane, "sweep", 0.3)
 		"war_factory":
 			# large hangar with a wide door, roof vents, side crane rail
@@ -201,6 +201,40 @@ static func make(type: String, team: int) -> Node3D:
 			var d := cyl(dish, 1.3, 0.2, 0.4, Vector3(0, 0.3, 0), METAL, 14)
 			d.rotation.x = 1.1
 			anim(root, dish, "spin", 0.6)
+			# battle-plan cannon (Bombardment): a heavy howitzer on the roof, hidden until the plan is active
+			var turret := Node3D.new()
+			turret.name = "Turret"
+			turret.position = Vector3(3.0, 2.2, -1.5)
+			root.add_child(turret)
+			var cannon := Node3D.new()
+			cannon.name = "Cannon"
+			cannon.visible = false
+			turret.add_child(cannon)
+			cyl(cannon, 1.1, 1.2, 0.7, Vector3(0, 0.35, 0), METAL, 12)
+			box(cannon, Vector3(1.6, 1.0, 1.8), Vector3(0, 1.1, -0.2), METAL_DARK)
+			var barrel := cyl(cannon, 0.16, 0.2, 4.2, Vector3(0, 1.4, 2.2), METAL_DARK, 8)
+			barrel.rotation.x = deg_to_rad(90.0 - 18.0)
+			box(cannon, Vector3(0.5, 0.3, 0.3), Vector3(0, 1.2, 1.0), tc)
+			# Hold the Line: sandbag ring; Search and Destroy: extra scanner mast (toggled by the puppet)
+			var bags := Node3D.new()
+			bags.name = "PlanHold"
+			bags.visible = false
+			root.add_child(bags)
+			for i in range(12):
+				var ang := i * TAU / 12.0
+				box(bags, Vector3(1.6, 0.7, 0.8), Vector3(sin(ang) * 6.6, 0.35, cos(ang) * 5.6), Color(0.55, 0.5, 0.36), ang)
+			var mast := Node3D.new()
+			mast.name = "PlanSearch"
+			mast.visible = false
+			root.add_child(mast)
+			cyl(mast, 0.08, 0.1, 6.0, Vector3(-4.5, 5.0, -3.0), METAL, 6)
+			var scan := Node3D.new()
+			scan.position = Vector3(-4.5, 8.2, -3.0)
+			mast.add_child(scan)
+			box(scan, Vector3(2.2, 0.5, 0.1), Vector3(0, 0, 0), METAL)
+			anim(root, scan, "spin", 2.5)
+			root.set_meta("turret", turret)
+			anim(root, turret, "sweep", 0.3)
 		"supply_drop_zone":
 			# marked landing square with a beacon mast
 			box(root, Vector3(5.6, 0.12, 5.6), Vector3(0, 0.06, 0), CONCRETE_DARK)

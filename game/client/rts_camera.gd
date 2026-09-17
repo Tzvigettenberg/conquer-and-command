@@ -1,6 +1,6 @@
 class_name RtsCamera
 extends Node3D
-## Generals-style camera: fixed pitch, scroll-zoom, edge/arrow-key scrolling, middle-drag pan, Q/E rotate.
+## Generals-style camera: scroll-zoom, edge/arrow-key/right-drag scrolling, middle-drag rotate/tilt, Q/E or numpad 4/6 rotate, numpad 8/2 zoom, numpad 5 reset.
 
 const PITCH_DEG := 54.0
 const MIN_H := 34.0
@@ -10,6 +10,7 @@ const EDGE := 14
 var cam: Camera3D
 var height := 85.0
 var yaw := 0.0
+var pitch := PITCH_DEG
 var map_size := 400.0
 var target := Vector3.ZERO
 var dragging := false
@@ -31,10 +32,9 @@ func setup(size: float, start: Vector2) -> void:
 func _apply() -> void:
 	position = target
 	rotation.y = yaw
-	var pitch := deg_to_rad(PITCH_DEG)
-	var back := height / tan(pitch)
+	var back := height / tan(deg_to_rad(pitch))
 	cam.position = Vector3(0, height, back)
-	cam.rotation_degrees = Vector3(-PITCH_DEG, 0, 0)
+	cam.rotation_degrees = Vector3(-pitch, 0, 0)
 
 func _unhandled_input(ev: InputEvent) -> void:
 	if not enabled:
@@ -51,11 +51,24 @@ func _unhandled_input(ev: InputEvent) -> void:
 			dragging = mb.pressed
 			drag_last = mb.position
 	elif ev is InputEventMouseMotion and dragging:
+		# middle-drag rotates the camera (Generals); right-drag scrolling is driven by the controller
 		var mm := ev as InputEventMouseMotion
 		var d := mm.position - drag_last
 		drag_last = mm.position
-		var k := height * 0.0016
-		_pan(Vector2(-d.x, d.y) * k)
+		yaw -= d.x * 0.006
+		pitch = clampf(pitch + d.y * 0.15, 38.0, 68.0)
+		_apply()
+
+## Scroll by a screen-space mouse delta (right-drag).
+func pan_screen(d: Vector2) -> void:
+	var k := height * 0.0016
+	_pan(Vector2(-d.x, d.y) * k)
+
+func reset_view() -> void:
+	yaw = 0.0
+	pitch = PITCH_DEG
+	height = 85.0
+	_apply()
 
 func _pan(v: Vector2) -> void:
 	var f := Vector3(sin(yaw), 0, cos(yaw))
@@ -89,12 +102,20 @@ func _process(dt: float) -> void:
 				v.y += 1
 			elif mp.y > vs.y - EDGE:
 				v.y -= 1
-	if Input.is_key_pressed(KEY_Q):
+	if Input.is_key_pressed(KEY_Q) or Input.is_key_pressed(KEY_KP_4):
 		yaw += dt * 1.5
 		_apply()
-	if Input.is_key_pressed(KEY_E):
+	if Input.is_key_pressed(KEY_E) or Input.is_key_pressed(KEY_KP_6):
 		yaw -= dt * 1.5
 		_apply()
+	if Input.is_key_pressed(KEY_KP_8):
+		height = clampf(height * (1.0 - dt * 1.2), MIN_H, MAX_H)
+		_apply()
+	if Input.is_key_pressed(KEY_KP_2):
+		height = clampf(height * (1.0 + dt * 1.2), MIN_H, MAX_H)
+		_apply()
+	if Input.is_key_pressed(KEY_KP_5):
+		reset_view()
 	if v != Vector2.ZERO:
 		_pan(v * dt * height * 0.9)
 

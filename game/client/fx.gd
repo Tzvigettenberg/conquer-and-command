@@ -59,6 +59,11 @@ func _process(dt: float) -> void:
 				n.position = f.lerp(to, a)
 			"para":
 				n.position.y = lerpf(it["from"].y, 0.0, a)
+			"beacon":
+				var pulse := 0.7 + 0.3 * sin(it["t"] * 6.0)
+				n.scale = Vector3(pulse, 1.0, pulse)
+				if a > 0.8:
+					_fade(n, (1.0 - a) / 0.2 * 0.5)
 			"track":
 				if a > 0.6:
 					_fade(n, (1.0 - a) / 0.4 * 0.55)
@@ -399,6 +404,26 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 			ring.material_override = _own_mat(Color(0.4, 0.8, 1.0, 0.7))
 			ring.position = pos + Vector3(0, 0.3, 0)
 			_add(ring, "beam", 2.0)
+
+## Team beacon: a tall pulsing pillar visible to allies for a while.
+func beacon(pos: Vector3, col: Color) -> void:
+	var n := Node3D.new()
+	n.position = pos
+	var pillar := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.6
+	cm.bottom_radius = 1.4
+	cm.height = 40.0
+	pillar.mesh = cm
+	pillar.material_override = _own_mat(Color(col.r, col.g, col.b, 0.35))
+	pillar.position.y = 20.0
+	pillar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(pillar)
+	var ring := Visuals.ring(6.0, Color(col.r, col.g, col.b, 0.8), 0.6)
+	ring.material_override = _own_mat(Color(col.r, col.g, col.b, 0.8))
+	ring.position.y = 0.3
+	n.add_child(ring)
+	_add(n, "beacon", 25.0)
 
 ## Tyre / track marks left behind by vehicles.
 func track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void:

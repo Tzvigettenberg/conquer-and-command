@@ -12,7 +12,9 @@ const PSTATE_EVERY := 5
 const SPATIAL_CELL := 8.0
 const CAPTURE_TIME := 20.0
 const GHOST_TIMEOUT_TICKS := 20
-const GUARD_RADIUS := 24.0
+const GUARD_RADIUS := 36.0
+const ASSIST_RADIUS := 45.0      # idle units this close to an attacked friend join the fight
+const SCRAMBLE_RADIUS := 130.0   # parked aircraft launch when something this close to their airfield is hit
 const ORPHAN_DRAIN := 0.035      # fraction of max hp lost per second by jets with no airfield
 const TURRET_RATE := 150.0       # deg/s turret traverse
 const RETALIATE_LEASH := 40.0
@@ -49,19 +51,35 @@ var paused := false
 func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) -> void:
 	session = _session
 	options = opts
-	map = MapGen.build(str(opts.get("map", "desert")), peers.size())
+	map = MapGen.build(str(opts.get("map", "desert2")), peers.size())
 	map_size = map["size"]
 	grid.setup(map_size)
 	solo = peers.size() == 1
 	var start_cash := float(opts.get("cash", Data.STARTING_CASH))
 	var teams: Array = opts.get("teams", [])
+	var levels: Array = opts.get("levels", [])
+	# spawn slot per player (index into map starts); default = player order
+	var slots: Array = opts.get("slots", [])
+	var used_slots := {}
+	for i in range(peers.size()):
+		var sl: int = int(slots[i]) if i < slots.size() else -1
+		if sl < 0 or sl >= map["starts"].size() or used_slots.has(sl):
+			sl = 0
+			while used_slots.has(sl):
+				sl += 1
+		used_slots[sl] = true
+		if i < slots.size():
+			slots[i] = sl
+		else:
+			slots.append(sl)
 	for i in range(peers.size()):
 		players.append({
 			"peer": peers[i], "name": names[i], "cash": start_cash, "xp": 0.0, "rank": 1, "points": 1, "lost_msg_t": -100.0,
 			"stats": {"units_built": 0, "units_lost": 0, "units_killed": 0, "bld_built": 0, "bld_lost": 0, "bld_killed": 0, "cash_earned": 0},
 			"team": int(teams[i]) if i < teams.size() else i,
+			"slot": int(slots[i]), "level": str(levels[i]) if i < levels.size() else str(opts.get("ai", "medium")),
 			"powers": {}, "cds": {}, "upgrades": {}, "defeated": false, "pp": 0, "pu": 0, "low": false,
-			"sw_steer": Vector2(-1, -1), "attack_msg_t": -100.0, "income_mult": 1.0,
+			"sw_steer": Vector2(-1, -1), "attack_msg_t": -100.0, "income_mult": 1.0, "plan": "",
 		})
 		var v := Vision.new()
 		v.setup(map_size)
@@ -73,23 +91,29 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 		var fp: Vector2i = pr["fp"]
 		if fp != Vector2i.ZERO:
 			grid.set_cells(PathGrid.footprint_cells(pr["p"], fp), true)
+	for rd in map.get("ridges", []):
+		grid.set_cells(PathGrid.capsule_cells(rd["a"], rd["b"], float(rd["w"]) + 0.5), true)
 	for d in map["docks"]:
 		var e := spawn("supply_dock", -1, d["p"])
 		e.boxes = d["boxes"]
 	for p in map["derricks"]:
 		spawn("oil_derrick", -1, p)
 	for i in range(players.size()):
-		var s: Vector2 = map["starts"][i]
-		var cc := spawn("command_center", i, PathGrid.snap_center(s, Data.BUILDINGS["command_center"]["fp"]))
+		var sl: int = players[i]["slot"]
+		var s: Vector2 = map["starts"][sl]
+		var cc := spawn("command_center", i, PathGrid.snap_center(s, Data.BUILDINGS["command_center"]["fp"]), true, map["start_yaw"][sl])
 		var ex := _exit_point(cc)
 		var dz := spawn("dozer", i, ex)
-		dz.yaw = map["start_yaw"][i]
+		dz.yaw = map["start_yaw"][sl]
 		_recompute_power(i)
 	grid.flush()
+	map["player_names"] = names.duplicate()
+	map["player_teams"] = _teams_array()
+	map["player_slots"] = slots.duplicate()
 	for i in range(players.size()):
 		if peers[i] == -1:
 			var b := Bot.new()
-			b.setup(self, i, str(opts.get("ai", "medium")))
+			b.setup(self, i, str(players[i]["level"]))
 			bots.append(b)
 		else:
 			session.s_map(players[i]["peer"], map, i)
@@ -152,6 +176,8 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 	dead_list.append(e)
 	if e.is_building:
 		grid.set_cells(e.cells, false)
+		if e.def.get("plans", false):
+			_recompute_plans()
 		# jets homed here lose their pads
 		for o: Ent in ents.values():
 			if o.alive and o.home_id == e.id:
@@ -418,7 +444,7 @@ func _next_order(e: Ent) -> void:
 		if r["state"] == "guard":
 			e.state = "guard"
 			e.guard_pos = r["goal"]
-			e.guard_radius = GUARD_RADIUS
+			e.guard_radius = float(r.get("r", GUARD_RADIUS))
 			if not e.is_jet():
 				_set_path(e, e.guard_pos)
 			return
@@ -566,7 +592,7 @@ func _auto_acquire(e: Ent, dt: float) -> bool:
 		return false
 	var rng := e.vision
 	for w in e.weapon_ids():
-		rng = maxf(rng, float(Data.WEAPONS[w]["range"]))
+		rng = maxf(rng, _range(e, Data.WEAPONS[w]))
 	var centre := e.pos
 	if e.state == "guard" and e.guard_radius > 0.0:
 		centre = e.guard_pos
@@ -596,7 +622,7 @@ func _auto_acquire(e: Ent, dt: float) -> bool:
 	if e.state == "amove":
 		e.resume = {"state": "amove", "goal": e.goal}
 	elif e.state == "guard":
-		e.resume = {"state": "guard", "goal": e.guard_pos}
+		e.resume = {"state": "guard", "goal": e.guard_pos, "r": e.guard_radius}
 	elif e.state == "idle":
 		e.guard_pos = e.pos
 	e.state = "attack"
@@ -615,7 +641,30 @@ func _weapon_available(e: Ent, wid: String) -> bool:
 	var wd: Dictionary = Data.WEAPONS[wid]
 	if wd.has("upgrade") and e.owner >= 0 and not players[e.owner]["upgrades"].has(wd["upgrade"]):
 		return false
+	if wd.has("plan") and (e.plan != wd["plan"] or e.plan_t > 0.0):
+		return false
 	return true
+
+## Active battle plan of the entity's owner ("" if none). Only ground units benefit.
+func _plan_of(e: Ent) -> String:
+	if e.owner < 0 or e.is_building or e.is_air():
+		return ""
+	return str(players[e.owner]["plan"])
+
+## Weapon range including the Search and Destroy bonus.
+func _range(e: Ent, wd: Dictionary) -> float:
+	var r := float(wd["range"])
+	if _plan_of(e) == "search":
+		r *= 1.2
+	return r
+
+func _recompute_plans() -> void:
+	for p in range(players.size()):
+		players[p]["plan"] = ""
+	for e: Ent in ents.values():
+		if e.alive and e.is_building and e.complete and e.owner >= 0 and e.def.get("plans", false) and e.plan != "" and e.plan_t <= 0.0:
+			if players[e.owner]["plan"] == "":
+				players[e.owner]["plan"] = e.plan
 
 ## Best weapon index able to hit target t, or -1.
 func _pick_weapon(e: Ent, t: Ent) -> int:
@@ -663,7 +712,7 @@ func _do_attack(e: Ent, dt: float) -> void:
 		return
 	var wid: String = e.weapon_ids()[wi]
 	var wd: Dictionary = Data.WEAPONS[wid]
-	var rng: float = wd["range"]
+	var rng: float = _range(e, wd)
 	var min_rng: float = wd.get("min_range", 0.0)
 	var d := edge_dist(e.pos, t)
 	var want := atan2(t.pos.x - e.pos.x, t.pos.y - e.pos.y)
@@ -700,10 +749,29 @@ func _do_attack(e: Ent, dt: float) -> void:
 			_order_move(e, e.guard_pos)
 		return
 	e.repath_t -= dt
+	# stuck behind friends: pick a different angle of approach
+	if e.pos.distance_to(e.last_pos) < e.speed * dt * 0.15:
+		e.stuck_t += dt
+		if e.stuck_t > 1.2:
+			e.stuck_t = 0.0
+			e.flank = randf_range(-1.4, 1.4)
+			e.repath_t = 0.0
+	else:
+		e.stuck_t = 0.0
 	if e.repath_t <= 0.0 or e.path.is_empty():
 		e.repath_t = 0.6
 		var goal := t.pos
-		if t.is_building:
+		if e.flank != 0.0 and d > rng * 0.9:
+			# stand-off point on a ring around the target, rotated by this unit's flank angle
+			var from_t := e.pos - t.pos
+			var ang := atan2(from_t.x, from_t.y) + e.flank
+			var standoff := rng * 0.7 + (maxf(t.def.get("fp", Vector2i.ONE).x, t.def.get("fp", Vector2i.ONE).y) * PathGrid.CELL * 0.5 if t.is_building else 0.0)
+			goal = t.pos + Vector2(sin(ang), cos(ang)) * standoff
+			var gc := grid.cell_of(goal)
+			if grid.is_solid(gc):
+				gc = grid.nearest_free(gc)
+			goal = grid.center_of(gc)
+		elif t.is_building:
 			goal = grid.center_of(grid.approach_cell(e.pos, t.cells))
 		_set_path(e, goal)
 	_follow_path(e, dt)
@@ -722,7 +790,7 @@ func _do_attack_ground(e: Ent, dt: float) -> void:
 		return
 	var wid: String = ws[wi]
 	var wd: Dictionary = Data.WEAPONS[wid]
-	var rng: float = wd["range"]
+	var rng: float = _range(e, wd)
 	var min_rng: float = wd.get("min_range", 0.0)
 	var d := e.pos.distance_to(e.goal)
 	var want := atan2(e.goal.x - e.pos.x, e.goal.y - e.pos.y)
@@ -792,6 +860,8 @@ func _consume_shot(e: Ent, wi: int) -> float:
 	var dmg: float = wd["dmg"] * e.vet_dmg()
 	if e.owner >= 0 and wd["type"] == "JET_MISSILES" and players[e.owner]["upgrades"].has("laser_missiles"):
 		dmg *= 1.25
+	if _plan_of(e) == "bombardment":
+		dmg *= 1.2
 	return dmg
 
 func _tick_shots() -> void:
@@ -846,6 +916,10 @@ func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 	var mult := Data.armor_mult(t.def.get("armor", ""), dtype)
 	if t.owner < 0 and t.def.get("neutral", false) and not t.def.get("capturable", false):
 		return
+	if _plan_of(t) == "hold":
+		mult *= 0.9
+	elif t.is_building and t.def.get("plans", false) and t.plan == "hold" and t.plan_t <= 0.0:
+		mult *= 0.5
 	t.hp -= amount * mult
 	if t.owner >= 0 and attacker != null and not allied(attacker.owner, t.owner):
 		var pl: Dictionary = players[t.owner]
@@ -856,15 +930,62 @@ func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 		# units that are being shot from outside their reach go and find the shooter
 		if not t.is_building and (t.state == "idle" or t.state == "guard") and t.has_weapons() and attacker.alive and _pick_weapon(t, attacker) >= 0 and not t.is_jet():
 			if t.state == "guard":
-				t.resume = {"state": "guard", "goal": t.guard_pos}
+				t.resume = {"state": "guard", "goal": t.guard_pos, "r": t.guard_radius}
 			else:
 				t.guard_pos = t.pos
 			t.state = "attack"
 			t.target_id = attacker.id
 			t.path = PackedVector2Array()
 			t.repath_t = 0.0
+		if attacker.alive and time - t.help_t > 3.0:
+			t.help_t = time
+			_call_for_help(t, attacker)
 	if t.hp <= 0.0:
 		destroy(t, "killed", attacker)
+
+## Nearby idle friendlies (own or allied) come to help; parked aircraft near the
+## fight scramble. Like Generals, everyone sitting around a base defends it.
+func _call_for_help(t: Ent, attacker: Ent) -> void:
+	var n := 0
+	for o in query(t.pos, ASSIST_RADIUS):
+		if o == t or not o.alive or o.is_building or o.owner < 0 or not allied(o.owner, t.owner):
+			continue
+		if o.is_jet() or not o.has_weapons() or o.def.get("gatherer", 0) > 0 or o.def.get("builder", false):
+			continue
+		if o.state != "idle" and o.state != "guard":
+			continue
+		if o.state == "guard" and o.guard_radius > 0.0 and o.guard_pos.distance_to(attacker.pos) > o.guard_radius + 12.0:
+			continue
+		if _pick_weapon(o, attacker) < 0:
+			continue
+		if o.state == "guard":
+			o.resume = {"state": "guard", "goal": o.guard_pos, "r": o.guard_radius}
+		else:
+			o.guard_pos = o.pos
+		o.state = "attack"
+		o.target_id = attacker.id
+		o.flank = randf_range(-1.2, 1.2)
+		o.path = PackedVector2Array()
+		o.repath_t = 0.0
+		n += 1
+		if n >= 12:
+			break
+	# aircraft: parked jets and idle helicopters whose airfield / position is near the fight
+	for o: Ent in ents.values():
+		if not o.alive or o.is_building or o.owner < 0 or not allied(o.owner, t.owner) or not o.is_air():
+			continue
+		if o.state != "idle" or not o.has_weapons() or _pick_weapon(o, attacker) < 0:
+			continue
+		var base: Ent = ents.get(o.home_id) if o.is_jet() else o
+		if base == null or base.pos.distance_to(t.pos) > SCRAMBLE_RADIUS:
+			continue
+		if o.is_jet() and (o.flight != "parked" or o.clip.is_empty() or o.clip[0] <= 0):
+			continue
+		o.guard_pos = o.pos
+		o.state = "attack"
+		o.target_id = attacker.id
+		o.path = PackedVector2Array()
+		o.repath_t = 0.0
 
 # ---- jets -------------------------------------------------------------------
 ## Fixed-wing aircraft: taxi/takeoff along the runway, fly with a minimum speed
@@ -1303,6 +1424,11 @@ func _tick_building(e: Ent, dt: float) -> void:
 			pl["cash"] += amt
 			pl["stats"]["cash_earned"] += int(amt)
 			events.append({"k": "cash", "p": e.pos, "d": [int(amt), e.id], "o": e.owner, "only": e.owner})
+	if e.plan_t > 0.0:
+		e.plan_t -= dt
+		if e.plan_t <= 0.0:
+			_recompute_plans()
+			session.s_msg(pl["peer"], "%s plan active" % Data.PLANS[e.plan]["name"])
 	if e.def.has("superweapon") and not e.sw_ready:
 		if e.powered:
 			e.sw_t += dt
@@ -1456,6 +1582,8 @@ func _update_vision() -> void:
 			var r := e.vision
 			if e.is_building and not e.complete:
 				r = 12.0
+			elif players[p]["plan"] == "search" and not e.is_building and not e.is_air():
+				r *= 1.2
 			v.stamp(e.pos, r)
 		var keep := []
 		for r in v.reveals:
@@ -1474,9 +1602,21 @@ func _update_vision() -> void:
 				done.append(id)
 		for id in done:
 			pending_despawn[p].erase(id)
-	# stealth detection (none of the M1 units are detectors; superweapon beams reveal)
+	# stealth detection: Search and Destroy lets ground units detect stealth in their vision
 	for e: Ent in ents.values():
 		e.detected = false
+	var detectors: Array = []
+	for e: Ent in ents.values():
+		if e.alive and e.owner >= 0 and not e.is_building and not e.is_air() and players[e.owner]["plan"] == "search":
+			detectors.append(e)
+	if not detectors.is_empty():
+		for e: Ent in ents.values():
+			if not e.alive or not _is_stealthed(e):
+				continue
+			for d: Ent in detectors:
+				if not allied(d.owner, e.owner) and d.pos.distance_to(e.pos) <= d.vision * 1.2:
+					e.detected = true
+					break
 
 ## Bit-packed union of every allied player's vision.
 func _team_fog(p: int) -> PackedByteArray:
@@ -1602,6 +1742,8 @@ func _send_snapshots() -> void:
 		for ev in events:
 			if ev.has("only") and ev["only"] != p:
 				continue
+			if ev.get("ally_only", false) and not allied(ev.get("o", -1), p):
+				continue
 			if ev.get("all", false) or allied(ev.get("o", -1), p) or team_visible(p, ev["p"]) or ev.has("only"):
 				evs.append([ev["k"], ev["d"]])
 		if not evs.is_empty():
@@ -1610,6 +1752,18 @@ func _send_snapshots() -> void:
 
 func events_seen_by_bot(_p: int) -> void:
 	pass
+
+func _plans_array() -> Array:
+	var out := []
+	for pl in players:
+		out.append(pl["plan"])
+	return out
+
+func _all_upgrades() -> Array:
+	var out := []
+	for pl in players:
+		out.append(pl["upgrades"].keys())
+	return out
 
 func _teams_array() -> Array:
 	var out := []
@@ -1637,6 +1791,7 @@ func _send_pstates() -> void:
 			"next": Data.RANK_XP[pl["rank"]] if pl["rank"] < 5 else -1, "points": pl["points"], "powers": pl["powers"].duplicate(),
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": beams.size() > 0 and beams[0]["owner"] == p,
+			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {},
 		}
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
@@ -1655,6 +1810,8 @@ func _send_pstates() -> void:
 					st["rally"][e.id] = [e.rally.x, e.rally.y]
 				if not e.upg_done.is_empty():
 					st["upg_done"][e.id] = e.upg_done.keys()
+				if e.def.get("plans", false):
+					st["plan_bld"][e.id] = [e.plan, clampf(1.0 - e.plan_t / Data.PLAN_SWITCH, 0.0, 1.0)]
 			st["hp"][e.id] = [int(e.hp), int(e.max_hp)]
 			if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
 				st["guard"][e.id] = [e.guard_pos.x, e.guard_pos.y, e.guard_radius]
@@ -1676,7 +1833,11 @@ func _check_victory() -> void:
 			session.s_msg(players[p]["peer"], "All structures lost")
 		else:
 			alive_players.append(p)
-	if solo:
+	var all_teams := {}
+	for pl in players:
+		all_teams[pl["team"]] = true
+	if solo or all_teams.size() <= 1:
+		# sandbox / co-op with no opponent: only ends when everybody is gone
 		if alive_players.is_empty():
 			game_over = true
 			session.s_gameover(-1, report())
@@ -1758,6 +1919,27 @@ func cmd(p: int, c: Dictionary) -> void:
 		"cheat_cash":
 			if solo or debug:
 				players[p]["cash"] += 10000.0
+		"plan":
+			var b: Ent = ents.get(int(c.get("id", -1)))
+			var plan := str(c.get("plan", ""))
+			if b != null and b.alive and b.owner == p and b.complete and b.def.get("plans", false) and Data.PLANS.has(plan) and b.plan != plan:
+				b.plan = plan
+				b.plan_t = Data.PLAN_SWITCH
+				_recompute_plans()
+				session.s_msg(players[p]["peer"], "Battle plan: %s (ready in %ds)" % [Data.PLANS[plan]["name"], int(Data.PLAN_SWITCH)])
+		"beacon":
+			var bp := Vector2(clampf(float(c.get("x", 0.0)), 0.0, map_size), clampf(float(c.get("y", 0.0)), 0.0, map_size))
+			events.append({"k": "beacon", "p": bp, "d": [bp.x, bp.y, p], "o": p, "ally_only": true})
+		"surrender":
+			if not players[p]["defeated"]:
+				players[p]["defeated"] = true
+				for e: Ent in ents.values():
+					if e.alive and e.owner == p:
+						destroy(e, "sold")
+				for pl in players:
+					if pl["peer"] >= 0:
+						session.s_msg(pl["peer"], "%s surrendered" % players[p]["name"])
+				_check_victory()
 		"pause":
 			# only when no other human is in the match
 			var humans := 0
@@ -1798,6 +1980,9 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 			e.repath_t = 0.0
 			e.guard_pos = Vector2.ZERO
 			e.guard_radius = 0.0
+			# groups fan out around the target instead of queueing behind the first tank
+			var k := ids.find(e.id)
+			e.flank = 0.0 if ids.size() <= 1 or k < 0 else clampf((k - (ids.size() - 1) * 0.5) * 0.3, -1.4, 1.4)
 		"attack_ground":
 			if not e.has_weapons():
 				return
@@ -1816,7 +2001,7 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 			e.clear_orders()
 			e.resume = {}
 			e.state = "guard"
-			e.guard_radius = GUARD_RADIUS
+			e.guard_radius = clampf(float(c.get("r", GUARD_RADIUS)), 12.0, 90.0)
 			if c.has("x"):
 				e.guard_pos = _formation_goal(e, ids, Vector2(float(c["x"]), float(c["y"])))
 				if not e.is_air():

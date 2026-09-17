@@ -18,6 +18,7 @@ func _ready() -> void:
 	vp = SubViewport.new()
 	vp.size = Vector2i(SIZE, SIZE)
 	vp.transparent_bg = true
+	vp.own_world_3d = true   # otherwise the icon models sit in the game world at the map corner
 	vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	vp.msaa_3d = Viewport.MSAA_4X
 	add_child(vp)
@@ -37,6 +38,7 @@ func _ready() -> void:
 	cam = Camera3D.new()
 	cam.fov = 30.0
 	vp.add_child(cam)
+	cam.current = true
 	holder = Node3D.new()
 	vp.add_child(holder)
 	# everything, up front
@@ -48,6 +50,8 @@ func _ready() -> void:
 		queue.append(["upgrade", u])
 	for p in Data.POWERS:
 		queue.append(["power", p])
+	for k in Data.PLANS:
+		queue.append(["plan", k])
 
 func get_icon(key: String) -> Texture2D:
 	return icons.get(key)
@@ -73,6 +77,9 @@ func _render_next() -> void:
 		"power":
 			model_type = _power_model(key)
 			badge = "star"
+		"plan":
+			model_type = {"bombardment": "firebase", "hold": "patriot", "search": "pathfinder"}.get(key, "strategy_center")
+			badge = "plan"
 	var model := Visuals.make_model(model_type, -1)
 	holder.add_child(model)
 	var aabb := Visuals.model_aabb(model)
@@ -92,6 +99,8 @@ func _render_next() -> void:
 	icons[key] = ImageTexture.create_from_image(img)
 	busy = false
 	if queue.is_empty():
+		for c in holder.get_children():
+			c.queue_free()
 		ready_changed.emit()
 
 func _upgrade_model(uid: String) -> String:
@@ -136,7 +145,7 @@ func _power_model(pid: String) -> String:
 
 func _draw_badge(img: Image, badge: String) -> void:
 	var s := img.get_width()
-	var col := Color(0.35, 0.95, 0.4) if badge == "up" else Color(1.0, 0.85, 0.2)
+	var col := Color(0.35, 0.95, 0.4) if badge == "up" else (Color(0.4, 0.75, 1.0) if badge == "plan" else Color(1.0, 0.85, 0.2))
 	var cx := s - 26
 	var cy := s - 26
 	for y in range(-18, 19):
@@ -145,6 +154,9 @@ func _draw_badge(img: Image, badge: String) -> void:
 			if badge == "up":
 				# arrow: triangle head + stem
 				inside = (y < 2 and absi(x) <= (y + 16) * 0.75 and y >= -16) or (y >= 2 and y <= 14 and absi(x) <= 5)
+			elif badge == "plan":
+				# crossed X on a disc
+				inside = Vector2(x, y).length() <= 16.0 and (absi(x - y) <= 3 or absi(x + y) <= 3)
 			else:
 				var ang := atan2(float(y), float(x))
 				var rad := Vector2(x, y).length()
@@ -165,6 +177,8 @@ func _draw_frame(img: Image, kind: String) -> void:
 		col = Color(0.4, 0.9, 0.5, 0.9)
 	elif kind == "power":
 		col = Color(1.0, 0.8, 0.3, 0.9)
+	elif kind == "plan":
+		col = Color(0.4, 0.75, 1.0, 0.9)
 	for i in range(s):
 		for t in range(2):
 			img.set_pixel(i, t, col)

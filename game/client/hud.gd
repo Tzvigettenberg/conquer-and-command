@@ -23,6 +23,14 @@ var queue_box: HBoxContainer
 var grid_buttons: Array[Button] = []
 var grid_actions: Array = []
 var grid_why: Array[Label] = []
+var side_buttons: Array[Button] = []
+var queue_slots: Array[TextureProgressBar] = []
+var research_slot: TextureProgressBar
+var queue_label: Label
+var chat_edit: LineEdit
+var chat_allies := false
+var surrender_btn: Button
+const QUEUE_PX := 50
 var powers_box: VBoxContainer
 var power_buttons: Dictionary = {}
 var promo_panel: PanelContainer
@@ -206,6 +214,24 @@ func _build() -> void:
 	minimap.gui_input.connect(_minimap_input)
 	bh.add_child(minimap)
 
+	# Generals-style side buttons: menu, idle worker, powers, beacon, chat
+	var side := VBoxContainer.new()
+	side.add_theme_constant_override("separation", 3)
+	bh.add_child(side)
+	for it in [["≡", "Game menu  (Esc)", func() -> void: toggle_pause_menu()],
+			["⚒", "Select the next idle Dozer  (N)", func() -> void: ctl.select_next_dozer()],
+			["★", "General's promotion", func() -> void: _toggle_promo()],
+			["◎", "Place a beacon for your team  (Ctrl+B)", func() -> void: ctl.beacon_mode()],
+			["✉", "Chat  (Enter: everyone, Backspace: allies)", func() -> void: open_chat(false)]]:
+		var b := Button.new()
+		b.text = it[0]
+		b.tooltip_text = it[1]
+		b.custom_minimum_size = Vector2(38, 40)
+		b.add_theme_font_size_override("font_size", 20)
+		b.pressed.connect(it[2])
+		side.add_child(b)
+		side_buttons.append(b)
+
 	var info := _panel(Color(0.11, 0.12, 0.15, 1.0))
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bh.add_child(info)
@@ -222,9 +248,65 @@ func _build() -> void:
 	info_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	info_body.add_theme_font_size_override("normal_font_size", 14)
 	iv.add_child(info_body)
+	# production queue: 9 fixed slots (icon fills up as the unit builds), research beside it
 	queue_box = HBoxContainer.new()
-	queue_box.add_theme_constant_override("separation", 4)
+	queue_box.add_theme_constant_override("separation", 3)
 	iv.add_child(queue_box)
+	for i in range(Data.MAX_QUEUE):
+		var tp := TextureProgressBar.new()
+		tp.custom_minimum_size = Vector2(QUEUE_PX, QUEUE_PX)
+		tp.fill_mode = TextureProgressBar.FILL_BOTTOM_TO_TOP
+		tp.min_value = 0.0
+		tp.max_value = 1.0
+		tp.tint_under = Color(0.35, 0.35, 0.4)
+		tp.tint_progress = Color.WHITE
+		tp.nine_patch_stretch = true
+		tp.visible = false
+		tp.tooltip_text = "Click to cancel"
+		tp.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+				_cancel_queue(i))
+		queue_box.add_child(tp)
+		queue_slots.append(tp)
+	var sep := Control.new()
+	sep.custom_minimum_size = Vector2(10, 0)
+	queue_box.add_child(sep)
+	research_slot = TextureProgressBar.new()
+	research_slot.custom_minimum_size = Vector2(QUEUE_PX, QUEUE_PX)
+	research_slot.fill_mode = TextureProgressBar.FILL_BOTTOM_TO_TOP
+	research_slot.min_value = 0.0
+	research_slot.max_value = 1.0
+	research_slot.tint_under = Color(0.35, 0.4, 0.35)
+	research_slot.nine_patch_stretch = true
+	research_slot.visible = false
+	research_slot.tooltip_text = "Researching - click to cancel"
+	research_slot.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			var sel: Array = ctl.selected_puppets()
+			if sel.size() == 1:
+				ctl.cancel_upgrade(sel[0].id))
+	queue_box.add_child(research_slot)
+	queue_label = Label.new()
+	queue_label.add_theme_font_size_override("font_size", 12)
+	queue_label.modulate = Color(0.75, 0.75, 0.75)
+	queue_box.add_child(queue_label)
+
+	# chat input (Enter / Backspace)
+	chat_edit = LineEdit.new()
+	chat_edit.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	chat_edit.anchor_top = 1.0
+	chat_edit.offset_left = 12
+	chat_edit.offset_right = -600
+	chat_edit.offset_top = -BAR_H - 44
+	chat_edit.offset_bottom = -BAR_H - 12
+	chat_edit.visible = false
+	chat_edit.placeholder_text = "Type a message, Enter to send, Esc to cancel"
+	chat_edit.text_submitted.connect(_submit_chat)
+	chat_edit.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventKey and ev.pressed and ev.keycode == KEY_ESCAPE:
+			close_chat()
+			get_viewport().set_input_as_handled())
+	add_child(chat_edit)
 
 	var gridp := _panel(Color(0.11, 0.12, 0.15, 1.0))
 	bh.add_child(gridp)
@@ -321,6 +403,8 @@ func is_mouse_over_ui(p: Vector2) -> bool:
 	if p.y >= vs.y - BAR_H:
 		return true
 	if promo_panel.visible and promo_panel.get_global_rect().has_point(p):
+		return true
+	if chat_edit.visible and chat_edit.get_global_rect().has_point(p):
 		return true
 	for c in [powers_box.get_parent(), cash_label.get_parent().get_parent()]:
 		if (c as Control).get_global_rect().has_point(p):
@@ -480,6 +564,16 @@ func _build_pause_menu() -> void:
 		Settings.apply()
 		view.camera.edge_scroll = on)
 	settings_box.add_child(edge)
+	surrender_btn = Button.new()
+	surrender_btn.text = "Surrender"
+	surrender_btn.pressed.connect(func() -> void:
+		if surrender_btn.text == "Surrender":
+			surrender_btn.text = "Really surrender? (click again)"
+			return
+		surrender_btn.text = "Surrender"
+		view.send({"t": "surrender"})
+		toggle_pause_menu())
+	pause_box.add_child(surrender_btn)
 	var leave := Button.new()
 	leave.text = "Leave match"
 	leave.pressed.connect(func() -> void: Main.I.return_to_menu())
@@ -493,6 +587,8 @@ func toggle_pause_menu() -> void:
 	if gameover_panel.visible:
 		return
 	var open := not pause_panel.visible
+	if surrender_btn:
+		surrender_btn.text = "Surrender"
 	pause_panel.visible = open
 	pause_backdrop.visible = open
 	view.camera.enabled = not open
@@ -516,11 +612,10 @@ func refresh_selection() -> void:
 	for i in range(grid_buttons.size()):
 		grid_buttons[i].visible = false
 		grid_actions[i] = null
-	for c in queue_box.get_children():
-		c.queue_free()
+	_update_queue()
 	if sel.is_empty():
 		info_title.text = ""
-		info_body.text = "[color=#889]Left-drag: select   Right-click: move / attack   Ctrl+right-click or X: force attack   A: attack-move   S: stop   G: guard area\nN: next Dozer   B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center   Ctrl+1-9: groups   H: home\nArrows / edge / middle-drag: scroll   Wheel: zoom   Q / E: rotate camera[/color]"
+		info_body.text = "[color=#889]Left-drag: select   Right-click: move / attack   Ctrl+right-click or X: force attack   A: attack-move   S: stop   G: guard area (drag to size)\nN: next Dozer   B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center   Ctrl+1-9: groups   H: home   Ctrl+B: beacon   Enter: chat\nArrows / edge / right-drag: scroll   Wheel: zoom   Middle-drag or Q / E: rotate camera[/color]"
 		return
 	var mine: bool = sel[0].team == view.my_index
 	if sel.size() == 1:
@@ -583,6 +678,15 @@ func refresh_selection() -> void:
 				lbl = "researching"
 			actions.append({"label": "%s\n%s" % [ud["name"], lbl], "icon": uid, "tip": "%s\n%s" % [ud["name"], ud["desc"]],
 				"cb": func() -> void: ctl.upgrade(single.id, uid), "enabled": not done and not researching and view.can_afford(ud["cost"])})
+		if d.get("plans", false):
+			var pb: Array = view.pstate.get("plan_bld", {}).get(single.id, ["", 1.0])
+			for pk in Data.PLANS:
+				var pd: Dictionary = Data.PLANS[pk]
+				var status := ""
+				if pb[0] == pk:
+					status = "ACTIVE" if float(pb[1]) >= 1.0 else "switching %d%%" % int(float(pb[1]) * 100.0)
+				actions.append({"label": "%s\n%s" % [pd["name"], status], "icon": pk, "tip": "%s\n%s\nSwitching takes %ds; only one plan is active." % [pd["name"], pd["desc"], int(Data.PLAN_SWITCH)],
+					"cb": func() -> void: ctl.set_plan(single.id, pk), "enabled": pb[0] != pk})
 		if d.has("superweapon"):
 			var ready: bool = view.sw_ready(single.team)
 			actions.append({"label": "FIRE\nParticle Cannon", "tip": "Select a target for the beam. Steer it with the mouse while it fires.", "cb": func() -> void: ctl.sw_mode(single.id), "enabled": ready})
@@ -608,7 +712,7 @@ func refresh_selection() -> void:
 			actions.append({"label": "Attack-move (A)", "tip": "Move and engage anything on the way", "cb": func() -> void: ctl.amove_mode(), "enabled": true})
 			actions.append({"label": "Force attack (X)", "tip": "Fire at a position or at anything, including neutral or own structures (Ctrl+right-click)", "cb": func() -> void: ctl.force_mode(), "enabled": true})
 			actions.append({"label": "Stop (S)", "tip": "Halt", "cb": func() -> void: ctl.stop(), "enabled": true})
-			actions.append({"label": "Guard (G)", "tip": "Hold here and engage anything that comes close, returning afterwards. Aircraft loiter overhead and go home to rearm.", "cb": func() -> void: ctl.guard(), "enabled": true})
+			actions.append({"label": "Guard area (G)", "tip": "Click a spot to guard - hold and drag to size the area. Press G twice to guard right here. Aircraft loiter overhead and go home to rearm.", "cb": func() -> void: ctl.guard_mode(), "enabled": true})
 			var has_ranger := false
 			for p in sel:
 				if p.type == "ranger":
@@ -644,40 +748,102 @@ func _on_grid(i: int) -> void:
 
 func _update_queue() -> void:
 	var sel: Array = ctl.selected_puppets()
-	if sel.size() != 1 or not sel[0].is_building:
-		if queue_box.get_child_count() > 0:
-			for c in queue_box.get_children():
-				c.queue_free()
-		return
-	var bid: int = sel[0].id
-	var queues: Dictionary = view.pstate.get("queues", {})
+	var show: bool = sel.size() == 1 and sel[0].is_building and sel[0].team == view.my_index
+	var q: Array = []
+	var bid := -1
 	var research: Dictionary = view.pstate.get("research", {})
-	var q: Array = queues.get(bid, [])
-	var want := q.size() + (1 if research.has(bid) else 0)
-	if queue_box.get_child_count() != want:
-		for c in queue_box.get_children():
-			c.queue_free()
-		for i in range(q.size()):
-			var b := Button.new()
-			b.custom_minimum_size = Vector2(90, 40)
-			b.add_theme_font_size_override("font_size", 11)
-			b.tooltip_text = "Click to cancel"
-			b.pressed.connect(func() -> void: ctl.cancel(bid, i))
-			queue_box.add_child(b)
-		if research.has(bid):
-			var b := Button.new()
-			b.custom_minimum_size = Vector2(110, 40)
-			b.add_theme_font_size_override("font_size", 11)
-			b.tooltip_text = "Click to cancel research"
-			b.pressed.connect(func() -> void: ctl.cancel_upgrade(bid))
-			queue_box.add_child(b)
-	var kids := queue_box.get_children()
-	for i in range(q.size()):
-		if i < kids.size():
-			(kids[i] as Button).text = "%s\n%d%%" % [Data.UNITS[q[i][0]]["name"], int(q[i][1] * 100)]
-	if research.has(bid) and kids.size() > q.size():
+	if show:
+		bid = sel[0].id
+		q = view.pstate.get("queues", {}).get(bid, [])
+	for i in range(queue_slots.size()):
+		var tp := queue_slots[i]
+		if show and i < q.size():
+			tp.visible = true
+			var icon := view.icons.get_icon(q[i][0])
+			tp.texture_under = icon
+			tp.texture_progress = icon
+			tp.value = float(q[i][1]) if i == 0 else 0.0
+			tp.tooltip_text = "%s  %d%%  (click to cancel)" % [Data.UNITS[q[i][0]]["name"], int(float(q[i][1]) * 100.0)] if i == 0 else "%s  queued  (click to cancel)" % Data.UNITS[q[i][0]]["name"]
+		elif show and sel[0].def.has("produces"):
+			tp.visible = true
+			tp.texture_under = _empty_slot_tex()
+			tp.texture_progress = null
+			tp.value = 0.0
+			tp.tooltip_text = "Empty queue slot"
+		else:
+			tp.visible = false
+	if show and research.has(bid):
 		var r: Array = research[bid]
-		(kids[q.size()] as Button).text = "%s\n%d%%" % [Data.UPGRADES[r[0]]["name"], int(r[1] * 100)]
+		research_slot.visible = true
+		var icon := view.icons.get_icon(r[0])
+		research_slot.texture_under = icon
+		research_slot.texture_progress = icon
+		research_slot.value = float(r[1])
+		queue_label.text = "%s %d%%" % [Data.UPGRADES[r[0]]["name"], int(float(r[1]) * 100.0)]
+		queue_label.visible = true
+	else:
+		research_slot.visible = false
+		queue_label.visible = false
+
+var _slot_tex: ImageTexture = null
+func _empty_slot_tex() -> ImageTexture:
+	if _slot_tex == null:
+		var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0.16, 0.17, 0.2, 1.0))
+		for i in range(8):
+			img.set_pixel(i, 0, Color(0.3, 0.32, 0.36))
+			img.set_pixel(i, 7, Color(0.3, 0.32, 0.36))
+			img.set_pixel(0, i, Color(0.3, 0.32, 0.36))
+			img.set_pixel(7, i, Color(0.3, 0.32, 0.36))
+		_slot_tex = ImageTexture.create_from_image(img)
+	return _slot_tex
+
+func _cancel_queue(i: int) -> void:
+	var sel: Array = ctl.selected_puppets()
+	if sel.size() == 1 and sel[0].is_building:
+		var q: Array = view.pstate.get("queues", {}).get(sel[0].id, [])
+		if i < q.size():
+			ctl.cancel(sel[0].id, i)
+			Audio.I.ui("ui_click", -8.0)
+
+# ---------------------------------------------------------------------------
+# Chat / beacons
+# ---------------------------------------------------------------------------
+func open_chat(allies: bool) -> void:
+	chat_allies = allies
+	chat_edit.placeholder_text = ("To allies: " if allies else "To everyone: ") + "type a message, Enter to send, Esc to cancel"
+	chat_edit.visible = true
+	chat_edit.text = ""
+	chat_edit.grab_focus()
+
+func close_chat() -> void:
+	chat_edit.visible = false
+	chat_edit.release_focus()
+
+func chat_open() -> bool:
+	return chat_edit.visible
+
+func _submit_chat(text: String) -> void:
+	close_chat()
+	text = text.strip_edges()
+	if text == "":
+		return
+	view.send_chat(text, chat_allies)
+
+func chat_line(from: int, text: String, allies: bool) -> void:
+	var nm: String = view.names[from] if from >= 0 and from < view.names.size() else "?"
+	var l := Label.new()
+	l.text = "%s%s: %s" % [nm, " (team)" if allies else "", text]
+	l.add_theme_font_size_override("font_size", 15)
+	l.add_theme_color_override("font_color", Data.TEAM_COLORS[from % Data.TEAM_COLORS.size()].lightened(0.35) if from >= 0 else Color.WHITE)
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("shadow_offset_x", 1)
+	l.add_theme_constant_override("shadow_offset_y", 1)
+	msg_box.add_child(l)
+	msgs.append({"label": l, "until": Time.get_ticks_msec() / 1000.0 + 12.0})
+	while msgs.size() > 6:
+		var m: Dictionary = msgs.pop_front()
+		m["label"].queue_free()
 
 # ---------------------------------------------------------------------------
 # General's powers
@@ -863,6 +1029,10 @@ func _draw_minimap() -> void:
 		var p: Vector2 = pr["p"]
 		var col := Color(0.35, 0.3, 0.25) if pr.get("kind", "") != "tree" else Color(0.2, 0.4, 0.2)
 		minimap.draw_rect(Rect2((p - Vector2(fp) * 1.0) * s, Vector2(fp) * 2.0 * s), col)
+	for rd in view.map.get("ridges", []):
+		minimap.draw_line(Vector2(rd["a"]) * s, Vector2(rd["b"]) * s, Color(0.3, 0.26, 0.22), float(rd["w"]) * 2.0 * s)
+		minimap.draw_circle(Vector2(rd["a"]) * s, float(rd["w"]) * s, Color(0.3, 0.26, 0.22))
+		minimap.draw_circle(Vector2(rd["b"]) * s, float(rd["w"]) * s, Color(0.3, 0.26, 0.22))
 	for pu in view.puppets.values():
 		var p: Puppet = pu
 		if p.ghost and not p.is_building:
@@ -883,9 +1053,10 @@ func _draw_minimap() -> void:
 	# alerts
 	var now := Time.get_ticks_msec() / 1000.0
 	for a in view.alerts:
-		if now - a["t"] < 4.0:
+		var beacon: bool = a.get("beacon", false)
+		if now - a["t"] < (25.0 if beacon else 4.0):
 			var r := 4.0 + fmod(now * 2.0, 1.0) * 8.0
-			minimap.draw_arc(a["p"] * s, r, 0, TAU, 16, Color(1, 0.3, 0.2), 1.5)
+			minimap.draw_arc(a["p"] * s, r, 0, TAU, 16, Color(0.4, 0.9, 1.0) if beacon else Color(1, 0.3, 0.2), 1.5)
 	# camera view: a rectangle around the camera target, rotated with the camera
 	var cam: RtsCamera = view.camera
 	var half := Vector2(cam.height * 0.95, cam.height * 0.62)

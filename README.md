@@ -25,32 +25,45 @@ Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0
 | Right-click | move / attack / repair (dozer) / gather (Chinook) / capture derrick (Ranger + upgrade) — Shift queues |
 | Ctrl+right-click or X | force attack: fire at a spot, a neutral structure or one of your own |
 | A + click | attack-move |
-| G | guard: press once then click a spot (or a unit) to guard there; press G twice to guard where they stand. Aircraft loiter over it, rearm and come back |
+| G | guard area: press G, then click a spot — or hold and drag to size the circle (12–90 m). G twice = guard right here. Aircraft loiter over it, rearm and come back |
 | S | stop |
-| Placing a building | click to place; hold the left button and drag to rotate it freely before releasing (like Generals) |
+| Placing a building | click to place; hold the left button and drag to rotate it freely before releasing (like Generals). The yellow arrow on the ghost shows the front (where units come out) |
 | N | select the next Dozer · B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center |
 | Ctrl+1..9 / 1..9 | assign / recall control group (press twice to jump there) |
 | H | jump to Command Center · Space: jump to last attack alert |
-| Arrows / edge / middle-drag | scroll · wheel: zoom · Q / E: rotate camera |
+| Arrows / edge / right-drag | scroll · wheel or numpad 8 / 2: zoom · middle-drag, Q / E or numpad 4 / 6: rotate (middle-drag up/down tilts) · numpad 5: reset |
+| Ctrl+B | place a beacon your team sees (minimap ping + pillar; Space jumps to it) |
+| Enter / Backspace | chat with everyone / with allies |
+| Side buttons (left of the info panel) | menu · next idle Dozer · promotion · beacon · chat — the Generals control-bar set |
 | Esc / F10 | cancel placement / deselect · with nothing to cancel: pause menu (solo/AI games actually pause; volume sliders, edge-scroll toggle, surrender) |
 | Right-click with a factory selected | set its rally point |
 | F1 | +$10,000 (solo / debug only) |
 
 ## Lobby
-Host a game and set it up before starting: **map** (Desert Divide / Frozen Front / Green Valley),
-**AI opponents** (0-3) and **difficulty** (Easy: slow, small waves, no powers for 8 min · Medium ·
-Hard: bigger waves, earlier powers, +$150 every 10 s), **starting cash**, **superweapons** on/off,
-**kick** buttons next to joined players, and a **team** picker per slot (humans and AI). Up to 4 players + AI;
-players start in the four corners. Teammates share vision, can't be attacked without force-fire (X / Ctrl+RMB —
-friendly fire only when you mean it), can capture/repair each other's stuff, and win or lose together.
-Everyone starts at rank 1 with one promotion point (as in Generals) — that's how an AI can have an
-A-10 strike early; on Easy/Medium it now waits several minutes before using any power.
+Host a game and set it up before starting. Every map has a fixed number of **spawn slots** (Desert Divide 2,
+Sand Sea 4, Frozen Front 4, Green Valley 6). Each slot is **Open / Closed / Easy AI / Medium AI / Hard AI** —
+add or remove opponents per slot, mix difficulties freely. Humans take the first open slot when they join
+and can **click a spawn point on the map preview** to move there; every slot has a **team** picker.
+Other options: starting cash, superweapons on/off, kick buttons. Teammates share vision, can't be attacked
+without force-fire (X / Ctrl+RMB), can capture/repair each other's stuff, and win or lose together.
+Easy: slow, small waves, no powers for 8 min · Medium · Hard: bigger waves, earlier powers, +$150 every 10 s.
+Everyone starts at rank 1 with one promotion point (as in Generals).
 
 ## Audio
 `audio/sfx` — 50 CC0 / CC-BY effects from Freesound (`audio/sfx/CREDITS.md`, re-fetch with `tools/fetch_sfx.py`).
 `audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
 `audio/music` — 12 Kevin MacLeod tracks, CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M5)
+- Lobby rework: per-slot AI with its own difficulty, map preview with clickable spawn points, four maps with 2 / 4 / 4 / 6 slots (6 team colours).
+- Real raised terrain: mountain ridges are a heightmap mesh (rock / snow-cap colouring, fog dims it too) instead of props; they sit exactly on the blocked cells so nothing walks into a slope.
+- Generals controls: right-drag scrolls, middle-drag rotates and tilts, numpad camera keys; side buttons for menu / idle Dozer / promotion / beacon / chat; team beacons (Ctrl+B); chat (Enter / Backspace).
+- Strategy Center battle plans (Zero Hour): Bombardment (+20% ground damage, roof howitzer), Hold the Line (−10% damage taken, reinforced building), Search and Destroy (+20% range and vision, stealth detection). 12 s to switch, one plan active, visible to everyone; the model shows the cannon / sandbags / scanner mast.
+- Smarter units: idle units near an attacked friend (own or allied) join in, parked jets and helicopters scramble when their base is hit, group attack orders fan out around the target, and a unit stuck behind friends picks another angle.
+- Production: 9-slot queue strip with the unit icon filling up as it builds (click to cancel), research shown beside it; the strip never overflows.
+- Upgrade visuals: TOW pod on Humvees, armour skirts on Crusader/Paladin, rocket pods, laser-missile tips, glowing control rods, extra crates, flag, etc.
+- Placement shows a facing arrow; guard radius is drag-sized (and bigger by default); surrender in the pause menu; smaller Supply Center awning.
 
 ## What's in (M4)
 - Pause menu (Esc / F10) with Master / SFX / Voice / Music sliders and an edge-scroll toggle, saved to `user://settings.cfg`; solo and vs-AI games freeze while it's open, multiplayer keeps running.
@@ -112,8 +125,9 @@ mixamo/                 rifle idle/run/fire/death clips for infantry
 ## Headless smoke test (what Claude runs before shipping)
 ```
 godot --headless --path . -- --host --solo --autostart --test=smoke --exit_after=240
+godot --headless --path . -- --host --autostart --ai=2 --ai_level=hard --map=grass6 --exit_after=400   # AI game
 # two peers:
 godot --headless --path . -- --host --autostart --test=smoke --exit_after=330 &
 godot --headless --path . -- --join=127.0.0.1 --test=smoke --exit_after=320
 ```
-`--debug` prints unit states from the sim every 3 s; `--screenshot=DIR` saves a frame every 8 s.
+`--simdebug` prints unit states from the sim every 3 s; `--screenshot=DIR` saves a frame every 8 s; `--reveal` shows the whole map; `--look=x,y` starts the camera there; `--map=desert2|desert4|snow4|grass6`, `--teams=0,1,1`.

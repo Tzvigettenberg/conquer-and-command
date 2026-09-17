@@ -25,13 +25,17 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	my_index = index
 	args = _args
 	session = get_parent().session
-	for p in lobby:
-		names.append(p["name"])
+	names = m.get("player_names", []).duplicate()
+	if names.is_empty():
+		for p in lobby:
+			names.append(p["name"])
 	grid.setup(float(m["size"]))
 	for pr in m["props"]:
 		var fp: Vector2i = pr["fp"]
 		if fp != Vector2i.ZERO:
 			grid.set_cells(PathGrid.footprint_cells(pr["p"], fp), true)
+	for rd in m.get("ridges", []):
+		grid.set_cells(PathGrid.capsule_cells(rd["a"], rd["b"], float(rd["w"]) + 0.5), true)
 	map_view = MapView.new()
 	map_view.name = "MapView"
 	add_child(map_view)
@@ -42,7 +46,8 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	camera = RtsCamera.new()
 	camera.name = "Camera"
 	add_child(camera)
-	var start: Vector2 = m["starts"][index]
+	var slots_arr: Array = m.get("player_slots", [])
+	var start: Vector2 = m["starts"][int(slots_arr[index]) if index < slots_arr.size() else index]
 	camera.setup(float(m["size"]), start + Vector2(0, 10))
 	camera.yaw = float(m["start_yaw"][index])
 	camera.edge_scroll = bool(Settings.load_cfg().get("edge_scroll", true))
@@ -66,6 +71,14 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	on_msg("Welcome, %s. You are %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index]])
 	if args.has("test"):
 		_run_test(str(args["test"]))
+	if args.has("look"):
+		var xy := str(args["look"]).split(",")
+		camera.jump_to(Vector2(float(xy[0]), float(xy[1])))
+	if args.has("select"):
+		get_tree().create_timer(3.0).timeout.connect(func() -> void:
+			var p := _own(str(args["select"]))
+			if p != null:
+				ctl.set_selection([p.id]))
 	if args.has("screenshot"):
 		_screenshots(str(args["screenshot"]))
 	if args.has("exit_after"):
@@ -221,6 +234,12 @@ func on_events(evs: Array) -> void:
 				Audio.I.ui("alert", -8.0)
 				while alerts.size() > 8:
 					alerts.pop_front()
+			"beacon":
+				var who := int(d[2])
+				alerts.append({"p": Vector2(d[0], d[1]), "t": Time.get_ticks_msec() / 1000.0, "beacon": true})
+				fx.beacon(Vector3(d[0], 0, d[1]), Data.TEAM_COLORS[who % Data.TEAM_COLORS.size()])
+				on_msg("%s placed a beacon (Space to jump there)" % (names[who] if who < names.size() else "Ally"))
+				Audio.I.ui("alert", -6.0)
 			"beam":
 				fx.particle_beam(Vector3(d[0], 0, d[1]))
 				Audio.I.sfx("superweapon_fire", Vector3(d[0], 5, d[1]), 4.0, 0.05, 0.5)
@@ -265,10 +284,43 @@ func leave_track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void
 		fx.track(pos, yaw, half_w, tracked)
 
 func on_fog(bytes: PackedByteArray) -> void:
+	if args.has("reveal"):
+		map_view.reveal_all()   # debug: --reveal shows the whole map
+		return
 	map_view.update_fog(bytes)
+
+## Upgrade / battle-plan visuals for every puppet we can see.
+func _push_extras(st: Dictionary) -> void:
+	var all_upg: Array = st.get("all_upgrades", [])
+	var plans: Array = st.get("plans", [])
+	var upg_done: Dictionary = st.get("upg_done", {})
+	for pu in puppets.values():
+		var p: Puppet = pu
+		if p.team < 0:
+			continue
+		var keys: Array = []
+		if p.team < all_upg.size():
+			keys = Array(all_upg[p.team]).duplicate()
+		if upg_done.has(p.id):
+			for k in upg_done[p.id]:
+				keys.append(k)
+		if p.type == "strategy_center" and p.team < plans.size() and str(plans[p.team]) != "":
+			keys.append("plan_" + str(plans[p.team]))
+		keys.sort()
+		p.set_extras(keys)
+
+func send_chat(text: String, allies: bool) -> void:
+	if session.world != null:
+		session.relay_chat(my_index, text, allies)
+	else:
+		session.rpc_id(1, "srv_chat", text, allies)
+
+func on_chat(from: int, text: String, allies: bool) -> void:
+	hud.chat_line(from, text, allies)
 
 func on_pstate(st: Dictionary) -> void:
 	pstate = st
+	_push_extras(st)
 	var docks: Dictionary = st.get("docks", {})
 	for id in docks:
 		var p: Puppet = puppets.get(int(id))
@@ -415,6 +467,13 @@ func _own_ids(filter: Callable) -> Array:
 			out.append(p.id)
 	return out
 
+func _enemy_start() -> Vector2:
+	var slots_arr: Array = map.get("player_slots", [])
+	for i in range(slots_arr.size()):
+		if i != my_index:
+			return map["starts"][int(slots_arr[i])]
+	return Vector2(float(map["size"]) * 0.5, float(map["size"]) * 0.5)
+
 func _run_test(kind: String) -> void:
 	print("[Test] scenario %s as player %d" % [kind, my_index])
 	await get_tree().create_timer(1.5).timeout
@@ -431,6 +490,7 @@ func _run_test(kind: String) -> void:
 		["supply_center", base + Vector2(24, 24) * dir],
 		["war_factory", base + Vector2(-22, 24) * dir],
 		["patriot", base + Vector2(30, -12) * dir],
+		["strategy_center", base + Vector2(-28, -6) * dir],
 	]
 	for step in plan:
 		var pos: Vector2 = PathGrid.snap_center(step[1], Data.BUILDINGS[step[0]]["fp"])
@@ -461,6 +521,9 @@ func _run_test(kind: String) -> void:
 			send({"t": "produce", "id": bar.id, "type": "ranger"})
 		send({"t": "produce", "id": bar.id, "type": "missile_defender"})
 	var wf := _own("war_factory")
+	var stc := _own("strategy_center")
+	if stc:
+		send({"t": "plan", "id": stc.id, "plan": "bombardment"})
 	if wf and args.has("screenshot"):
 		ctl.set_selection([wf.id])
 	if wf:
@@ -471,6 +534,13 @@ func _run_test(kind: String) -> void:
 	var sc := _own("supply_center")
 	if sc:
 		send({"t": "produce", "id": sc.id, "type": "chinook"})
+	if args.has("screenshot"):
+		await get_tree().create_timer(9.0).timeout
+		if stc:
+			ctl.set_selection([stc.id])
+		await get_tree().create_timer(9.0).timeout
+		if wf:
+			ctl.set_selection([wf.id])
 	if bar:
 		send({"t": "upgrade", "id": bar.id, "uid": "capture"})
 		send({"t": "upgrade", "id": bar.id, "uid": "capture"})   # duplicate must be rejected
@@ -507,7 +577,7 @@ func _run_test(kind: String) -> void:
 		print("[Test] capturing derrick %d at %s" % [derrick.id, derrick.cur_pos])
 	await get_tree().create_timer(30.0).timeout
 	var raptor := _own("raptor")
-	var enemy_base0: Vector2 = map["starts"][1 - my_index] if map["starts"].size() > 1 else Vector2(200, 200)
+	var enemy_base0: Vector2 = _enemy_start()
 	if raptor:
 		send({"t": "attack_ground", "ids": [raptor.id], "x": enemy_base0.x, "y": enemy_base0.y})
 		print("[Test] raptor force-attacking enemy base")
@@ -515,7 +585,7 @@ func _run_test(kind: String) -> void:
 		print("[Test] derrick owner now %d" % derrick.team)
 	_report()
 	# send the army toward the enemy base
-	var enemy_base: Vector2 = map["starts"][1 - my_index] if map["starts"].size() > 1 else Vector2(200, 200)
+	var enemy_base: Vector2 = _enemy_start()
 	var army := _own_ids(func(p: Puppet) -> bool: return not p.is_building and p.cat != "air" and not p.def.get("builder", false))
 	print("[Test] attack-moving %d units to %s" % [army.size(), enemy_base])
 	send({"t": "amove", "ids": army, "x": enemy_base.x, "y": enemy_base.y, "q": false})

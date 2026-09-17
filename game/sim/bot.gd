@@ -104,7 +104,7 @@ func _base_pos() -> Vector2:
 	for e: Ent in w.ents.values():
 		if e.alive and e.owner == p and e.is_building:
 			return e.pos
-	return w.map["starts"][p]
+	return w.map["starts"][int(w.players[p].get("slot", p))]
 
 func _cash() -> float:
 	return float(w.players[p]["cash"])
@@ -125,7 +125,7 @@ func _nearest_enemy_start() -> Vector2:
 	for i in range(w.players.size()):
 		if w.allied(i, p) or w.players[i]["defeated"]:
 			continue
-		var s: Vector2 = w.map["starts"][i]
+		var s: Vector2 = w.map["starts"][int(w.players[i].get("slot", i))]
 		if s.distance_squared_to(base) < bd:
 			bd = s.distance_squared_to(base)
 			best = s
@@ -291,6 +291,10 @@ func _queued(type: String) -> int:
 	return n
 
 func _research() -> void:
+	# battle plan as soon as the strategy center stands: hard bots go on the offensive
+	for sc in _own("strategy_center"):
+		if sc.plan == "":
+			w.cmd(p, {"t": "plan", "id": sc.id, "plan": "bombardment" if level == "hard" else ("search" if level == "medium" else "hold")})
 	if _cash() < 3000:
 		return
 	var order := [["barracks", "capture"], ["war_factory", "tow"], ["power_plant", "control_rods"], ["strategy_center", "composite_armor"], ["airfield", "rocket_pods"], ["strategy_center", "advanced_training"], ["strategy_center", "supply_lines"], ["airfield", "laser_missiles"]]

@@ -7,10 +7,16 @@ shader_type spatial;
 uniform float map_size = 400.0;
 uniform sampler2D noise_tex : filter_linear, repeat_enable;
 uniform sampler2D road_tex : filter_linear;
+uniform sampler2D fog_tex : filter_linear;
 uniform vec3 col_a = vec3(0.42, 0.36, 0.25);
 uniform vec3 col_b = vec3(0.30, 0.25, 0.17);
 uniform vec3 col_c = vec3(0.36, 0.36, 0.24);
 uniform vec3 road_col = vec3(0.30, 0.26, 0.20);
+uniform int use_vcol = 0;
+varying vec4 vcol;
+void vertex() {
+	vcol = COLOR;
+}
 void fragment() {
 	vec2 wp = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xz;
 	vec2 uv = wp / map_size;
@@ -22,6 +28,16 @@ void fragment() {
 	col *= 0.85 + 0.25 * n3;
 	float road = texture(road_tex, uv).r;
 	col = mix(col, road_col, road * 0.85);
+	if (use_vcol == 1) {
+		// vertex colour = rock / snow tint, alpha = how much of it shows (0 on flat ground)
+		vec3 rock = vcol.rgb * (0.8 + 0.35 * n2) * (0.9 + 0.2 * n3);
+		col = mix(col, rock, vcol.a);
+	}
+	// fog of war: explored-but-not-visible areas are dimmed here (no separate plane, so hills dim too)
+	vec2 f = texture(fog_tex, uv).rg;
+	float dim = (1.0 - smoothstep(0.2, 0.7, f.r)) * 0.42;
+	if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { dim = 0.92; }
+	col = mix(col, vec3(0.02, 0.02, 0.05), dim);
 	ALBEDO = col;
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.05;
@@ -61,6 +77,9 @@ var visible_cells := PackedByteArray()
 var shroud_plane: MeshInstance3D
 var dim_plane: MeshInstance3D
 var road_img: Image
+var terrain_mat: ShaderMaterial = null
+var terrain_mesh: MeshInstance3D = null
+var heights := PackedFloat32Array()
 
 func setup(m: Dictionary) -> void:
 	map = m
@@ -114,14 +133,9 @@ func _noise_texture() -> NoiseTexture2D:
 	nt.seamless = true
 	return nt
 
-func _build_terrain() -> void:
-	var mi := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(size + 800.0, size + 800.0)
-	pm.subdivide_depth = 8
-	pm.subdivide_width = 8
-	mi.mesh = pm
-	mi.position = Vector3(size * 0.5, 0, size * 0.5)
+func _terrain_material() -> ShaderMaterial:
+	if terrain_mat != null:
+		return terrain_mat
 	var sh := Shader.new()
 	sh.code = TERRAIN_SHADER
 	var mat := ShaderMaterial.new()
@@ -131,9 +145,9 @@ func _build_terrain() -> void:
 	var theme: String = map.get("theme", "desert")
 	match theme:
 		"snow":
-			mat.set_shader_parameter("col_a", Vector3(0.78, 0.80, 0.84))
-			mat.set_shader_parameter("col_b", Vector3(0.55, 0.60, 0.68))
-			mat.set_shader_parameter("col_c", Vector3(0.70, 0.72, 0.70))
+			mat.set_shader_parameter("col_a", Vector3(0.52, 0.56, 0.63))
+			mat.set_shader_parameter("col_b", Vector3(0.36, 0.41, 0.49))
+			mat.set_shader_parameter("col_c", Vector3(0.47, 0.49, 0.50))
 			mat.set_shader_parameter("road_col", Vector3(0.40, 0.38, 0.36))
 		"grass":
 			mat.set_shader_parameter("col_a", Vector3(0.30, 0.42, 0.18))
@@ -145,11 +159,162 @@ func _build_terrain() -> void:
 	road_img.fill(Color.BLACK)
 	for r in map.get("roads", []):
 		_paint_road(r["a"], r["b"])
-	var rt := ImageTexture.create_from_image(road_img)
-	mat.set_shader_parameter("road_tex", rt)
-	mi.material_override = mat
+	mat.set_shader_parameter("road_tex", ImageTexture.create_from_image(road_img))
+	terrain_mat = mat
+	return mat
+
+func _build_terrain() -> void:
+	# flat ground that extends well past the map edge
+	var mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(size + 800.0, size + 800.0)
+	pm.subdivide_depth = 8
+	pm.subdivide_width = 8
+	mi.mesh = pm
+	mi.position = Vector3(size * 0.5, -0.03, size * 0.5)
+	mi.material_override = _terrain_material()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
+	_build_heightmap()
+
+## Raised terrain for the mountain ridges. Each "mountain" prop becomes a dome that
+## stays inside its blocked footprint, so the slopes never reach walkable cells.
+func _build_heightmap() -> void:
+	var res := 2.0
+	var n := int(ceil(size / res))
+	var w := n + 1
+	heights = PackedFloat32Array()
+	heights.resize(w * w)
+	heights.fill(0.0)
+	var peak := 0.0
+	var fn := FastNoiseLite.new()
+	fn.seed = 11
+	fn.frequency = 0.08
+	fn.fractal_octaves = 3
+	# ridges: capsules with a flat-ish top; the slope ends 0.5 m inside the blocked band
+	for rd in map.get("ridges", []):
+		var a: Vector2 = rd["a"]
+		var b: Vector2 = rd["b"]
+		var wd: float = float(rd["w"])
+		var h: float = float(rd.get("h", 16.0))
+		peak = maxf(peak, h)
+		var x0 := maxi(int((minf(a.x, b.x) - wd) / res) - 1, 0)
+		var x1 := mini(int((maxf(a.x, b.x) + wd) / res) + 2, n)
+		var y0 := maxi(int((minf(a.y, b.y) - wd) / res) - 1, 0)
+		var y1 := mini(int((maxf(a.y, b.y) + wd) / res) + 2, n)
+		var seed_off := float(rd.get("seed", 0)) * 7.3
+		for y in range(y0, y1 + 1):
+			for x in range(x0, x1 + 1):
+				var p := Vector2(x * res, y * res)
+				# wobble the edge so the ridge isn't a perfect sausage
+				var wob := 1.0 + 0.3 * fn.get_noise_2d(p.x * 0.5 + seed_off, p.y * 0.5)
+				var d := PathGrid.seg_dist(p, a, b) / (wd * wob)
+				if d >= 1.0:
+					continue
+				var hv := h * (1.0 - pow(d, 2.2)) * (0.75 + 0.25 * (1.0 - d))
+				# height varies along the ridge (peaks and saddles)
+				var ab := b - a
+				var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 0.001), 0.0, 1.0)
+				hv *= 0.62 + 0.38 * (0.5 + 0.5 * sin(t * ab.length() * 0.3 + seed_off)) + 0.15 * fn.get_noise_2d(p.x * 0.15 + seed_off, p.y * 0.15)
+				var i := y * w + x
+				if hv > heights[i]:
+					heights[i] = hv
+	# legacy blob mountains (older map dictionaries)
+	for pr in map["props"]:
+		if pr.get("kind", "") != "mountain":
+			continue
+		var fp: Vector2i = pr["fp"]
+		var p: Vector2 = pr["p"]
+		var origin := Vector2(round(p.x / PathGrid.CELL - fp.x * 0.5), round(p.y / PathGrid.CELL - fp.y * 0.5)) * PathGrid.CELL
+		var c := origin + Vector2(fp) * PathGrid.CELL * 0.5
+		var r := Vector2(fp) * PathGrid.CELL * 0.5 - Vector2(0.6, 0.6)
+		var h: float = float(pr.get("h", 14.0))
+		peak = maxf(peak, h)
+		var x0 := maxi(int((c.x - r.x) / res), 0)
+		var x1 := mini(int((c.x + r.x) / res) + 1, n)
+		var y0 := maxi(int((c.y - r.y) / res), 0)
+		var y1 := mini(int((c.y + r.y) / res) + 1, n)
+		for y in range(y0, y1 + 1):
+			for x in range(x0, x1 + 1):
+				var dx := (x * res - c.x) / r.x
+				var dy := (y * res - c.y) / r.y
+				var d2 := dx * dx + dy * dy
+				if d2 >= 1.0:
+					continue
+				var hv := h * (1.0 - d2 * d2)
+				var i := y * w + x
+				if hv > heights[i]:
+					heights[i] = hv
+	if peak <= 0.0:
+		return
+	# rugged detail that fades out toward the foot of the slope
+	for y in range(w):
+		for x in range(w):
+			var i := y * w + x
+			if heights[i] > 0.0:
+				var k := heights[i] / peak
+				heights[i] += fn.get_noise_2d(x * res, y * res) * 3.5 * k + fn.get_noise_2d(x * res * 3.0, y * res * 3.0) * 1.0 * k
+				heights[i] = maxf(heights[i], 0.0)
+	var theme: String = map.get("theme", "desert")
+	var rock := Color(0.36, 0.30, 0.24)
+	var top := Color(0.46, 0.41, 0.35)
+	match theme:
+		"snow":
+			rock = Color(0.26, 0.28, 0.34)
+			top = Color(0.66, 0.70, 0.78)
+		"grass":
+			rock = Color(0.30, 0.27, 0.23)
+			top = Color(0.40, 0.37, 0.33)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for y in range(w):
+		for x in range(w):
+			var i := y * w + x
+			var hv := heights[i]
+			var hl := heights[y * w + maxi(x - 1, 0)]
+			var hr := heights[y * w + mini(x + 1, n)]
+			var hu := heights[maxi(y - 1, 0) * w + x]
+			var hd := heights[mini(y + 1, n) * w + x]
+			var nrm := Vector3(hl - hr, 2.0 * res, hu - hd).normalized()
+			var slope := 1.0 - nrm.y
+			var blend := clampf((hv - 0.8) / 4.0, 0.0, 1.0) * clampf(slope * 6.0 + hv / 8.0, 0.0, 1.0)
+			var col := rock.lerp(top, clampf((hv / peak - 0.45) * 2.2, 0.0, 1.0) * (1.0 - clampf(slope * 2.5, 0.0, 0.6)))
+			st.set_color(Color(col.r, col.g, col.b, blend))
+			st.set_normal(nrm)
+			st.set_uv(Vector2(x * res, y * res))
+			st.add_vertex(Vector3(x * res, hv, y * res))
+	for y in range(n):
+		for x in range(n):
+			var a := y * w + x
+			var b := a + 1
+			var c := a + w
+			var d := c + 1
+			st.add_index(a)
+			st.add_index(b)
+			st.add_index(c)
+			st.add_index(b)
+			st.add_index(d)
+			st.add_index(c)
+	var mesh := st.commit()
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	var mat := _terrain_material().duplicate() as ShaderMaterial
+	mat.set_shader_parameter("use_vcol", 1)
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	add_child(mi)
+	terrain_mesh = mi
+
+## Terrain height at a world position (0 on flat ground).
+func height_at(p: Vector2) -> float:
+	if heights.is_empty():
+		return 0.0
+	var res := 2.0
+	var n := int(ceil(size / res))
+	var w := n + 1
+	var x := clampi(int(p.x / res), 0, n)
+	var y := clampi(int(p.y / res), 0, n)
+	return heights[y * w + x]
 
 func _paint_road(a: Vector2, b: Vector2) -> void:
 	var steps := int(a.distance_to(b) / 1.5) + 1
@@ -168,6 +333,8 @@ func _paint_road(a: Vector2, b: Vector2) -> void:
 
 func _build_props() -> void:
 	for pr in map["props"]:
+		if pr.get("kind", "") == "mountain":
+			continue   # drawn as raised terrain
 		var n := Visuals.make_prop(pr["m"], pr["fp"], pr["yaw"], pr.get("kind", ""))
 		var p: Vector2 = pr["p"]
 		n.position = Vector3(p.x, 0, p.y)
@@ -182,8 +349,10 @@ func _build_fog() -> void:
 	fog_img = Image.create(fog_cells, fog_cells, false, Image.FORMAT_RG8)
 	fog_img.fill(Color(0, 0, 0))
 	fog_tex = ImageTexture.create_from_image(fog_img)
-	shroud_plane = _fog_plane(0, 27.0)
-	dim_plane = _fog_plane(1, 0.2)
+	shroud_plane = _fog_plane(0, 45.0)
+	_terrain_material().set_shader_parameter("fog_tex", fog_tex)
+	if terrain_mesh:
+		(terrain_mesh.material_override as ShaderMaterial).set_shader_parameter("fog_tex", fog_tex)
 
 func _fog_plane(mode: int, height: float) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()

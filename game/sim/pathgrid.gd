@@ -54,6 +54,28 @@ func flush() -> void:
 		astar.update()
 		dirty = false
 
+## Cells whose centre lies within r metres of the segment a-b (mountain ridges).
+static func capsule_cells(a: Vector2, b: Vector2, r: float) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var lo := Vector2(minf(a.x, b.x) - r, minf(a.y, b.y) - r)
+	var hi := Vector2(maxf(a.x, b.x) + r, maxf(a.y, b.y) + r)
+	var c0 := Vector2i(int(floor(lo.x / CELL)), int(floor(lo.y / CELL)))
+	var c1 := Vector2i(int(ceil(hi.x / CELL)), int(ceil(hi.y / CELL)))
+	for y in range(c0.y, c1.y + 1):
+		for x in range(c0.x, c1.x + 1):
+			var p := Vector2((x + 0.5) * CELL, (y + 0.5) * CELL)
+			if seg_dist(p, a, b) <= r:
+				out.append(Vector2i(x, y))
+	return out
+
+static func seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var l2 := ab.length_squared()
+	if l2 < 0.0001:
+		return p.distance_to(a)
+	var t := clampf((p - a).dot(ab) / l2, 0.0, 1.0)
+	return p.distance_to(a + ab * t)
+
 ## Cells covered by a footprint (w,h in cells) centred at world position p,
 ## rotated by yaw (radians). Axis-aligned footprints map exactly onto the grid;
 ## rotated ones block every cell whose centre falls inside the rotated rectangle

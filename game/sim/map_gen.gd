@@ -1,133 +1,198 @@
 class_name MapGen
 extends RefCounted
-## Builds the 1v1 map description. Deterministic (seeded) so it can be
-## generated on the server and sent to clients as a plain dictionary.
-## Layout is point-symmetric around the map centre: what P0 has at (x,y) P1 has at (S-x, S-y).
-
-const SIZE := 400.0
-
-static func mirror(p: Vector2) -> Vector2:
-	return Vector2(SIZE - p.x, SIZE - p.y)
-
-## The four corner transforms: player 0 bottom-left, 1 top-right, 2 top-left, 3 bottom-right.
-static func corner(p: Vector2, i: int) -> Vector2:
-	match i:
-		1:
-			return Vector2(SIZE - p.x, SIZE - p.y)
-		2:
-			return Vector2(SIZE - p.x, p.y)
-		3:
-			return Vector2(p.x, SIZE - p.y)
-	return p
+## Builds a map description. Deterministic (seeded) so it can be generated on the
+## server and sent to clients as a plain dictionary.
+##
+## Every map is a list of spawn slots (start positions). Each base gets the same
+## "kit" laid out in a local frame: u points from the base toward the map centre,
+## v is perpendicular. So the kit works for corner and mid-edge bases alike.
 
 const THEMES := {
-	"desert": {"name": "Desert Divide", "seed": 7, "trees": ["Environment/SM_Env_Tree_01.tscn", "Environment/SM_Env_Tree_Small_01.tscn", "Environment/SM_Env_Cactus_01.tscn", "Environment/SM_Env_Cactus_02.tscn"], "deco": "Environment/SM_Env_SandDunes_0%d.tscn"},
-	"snow": {"name": "Frozen Front", "seed": 21, "trees": ["Environment/SM_Env_Tree_Big_01.tscn", "Environment/SM_Env_Tree_Big_02.tscn", "Environment/SM_Env_Tree_02.tscn"], "deco": "Environment/SM_Env_Rock_Flat_0%d.tscn"},
-	"grass": {"name": "Green Valley", "seed": 33, "trees": ["Environment/SM_Env_Tree_Large_01.tscn", "Environment/SM_Env_Tree_Round_01.tscn", "Environment/SM_Env_Tree_Bush_01.tscn", "Environment/SM_Env_Tree_02.tscn"], "deco": "Environment/SM_Env_Bush_Group_0%d.tscn"},
+	"desert": {"trees": ["Environment/SM_Env_Tree_01.tscn", "Environment/SM_Env_Tree_Small_01.tscn", "Environment/SM_Env_Cactus_01.tscn", "Environment/SM_Env_Cactus_02.tscn"], "deco": "Environment/SM_Env_SandDunes_0%d.tscn", "trees_per_base": 10},
+	"snow": {"trees": ["Environment/SM_Env_Tree_Big_01.tscn", "Environment/SM_Env_Tree_Big_02.tscn", "Environment/SM_Env_Tree_02.tscn"], "deco": "Environment/SM_Env_Rock_Flat_0%d.tscn", "trees_per_base": 30},
+	"grass": {"trees": ["Environment/SM_Env_Tree_Large_01.tscn", "Environment/SM_Env_Tree_Round_01.tscn", "Environment/SM_Env_Tree_Bush_01.tscn", "Environment/SM_Env_Tree_02.tscn"], "deco": "Environment/SM_Env_Bush_Group_0%d.tscn", "trees_per_base": 30},
 }
 
-static func build(theme: String = "desert", players := 2) -> Dictionary:
-	var th: Dictionary = THEMES.get(theme, THEMES["desert"])
+## Playable maps. "starts" are fractions of the map size.
+const MAPS := {
+	"desert2": {"name": "Desert Divide", "theme": "desert", "size": 300.0, "seed": 7, "players": 2,
+		"starts": [Vector2(0.18, 0.18), Vector2(0.82, 0.82)]},
+	"desert4": {"name": "Sand Sea", "theme": "desert", "size": 400.0, "seed": 11, "players": 4,
+		"starts": [Vector2(0.16, 0.16), Vector2(0.84, 0.84), Vector2(0.84, 0.16), Vector2(0.16, 0.84)]},
+	"snow4": {"name": "Frozen Front", "theme": "snow", "size": 400.0, "seed": 21, "players": 4,
+		"starts": [Vector2(0.16, 0.16), Vector2(0.84, 0.84), Vector2(0.84, 0.16), Vector2(0.16, 0.84)]},
+	"grass6": {"name": "Green Valley", "theme": "grass", "size": 500.0, "seed": 33, "players": 6,
+		"starts": [Vector2(0.13, 0.13), Vector2(0.87, 0.87), Vector2(0.87, 0.13), Vector2(0.13, 0.87), Vector2(0.11, 0.5), Vector2(0.89, 0.5)]},
+}
+const MAP_ORDER := ["desert2", "desert4", "snow4", "grass6"]
+
+static func map_id(id: String) -> String:
+	if MAPS.has(id):
+		return id
+	# legacy names
+	match id:
+		"desert":
+			return "desert2"
+		"snow":
+			return "snow4"
+		"grass":
+			return "grass6"
+	return "desert2"
+
+static func slots(id: String) -> int:
+	return int(MAPS[map_id(id)]["players"])
+
+## Build the whole map (all slots get a base kit whether or not a player sits there,
+## so the map looks the same in every game).
+static func build(id: String = "desert2", _players := 2) -> Dictionary:
+	id = map_id(id)
+	var md: Dictionary = MAPS[id]
+	var th: Dictionary = THEMES[md["theme"]]
+	var S: float = md["size"]
 	var rng := RandomNumberGenerator.new()
-	rng.seed = int(th["seed"])
+	rng.seed = int(md["seed"])
 	var m := {
-		"name": th["name"],
-		"theme": theme,
-		"size": SIZE,
-		"starts": [Vector2(64, 64), corner(Vector2(64, 64), 1), corner(Vector2(64, 64), 2), corner(Vector2(64, 64), 3)],
-		"start_yaw": [0.0, PI, PI * 0.5, -PI * 0.5],
+		"id": id,
+		"name": md["name"],
+		"theme": md["theme"],
+		"size": S,
+		"starts": [],
+		"start_yaw": [],
 		"docks": [],        # [{p, boxes}]
 		"derricks": [],     # [p]
-		"props": [],        # [{m, p, yaw, s, fp}] fp = blocked cells (Vector2i), Vector2i.ZERO = decoration only
+		"props": [],        # [{m, p, yaw, s, fp, kind}] fp = blocked cells (Vector2i), Vector2i.ZERO = decoration only
+		"ridges": [],       # [{a, b, w, h}] impassable mountain ridges (capsules), raised terrain on the client
 		"roads": [],        # [{a, b}] purely visual
 	}
-	# Corner kit (mirrored into every corner): two supply docks per base plus a
-	# contested expansion dock and derrick along the edge.
-	var corners := players if players > 2 else 2
-	var used := [0, 1] if players <= 2 else range(players)
-	for i in used:
-		for p in [Vector2(110, 40), Vector2(40, 110)]:
-			m["docks"].append({"p": corner(p, i), "boxes": 400})
-		m["docks"].append({"p": corner(Vector2(200, 30), i), "boxes": 300})
-		m["derricks"].append(corner(Vector2(200, 62), i))
-	# centre derricks
-	for p in [Vector2(186, 214), Vector2(214, 186)]:
-		m["derricks"].append(p)
-	# Mountain ridges: impassable walls that split the map into lanes. Each ridge is a
-	# chain of mountain props whose footprints overlap, so the blocked cells match the art.
-	var ridges := [
-		[Vector2(120, 100), Vector2(150, 150)],   # diagonal ridge shielding each base, gap toward the centre lanes
-		[Vector2(150, 30), Vector2(160, 70)],     # spur between base docks and the edge expansion
-	]
+	var centre := Vector2(S * 0.5, S * 0.5)
+	var frames: Array = []   # [s, u, v]
+	for f in md["starts"]:
+		var s: Vector2 = Vector2(f) * S
+		var u := (centre - s).normalized()
+		var v := Vector2(-u.y, u.x)
+		frames.append([s, u, v])
+		m["starts"].append(s)
+		m["start_yaw"].append(atan2(u.x, u.y))
 	var mtn_models := ["Environment/SM_Env_Mountain_01.tscn", "Environment/SM_Env_Mountain_02.tscn", "Environment/SM_Env_Mountain_03.tscn", "Environment/SM_Env_Mountain_04.tscn"]
-	for rd in ridges:
-		for ci in range(4):
-			var pair := [corner(rd[0], ci), corner(rd[1], ci)]
-			var a: Vector2 = pair[0]
-			var b: Vector2 = pair[1]
-			var n := int(a.distance_to(b) / 14.0) + 1
-			for i in range(n + 1):
-				var pp := a.lerp(b, float(i) / n)
-				var size := Vector2i(8 + rng.randi() % 3, 6 + rng.randi() % 3)
-				m["props"].append({"m": mtn_models[rng.randi() % mtn_models.size()], "p": pp, "yaw": rng.randf() * TAU, "s": 1.0, "fp": size, "kind": "mountain"})
-	# Rock formations shaping the lanes.
-	var rocks := [
-		{"p": Vector2(200, 118), "fp": Vector2i(10, 4)},
-		{"p": Vector2(118, 200), "fp": Vector2i(4, 10)},
-		{"p": Vector2(160, 160), "fp": Vector2i(4, 4)},
-		{"p": Vector2(20, 200), "fp": Vector2i(4, 12)},
-	]
-	var rock_models := ["Environment/SM_Env_Rock_01.tscn", "Environment/SM_Env_Rock_02.tscn", "Environment/SM_Env_Rock_03.tscn", "Environment/SM_Env_Rock_04.tscn"]
-	for r in rocks:
-		for i in range(4):
-			var pp := corner(r["p"], i)
-			var dup := false
-			for pr in m["props"]:
-				if pr["p"].distance_to(pp) < 1.0:
-					dup = true
-			if dup:
-				continue
-			m["props"].append({"m": rock_models[rng.randi() % rock_models.size()], "p": pp, "yaw": rng.randf() * TAU, "s": 1.0, "fp": r["fp"], "kind": "rock"})
-	# Central ruined village: cover and chokepoints.
+	for fr in frames:
+		var s: Vector2 = fr[0]
+		var u: Vector2 = fr[1]
+		var v: Vector2 = fr[2]
+		# two base docks flanking the entrance
+		for sv in [1.0, -1.0]:
+			_add_dock(m, [s + u * 16.0 + v * (50.0 * sv)], 400, S)
+		# expansion dock + derrick out along the edge (first clear candidate wins)
+		_add_dock(m, [s + u * 72.0 - v * 120.0, s + u * 40.0 - v * 120.0, s + u * 72.0 + v * 120.0], 300, S)
+		_add_derrick(m, [s + u * 95.0 - v * 98.0, s + u * 60.0 - v * 98.0, s + u * 95.0 + v * 98.0], S)
+		m["roads"].append({"a": s, "b": s + u * 90.0})
+	for fr in frames:
+		var s: Vector2 = fr[0]
+		var u: Vector2 = fr[1]
+		var v: Vector2 = fr[2]
+		# ridges shielding the base: one along the approach, one spur toward the expansion
+		_add_ridge(m, rng, mtn_models, s + u * 65.0 - v * 14.0, s + u * 122.0, S)
+		_add_ridge(m, rng, mtn_models, s + u * 37.0 - v * 85.0, s + u * 72.0 - v * 64.0, S)
+	# centre: derricks and a ruined village
+	for d in [Vector2(-14, 14), Vector2(14, -14)]:
+		_add_derrick(m, [centre + d], S)
 	var houses := [
-		{"p": Vector2(170, 186), "fp": Vector2i(4, 4), "m": "Buildings/SM_Bld_Village_House_01_Destroyed.tscn"},
-		{"p": Vector2(214, 170), "fp": Vector2i(4, 3), "m": "Buildings/SM_Bld_Village_House_03_Destroyed.tscn"},
-		{"p": Vector2(200, 200), "fp": Vector2i(3, 3), "m": "Buildings/SM_Bld_Village_Well_01.tscn"},
+		{"d": Vector2(-30, -14), "fp": Vector2i(4, 4), "m": "Buildings/SM_Bld_Village_House_01_Destroyed.tscn"},
+		{"d": Vector2(30, 14), "fp": Vector2i(4, 4), "m": "Buildings/SM_Bld_Village_House_01_Destroyed.tscn"},
+		{"d": Vector2(14, -30), "fp": Vector2i(4, 3), "m": "Buildings/SM_Bld_Village_House_03_Destroyed.tscn"},
+		{"d": Vector2(-14, 30), "fp": Vector2i(4, 3), "m": "Buildings/SM_Bld_Village_House_03_Destroyed.tscn"},
+		{"d": Vector2(0, 0), "fp": Vector2i(3, 3), "m": "Buildings/SM_Bld_Village_Well_01.tscn"},
 	]
 	for h in houses:
-		m["props"].append({"m": h["m"], "p": h["p"], "yaw": 0.0, "s": 1.0, "fp": h["fp"], "kind": "ruin"})
-		if h["p"] != Vector2(200, 200):
-			m["props"].append({"m": h["m"], "p": mirror(h["p"]), "yaw": PI, "s": 1.0, "fp": h["fp"], "kind": "ruin"})
-	# Trees (single blocked cell each), away from bases and docks.
+		m["props"].append({"m": h["m"], "p": centre + h["d"], "yaw": 0.0 if h["d"].x <= 0 else PI, "s": 1.0, "fp": h["fp"], "kind": "ruin"})
+	# rock formations shaping the lanes between neighbouring bases
+	var rock_models := ["Environment/SM_Env_Rock_01.tscn", "Environment/SM_Env_Rock_02.tscn", "Environment/SM_Env_Rock_03.tscn", "Environment/SM_Env_Rock_04.tscn"]
+	for i in range(frames.size()):
+		var s: Vector2 = frames[i][0]
+		var u: Vector2 = frames[i][1]
+		var v: Vector2 = frames[i][2]
+		for d in [u * 150.0 + v * 40.0, u * 150.0 - v * 40.0, u * 105.0 + v * 12.0]:
+			var p: Vector2 = s + d
+			if _inside(p, S, 12.0) and _clear_spot(m, p, 14.0, true):
+				m["props"].append({"m": rock_models[rng.randi() % rock_models.size()], "p": p, "yaw": rng.randf() * TAU, "s": 1.0, "fp": Vector2i(4 + rng.randi() % 4, 4 + rng.randi() % 3), "kind": "rock"})
+	# trees (single blocked cell each), away from bases and docks
 	var tree_models: Array = th["trees"]
+	var want_trees: int = int(th["trees_per_base"]) * frames.size()
 	var tries := 0
 	var placed := 0
-	var want_trees := 40 if theme == "desert" else 120
-	while placed < want_trees and tries < 4000:
+	while placed < want_trees and tries < 6000:
 		tries += 1
-		var p := Vector2(rng.randf_range(12, SIZE * 0.5 - 4), rng.randf_range(12, SIZE * 0.5 - 4))
+		var p := Vector2(rng.randf_range(12, S - 12), rng.randf_range(12, S - 12))
 		if not _clear_spot(m, p, 12.0):
 			continue
-		for i in range(4):
-			m["props"].append({"m": tree_models[rng.randi() % tree_models.size()], "p": corner(p, i), "yaw": rng.randf() * TAU, "s": 1.0, "fp": Vector2i(1, 1), "kind": "tree"})
-		placed += 4
-	# Decoration (no blocking): dunes and pebbles.
-	for i in range(40):
-		var p := Vector2(rng.randf_range(10, SIZE - 10), rng.randf_range(10, SIZE - 10))
+		var n := 1 + rng.randi() % 3
+		for k in range(n):
+			var q := p + Vector2(rng.randf_range(-5, 5), rng.randf_range(-5, 5))
+			if _inside(q, S, 8.0):
+				m["props"].append({"m": tree_models[rng.randi() % tree_models.size()], "p": q, "yaw": rng.randf() * TAU, "s": 1.0, "fp": Vector2i(1, 1), "kind": "tree"})
+				placed += 1
+	# decoration (no blocking)
+	for i in range(int(S / 10.0)):
+		var p := Vector2(rng.randf_range(10, S - 10), rng.randf_range(10, S - 10))
 		if not _clear_spot(m, p, 16.0):
 			continue
 		var dm: String = th["deco"] % (1 + rng.randi() % 2)
 		m["props"].append({"m": dm, "p": p, "yaw": rng.randf() * TAU, "s": 1.0, "fp": Vector2i.ZERO, "kind": "deco"})
-	# Dirt road between the bases (visual only).
-	for i in used:
-		m["roads"].append({"a": corner(Vector2(64, 64), i), "b": corner(Vector2(150, 150), i)})
-	m["roads"].append({"a": Vector2(150, 150), "b": Vector2(250, 250)})
-	m["roads"].append({"a": Vector2(250, 150), "b": Vector2(150, 250)})
+	# roads through the middle
+	m["roads"].append({"a": centre + Vector2(-100, -100), "b": centre + Vector2(100, 100)})
+	m["roads"].append({"a": centre + Vector2(100, -100), "b": centre + Vector2(-100, 100)})
 	return m
 
-static func _clear_spot(m: Dictionary, p: Vector2, min_d: float) -> bool:
+static func _inside(p: Vector2, S: float, margin: float) -> bool:
+	return p.x >= margin and p.y >= margin and p.x <= S - margin and p.y <= S - margin
+
+static func _add_dock(m: Dictionary, cands: Array, boxes: int, S: float) -> void:
+	for c in cands:
+		var p := Vector2(clampf(c.x, 14.0, S - 14.0), clampf(c.y, 14.0, S - 14.0))
+		if _site_free(m, p, 24.0):
+			m["docks"].append({"p": p, "boxes": boxes})
+			return
+
+static func _add_derrick(m: Dictionary, cands: Array, S: float) -> void:
+	for c in cands:
+		var p := Vector2(clampf(c.x, 10.0, S - 10.0), clampf(c.y, 10.0, S - 10.0))
+		if _site_free(m, p, 16.0):
+			m["derricks"].append(p)
+			return
+
+static func _site_free(m: Dictionary, p: Vector2, d: float) -> bool:
 	for s in m["starts"]:
-		if p.distance_to(s) < 70.0:
+		if p.distance_to(s) < 30.0:
+			return false
+	for k in m["docks"]:
+		if k["p"].distance_to(p) < d:
+			return false
+	for k in m["derricks"]:
+		if k.distance_to(p) < d:
+			return false
+	for r in m["ridges"]:
+		if PathGrid.seg_dist(p, r["a"], r["b"]) < r["w"] + 6.0:
+			return false
+	return true
+
+## A mountain ridge from a to b: a capsule of half-width w. Cells under it are blocked
+## (see World / ClientView grid setup); the client raises the terrain to match.
+static func _add_ridge(m: Dictionary, rng: RandomNumberGenerator, _models: Array, a: Vector2, b: Vector2, S: float) -> void:
+	a = Vector2(clampf(a.x, 10.0, S - 10.0), clampf(a.y, 10.0, S - 10.0))
+	b = Vector2(clampf(b.x, 10.0, S - 10.0), clampf(b.y, 10.0, S - 10.0))
+	# shorten the ridge if it would cover a dock / derrick / start
+	var n := int(a.distance_to(b) / 4.0) + 1
+	var pts: Array = []
+	for i in range(n + 1):
+		var pp := a.lerp(b, float(i) / n)
+		if _site_free(m, pp, 18.0):
+			pts.append(pp)
+	if pts.size() < 3:
+		return
+	m["ridges"].append({"a": pts[0], "b": pts[pts.size() - 1], "w": 9.0 + rng.randf() * 3.0, "h": 15.0 + rng.randf() * 6.0, "seed": rng.randi() % 1000})
+
+static func _clear_spot(m: Dictionary, p: Vector2, min_d: float, allow_near_start := false) -> bool:
+	for s in m["starts"]:
+		if p.distance_to(s) < (40.0 if allow_near_start else 70.0):
 			return false
 	for d in m["docks"]:
 		if p.distance_to(d["p"]) < 22.0:
@@ -140,4 +205,60 @@ static func _clear_spot(m: Dictionary, p: Vector2, min_d: float) -> bool:
 		var r := maxf(fp.x, fp.y) * 1.0 + min_d * 0.5
 		if p.distance_to(pr["p"]) < r:
 			return false
+	for rd in m["ridges"]:
+		if PathGrid.seg_dist(p, rd["a"], rd["b"]) < rd["w"] + min_d * 0.5:
+			return false
 	return true
+
+## Small preview image for the lobby (theme colour, ridges, docks, derricks, starts).
+static func preview(id: String, px := 220) -> Image:
+	var m := build(id)
+	var S: float = m["size"]
+	var img := Image.create(px, px, false, Image.FORMAT_RGBA8)
+	var base := Color(0.55, 0.47, 0.32)
+	var rock := Color(0.36, 0.32, 0.28)
+	match m["theme"]:
+		"snow":
+			base = Color(0.78, 0.80, 0.84)
+			rock = Color(0.45, 0.47, 0.52)
+		"grass":
+			base = Color(0.32, 0.45, 0.2)
+			rock = Color(0.4, 0.38, 0.32)
+	img.fill(base)
+	var k := px / S
+	for pr in m["props"]:
+		var fp: Vector2i = pr["fp"]
+		if fp == Vector2i.ZERO:
+			continue
+		var col := rock
+		if pr["kind"] == "tree":
+			col = Color(0.2, 0.38, 0.18)
+		elif pr["kind"] == "mountain":
+			col = rock.darkened(0.25)
+		var p: Vector2 = pr["p"]
+		var x0 := int((p.x - fp.x) * k)
+		var y0 := int((p.y - fp.y) * k)
+		for y in range(y0, int((p.y + fp.y) * k) + 1):
+			for x in range(x0, int((p.x + fp.x) * k) + 1):
+				if x >= 0 and y >= 0 and x < px and y < px:
+					img.set_pixel(x, y, col)
+	for rd in m["ridges"]:
+		var a: Vector2 = rd["a"]
+		var b: Vector2 = rd["b"]
+		var steps := int(a.distance_to(b) / 2.0) + 1
+		for i in range(steps + 1):
+			_blob(img, a.lerp(b, float(i) / steps) * k, int(rd["w"] * k), rock.darkened(0.3))
+	for d in m["docks"]:
+		_blob(img, Vector2(d["p"]) * k, 3, Color(1.0, 0.85, 0.2))
+	for d in m["derricks"]:
+		_blob(img, Vector2(d) * k, 2, Color(0.15, 0.15, 0.15))
+	return img
+
+static func _blob(img: Image, c: Vector2, r: int, col: Color) -> void:
+	for y in range(-r, r + 1):
+		for x in range(-r, r + 1):
+			if x * x + y * y <= r * r:
+				var px := int(c.x) + x
+				var py := int(c.y) + y
+				if px >= 0 and py >= 0 and px < img.get_width() and py < img.get_height():
+					img.set_pixel(px, py, col)

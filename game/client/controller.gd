@@ -27,6 +27,11 @@ var place_press := Vector2(-1, -1)      # screen point where LMB went down in pl
 var place_rotating := false
 var guard_ring: MeshInstance3D = null
 var dozer_cycle := 0
+var guard_press := Vector2(-1, -1)      # screen point where LMB went down in guard mode
+var guard_centre := Vector2.ZERO        # ground point of that press
+var guard_radius := World.GUARD_RADIUS
+var rmb_press := Vector2(-1, -1)
+var rmb_dragged := false
 
 func setup(_view: ClientView) -> void:
 	view = _view
@@ -58,7 +63,9 @@ func hint_text() -> String:
 		"amove":
 			return "Attack-move: click a destination"
 		"guard":
-			return "Guard area: click where to guard (press G again to guard here)"
+			return "Guard area: click where to guard, hold and drag to set the radius (G again = guard here)"
+		"beacon":
+			return "Beacon: click where your team should look"
 		"force":
 			return "Force attack: click a target or the ground"
 		"capture":
@@ -182,8 +189,20 @@ func _unhandled_input(ev: InputEvent) -> void:
 		return
 	if ev is InputEventMouseMotion:
 		mouse_pos = ev.position
+		if rmb_press.x >= 0:
+			# right-drag scrolls the map (Generals); the order is only given if the mouse didn't move
+			if rmb_dragged or mouse_pos.distance_to(rmb_press) > DRAG_MIN:
+				rmb_dragged = true
+				cam.pan_screen(ev.relative)
+			return
 		if drag_start.x >= 0 and not dragging and mouse_pos.distance_to(drag_start) > DRAG_MIN and mode == "":
 			dragging = true
+		if mode == "guard" and guard_press.x >= 0:
+			var g := cam.ground_at(mouse_pos)
+			if g.x >= 0:
+				guard_radius = clampf(guard_centre.distance_to(g), 12.0, 90.0)
+				if guard_centre.distance_to(g) > 3.0:
+					_set_guard_ring_radius(guard_radius)
 		if mode == "place" and place_press.x >= 0 and mouse_pos.distance_to(place_press) > DRAG_MIN:
 			place_rotating = true
 			var a := cam.ground_at(place_press)
@@ -204,6 +223,13 @@ func _unhandled_input(ev: InputEvent) -> void:
 					place_press = mb.position
 					get_viewport().set_input_as_handled()
 					return
+				if mode == "guard":
+					var g := cam.ground_at(mb.position)
+					if g.x >= 0:
+						guard_press = mb.position
+						guard_centre = g
+					get_viewport().set_input_as_handled()
+					return
 				if mode != "":
 					_mode_click(mb.position)
 					get_viewport().set_input_as_handled()
@@ -217,6 +243,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_mode_click(anchor)
 					get_viewport().set_input_as_handled()
 					return
+				if mode == "guard" and guard_press.x >= 0:
+					var anchor := guard_press
+					guard_press = Vector2(-1, -1)
+					_mode_click(anchor)
+					get_viewport().set_input_as_handled()
+					return
 				if dragging:
 					_select_box(drag_rect(), mb.shift_pressed)
 				elif drag_start.x >= 0:
@@ -224,17 +256,39 @@ func _unhandled_input(ev: InputEvent) -> void:
 				drag_start = Vector2(-1, -1)
 				dragging = false
 			get_viewport().set_input_as_handled()
-		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			if mode != "":
-				cancel_mode()
-			elif mb.ctrl_pressed:
-				_force_attack(mb.position)
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
+			if mb.pressed:
+				rmb_press = mb.position
+				rmb_dragged = false
 			else:
-				_context_command(mb.position, mb.shift_pressed)
+				var was_drag := rmb_dragged
+				rmb_press = Vector2(-1, -1)
+				rmb_dragged = false
+				if not was_drag:
+					if mode != "":
+						cancel_mode()
+					elif mb.ctrl_pressed:
+						_force_attack(mb.position)
+					else:
+						_context_command(mb.position, mb.shift_pressed)
 			get_viewport().set_input_as_handled()
 		return
 	if ev is InputEventKey and ev.pressed:
 		var k := ev as InputEventKey
+		if view.hud.chat_open():
+			return
+		if k.keycode == KEY_ENTER or k.keycode == KEY_KP_ENTER:
+			view.hud.open_chat(false)
+			get_viewport().set_input_as_handled()
+			return
+		if k.keycode == KEY_BACKSPACE:
+			view.hud.open_chat(true)
+			get_viewport().set_input_as_handled()
+			return
+		if k.keycode == KEY_B and k.ctrl_pressed:
+			beacon_mode()
+			get_viewport().set_input_as_handled()
+			return
 		if k.keycode == KEY_ESCAPE or k.keycode == KEY_F10:
 			if mode != "":
 				cancel_mode()
@@ -466,6 +520,7 @@ func cancel_mode() -> void:
 	mode_arg = null
 	place_press = Vector2(-1, -1)
 	place_rotating = false
+	guard_press = Vector2(-1, -1)
 	_clear_ghost()
 	if guard_ring != null:
 		guard_ring.queue_free()
@@ -495,8 +550,11 @@ func _mode_click(pos: Vector2) -> void:
 			_voice_for(_own_units_selected(), "attack")
 			cancel_mode()
 		"guard":
-			view.send({"t": "guard", "ids": _own_units_selected(), "x": g.x, "y": g.y})
+			view.send({"t": "guard", "ids": _own_units_selected(), "x": g.x, "y": g.y, "r": guard_radius})
 			_voice_for(_own_units_selected(), "move")
+			cancel_mode()
+		"beacon":
+			view.send({"t": "beacon", "x": g.x, "y": g.y})
 			cancel_mode()
 		"force":
 			_force_attack(pos)
@@ -562,6 +620,24 @@ func begin_place(type: String) -> void:
 	model.name = "GhostModel"
 	ghost.add_child(model)
 	_set_ghost_alpha(model, 0.45)
+	# facing arrow: the building's front (door / exit side) is local +Z
+	var arrow := Node3D.new()
+	arrow.name = "Arrow"
+	var stem := Visuals.box(Vector3(0.8, 0.12, 3.0), Color(1.0, 0.9, 0.2, 0.9), true)
+	stem.position = Vector3(0, 0.4, fp.y * 0.5 + 1.8)
+	arrow.add_child(stem)
+	var head := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 1.6
+	cone.height = 2.2
+	cone.radial_segments = 3
+	head.mesh = cone
+	head.material_override = Visuals.flat_mat(Color(1.0, 0.9, 0.2, 0.9))
+	head.rotation_degrees = Vector3(90, 0, 0)
+	head.position = Vector3(0, 0.4, fp.y * 0.5 + 4.4)
+	arrow.add_child(head)
+	ghost.add_child(arrow)
 	view.add_child(ghost)
 	_update_ghost()
 	_refresh_sig()
@@ -583,7 +659,7 @@ func _clear_ghost() -> void:
 		ghost_mesh = null
 
 func _update_ghost() -> void:
-	if guard_ring != null:
+	if guard_ring != null and guard_press.x < 0:
 		var gg := cam.ground_at(mouse_pos)
 		if gg.x >= 0:
 			guard_ring.position = Vector3(gg.x, 0.2, gg.y)
@@ -605,12 +681,35 @@ func amove_mode() -> void:
 	_refresh_sig()
 
 func guard_mode() -> void:
+	if _own_units_selected().is_empty():
+		return
 	mode = "guard"
-	guard_ring = Visuals.ring(World.GUARD_RADIUS, Color(0.4, 0.9, 1.0, 0.7), 0.5)
+	guard_radius = World.GUARD_RADIUS
+	guard_press = Vector2(-1, -1)
+	if guard_ring != null:
+		guard_ring.queue_free()
+	guard_ring = Visuals.ring(1.0, Color(0.4, 0.9, 1.0, 0.7), 0.5)
 	guard_ring.material_override = Visuals.flat_mat(Color(0.4, 0.9, 1.0, 0.6))
 	view.add_child(guard_ring)
+	_set_guard_ring_radius(guard_radius)
 	_update_ghost()
 	_refresh_sig()
+
+func _set_guard_ring_radius(r: float) -> void:
+	if guard_ring != null:
+		guard_ring.scale = Vector3(r, 1.0, r)
+		guard_ring.position = Vector3(guard_centre.x, 0.2, guard_centre.y) if guard_press.x >= 0 else guard_ring.position
+
+func beacon_mode() -> void:
+	mode = "beacon"
+	_refresh_sig()
+
+func select_next_dozer() -> void:
+	_select_next("dozer", true)
+
+func set_plan(bid: int, plan: String) -> void:
+	view.send({"t": "plan", "id": bid, "plan": plan})
+	Audio.I.ui("ui_click", -6.0)
 
 func force_mode() -> void:
 	mode = "force"

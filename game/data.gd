@@ -15,6 +15,14 @@ const VET_HP := [1.0, 1.2, 1.4, 1.6]
 const RANK_XP := [0, 1000, 2500, 5000, 9000]   # player xp needed for rank 1..5
 const MAX_QUEUE := 9
 
+## Strategy Center battle plans (Zero Hour): one active plan per player; switching takes PLAN_SWITCH s.
+const PLAN_SWITCH := 12.0
+const PLANS := {
+	"bombardment": {"name": "Bombardment", "desc": "Ground units deal 20% more damage. The Strategy Center arms its artillery cannon.", "icon": "plan_bombardment"},
+	"hold": {"name": "Hold the Line", "desc": "Ground units take 10% less damage. The Strategy Center is reinforced (x2 armour).", "icon": "plan_hold"},
+	"search": {"name": "Search and Destroy", "desc": "Ground units get 20% more range and vision, and detect stealth.", "icon": "plan_search"},
+}
+
 const PREFAB := "res://Assets/Synty/PolygonMilitary/Prefabs/"
 
 # ---------------------------------------------------------------------------
@@ -68,6 +76,7 @@ const WEAPONS := {
 	"stealth_missile": {"dmg": 100.0, "type": "JET_MISSILES", "range": 44.0, "min_range": 8.0, "cd": 0.2, "clip": 2, "reload": -1.0, "speed": 200.0, "radius": 1.0, "aa": false, "ag": true, "style": "missile"},
 	"aurora_bomb": {"dmg": 400.0, "type": "AURORA_BOMB", "range": 30.0, "cd": 0.5, "clip": 1, "reload": -1.0, "speed": 60.0, "radius": 4.0, "aa": false, "ag": true, "style": "bomb"},
 	"patriot": {"dmg": 30.0, "type": "EXPLOSION", "range": 45.0, "cd": 0.25, "clip": 4, "reload": 2.0, "speed": 100.0, "radius": 1.0, "aa": true, "ag": true, "style": "missile", "needs_power": true},
+	"sc_cannon": {"dmg": 90.0, "type": "EXPLOSION", "range": 70.0, "min_range": 12.0, "cd": 3.0, "speed": 60.0, "radius": 2.5, "aa": false, "ag": true, "style": "shell", "plan": "bombardment"},
 	"firebase_gun": {"dmg": 75.0, "type": "EXPLOSION", "range": 55.0, "min_range": 10.0, "cd": 2.0, "speed": 60.0, "radius": 2.0, "aa": false, "ag": true, "style": "shell"},
 	"a10_gun": {"dmg": 45.0, "type": "COMANCHE_VULCAN", "range": 0.0, "cd": 1.0, "speed": 0.0, "radius": 3.0, "aa": false, "ag": true, "style": "bullet"},
 	"a10_missile": {"dmg": 150.0, "type": "EXPLOSION", "range": 0.0, "cd": 1.0, "speed": 0.0, "radius": 6.0, "aa": false, "ag": true, "style": "missile"},
@@ -161,7 +170,8 @@ const BUILDINGS := {
 		"model": "Buildings/SM_Bld_ControlTower_01.tscn", "height": 9.0, "runway": true, "desc": "Builds aircraft. Jets rearm and repair here (4 pads)."},
 	"strategy_center": {"name": "Strategy Center", "cost": 2500, "time": 60.0, "hp": 1500.0, "armor": "StructureArmor", "fp": Vector2i(6, 5),
 		"power": -2, "vision": 80.0, "prereq_any": ["war_factory", "airfield"], "upgrades": ["composite_armor", "advanced_training", "supply_lines"],
-		"model": "Buildings/SM_Bld_Hall_02.tscn", "height": 9.0, "desc": "Unlocks advanced units and upgrades."},
+		"weapons": ["sc_cannon"], "turret": true, "plans": true,
+		"model": "Buildings/SM_Bld_Hall_02.tscn", "height": 9.0, "desc": "Unlocks advanced units and upgrades. Choose a battle plan: Bombardment, Hold the Line or Search and Destroy."},
 	"supply_drop_zone": {"name": "Supply Drop Zone", "cost": 2500, "time": 45.0, "hp": 1000.0, "armor": "StructureArmor", "fp": Vector2i(3, 3),
 		"power": -4, "vision": 20.0, "prereq": ["strategy_center"], "income": {"amount": 1500, "every": 120.0},
 		"model": "Buildings/SM_Bld_Plywood_Shed_01.tscn", "height": 4.0, "desc": "$1500 airdropped every 2 minutes."},
@@ -207,8 +217,8 @@ const POWERS := {
 	"fuel_air_bomb": {"name": "Fuel Air Bomb", "rank": 5, "kind": "ability", "cd": 300.0, "radius": 30.0, "auto": true, "desc": "Massive thermobaric strike."},
 }
 
-const TEAM_COLORS := [Color(0.25, 0.55, 1.0), Color(1.0, 0.25, 0.2), Color(0.3, 0.9, 0.35), Color(1.0, 0.85, 0.2)]
-const TEAM_NAMES := ["Blue", "Red", "Green", "Yellow"]
+const TEAM_COLORS := [Color(0.25, 0.55, 1.0), Color(1.0, 0.25, 0.2), Color(0.3, 0.9, 0.35), Color(1.0, 0.85, 0.2), Color(0.85, 0.35, 1.0), Color(1.0, 0.55, 0.15)]
+const TEAM_NAMES := ["Blue", "Red", "Green", "Yellow", "Purple", "Orange"]
 
 static func def(type: String) -> Dictionary:
 	if UNITS.has(type):

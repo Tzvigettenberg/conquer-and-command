@@ -131,6 +131,34 @@ func cl_paused(on: bool) -> void:
 func srv_hello(name: String, version: String) -> void:
 	get_parent().on_client_hello(multiplayer.get_remote_sender_id(), name, version)
 
+@rpc("any_peer", "call_remote", "reliable")
+func srv_lobby(c: Dictionary) -> void:
+	get_parent().on_lobby_cmd(multiplayer.get_remote_sender_id(), c)
+
+## In-game chat: relayed by the host to everyone (or allies only).
+@rpc("any_peer", "call_remote", "reliable")
+func srv_chat(text: String, allies: bool) -> void:
+	if world == null:
+		return
+	var from := world.player_of_peer(multiplayer.get_remote_sender_id())
+	relay_chat(from, text, allies)
+
+func relay_chat(from: int, text: String, allies: bool) -> void:
+	if world == null or from < 0:
+		return
+	for i in range(world.players.size()):
+		var p: Dictionary = world.players[i]
+		if int(p["peer"]) < 0:
+			continue
+		if allies and not world.allied(from, i):
+			continue
+		_to(int(p["peer"]), "cl_chat", [from, text, allies])
+
+@rpc("authority", "call_remote", "reliable")
+func cl_chat(from: int, text: String, allies: bool) -> void:
+	if view:
+		view.on_chat(from, text, allies)
+
 @rpc("authority", "call_remote", "reliable")
 func cl_lobby(players: Array, opts: Dictionary) -> void:
 	get_parent().on_lobby(players, opts)

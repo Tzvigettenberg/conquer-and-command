@@ -48,6 +48,8 @@ var trail_t := 0.0
 
 var model: Node3D
 var turret: Node3D = null
+var extras_key := ""              # which upgrade / plan add-ons are shown
+var extras_node: Node3D = null
 var rotors: Array[Node3D] = []
 var wheels: Array[Node3D] = []
 var tilt: Node3D = null          # body pivot for banking / pitching
@@ -316,6 +318,34 @@ func _process_building(now: float) -> void:
 		smoke = null
 	_idle_anims(now, get_process_delta_time())
 	_capture_fx(now)
+
+## Upgrade and battle-plan visuals: small add-on parts so you can see at a glance
+## what a unit or structure has (TOW pod, armour skirts, control rods, the
+## Strategy Center's cannon / sandbags / scanner).
+func set_extras(keys: Array) -> void:
+	var key := ",".join(keys)
+	if key == extras_key:
+		return
+	extras_key = key
+	if extras_node != null:
+		extras_node.queue_free()
+		extras_node = null
+	# plan parts live in the building model itself
+	if model != null:
+		for nm in ["PlanHold", "PlanSearch"]:
+			var n := model.find_child(nm, true, false)
+			if n != null:
+				n.visible = keys.has("plan_hold" if nm == "PlanHold" else "plan_search")
+		var cannon := model.find_child("Cannon", true, false)
+		if cannon != null:
+			cannon.visible = keys.has("plan_bombardment")
+	var parts := Visuals.make_extras(type, keys, team, aabb)
+	if parts != null:
+		extras_node = parts
+		if tilt != null:
+			tilt.add_child(parts)
+		else:
+			add_child(parts)
 
 ## Idle life: radar spin, launcher sweep, pump-jack nod, beacon blink, glow pulse.
 func _idle_anims(now: float, dt: float) -> void:

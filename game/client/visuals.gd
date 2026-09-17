@@ -90,6 +90,71 @@ static func strip_physics(root: Node) -> void:
 ## Build the visual for a sim entity type. Returns a Node3D whose origin is the
 ## Build the visual for a sim entity type. Returns a Node3D whose origin is the
 ## entity's ground position, facing +Z.
+## Add-on parts for upgrades (see Puppet.set_extras). Returns null when nothing applies.
+static func make_extras(type: String, keys: Array, team: int, aabb: AABB) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Extras"
+	var top := aabb.end.y
+	var c := aabb.get_center()
+	var tc: Color = Data.TEAM_COLORS[team % Data.TEAM_COLORS.size()] if team >= 0 else Color(0.6, 0.6, 0.6)
+	var any := false
+	var metal := Color(0.24, 0.25, 0.28)
+	match type:
+		"humvee":
+			if keys.has("tow"):
+				# TOW launcher box on the roof
+				Buildings.box(root, Vector3(0.9, 0.45, 1.3), Vector3(c.x, top + 0.2, c.z - 0.2), metal)
+				Buildings.cyl(root, 0.12, 0.12, 1.1, Vector3(c.x, top + 0.25, c.z + 0.5), Color(0.5, 0.5, 0.55), 6).rotation.x = PI * 0.5
+				any = true
+		"crusader", "paladin":
+			if keys.has("composite_armor"):
+				# side skirts and extra front plate
+				var w := aabb.size.x
+				var l := aabb.size.z
+				for sx in [-1.0, 1.0]:
+					Buildings.box(root, Vector3(0.18, 0.7, l * 0.75), Vector3(c.x + sx * (w * 0.5 + 0.05), aabb.position.y + 0.75, c.z), metal)
+				Buildings.box(root, Vector3(w * 0.8, 0.5, 0.2), Vector3(c.x, aabb.position.y + 0.9, c.z + l * 0.5), metal)
+				any = true
+		"comanche":
+			if keys.has("rocket_pods"):
+				for sx in [-1.0, 1.0]:
+					Buildings.cyl(root, 0.28, 0.28, 1.4, Vector3(c.x + sx * 1.1, c.y - 0.2, c.z), metal, 8).rotation.x = PI * 0.5
+				any = true
+		"raptor", "stealth_fighter":
+			if keys.has("laser_missiles"):
+				for sx in [-1.0, 1.0]:
+					var tip := Buildings.sphere(root, 0.22, Vector3(c.x + sx * aabb.size.x * 0.32, c.y - 0.3, c.z + 0.6), Color(0.4, 0.8, 1.0))
+					(tip.material_override as StandardMaterial3D).emission_enabled = true
+					(tip.material_override as StandardMaterial3D).emission = Color(0.3, 0.7, 1.0)
+				any = true
+		"power_plant":
+			if keys.has("control_rods"):
+				# glowing rods sticking out of the reactor dome
+				for i in range(4):
+					var ang := i * TAU / 4.0 + 0.4
+					var rod := Buildings.cyl(root, 0.16, 0.16, 2.4, Vector3(sin(ang) * 1.6, top + 0.4, cos(ang) * 1.6), Color(0.5, 1.0, 0.6), 6)
+					(rod.material_override as StandardMaterial3D).emission_enabled = true
+					(rod.material_override as StandardMaterial3D).emission = Color(0.3, 1.0, 0.4)
+				any = true
+		"supply_center":
+			if keys.has("supply_lines"):
+				for i in range(3):
+					Buildings.box(root, Vector3(1.0, 1.0, 1.0), Vector3(1.0 + i * 1.15, 0.65, -3.8), Color(0.85, 0.7, 0.3))
+				any = true
+		"barracks":
+			if keys.has("capture"):
+				Buildings.box(root, Vector3(0.1, 4.5, 0.1), Vector3(aabb.position.x + 0.6, 2.25, aabb.end.z - 0.6), metal)
+				Buildings.box(root, Vector3(1.4, 0.8, 0.05), Vector3(aabb.position.x + 1.3, 4.0, aabb.end.z - 0.6), tc)
+				any = true
+		"strategy_center":
+			if keys.has("advanced_training"):
+				Buildings.box(root, Vector3(1.6, 0.9, 0.05), Vector3(-1.5, 4.7, 2.6), Color(0.9, 0.75, 0.2))
+				any = true
+	if not any:
+		root.free()
+		return null
+	return root
+
 static func make_model(type: String, owner: int) -> Node3D:
 	var def := Data.def(type)
 	var is_bld := Data.is_building(type)
