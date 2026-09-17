@@ -54,22 +54,54 @@ func flush() -> void:
 		astar.update()
 		dirty = false
 
-## Cells covered by a footprint (w,h in cells) centred at world position p.
-static func footprint_cells(p: Vector2, fp: Vector2i) -> Array[Vector2i]:
+## Cells covered by a footprint (w,h in cells) centred at world position p,
+## rotated by yaw (radians). Axis-aligned footprints map exactly onto the grid;
+## rotated ones block every cell whose centre falls inside the rotated rectangle
+## (slightly inflated so edges are sealed).
+static func footprint_cells(p: Vector2, fp: Vector2i, yaw := 0.0) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	var origin := Vector2i(int(round(p.x / CELL - fp.x * 0.5)), int(round(p.y / CELL - fp.y * 0.5)))
-	for y in range(fp.y):
-		for x in range(fp.x):
-			out.append(origin + Vector2i(x, y))
+	if absf(wrapf(yaw, -PI, PI)) < 0.001:
+		var origin := Vector2i(int(round(p.x / CELL - fp.x * 0.5)), int(round(p.y / CELL - fp.y * 0.5)))
+		for y in range(fp.y):
+			for x in range(fp.x):
+				out.append(origin + Vector2i(x, y))
+		return out
+	var half := Vector2(fp) * CELL * 0.5
+	var r := half.length() + CELL
+	var c0 := Vector2i(int(floor((p.x - r) / CELL)), int(floor((p.y - r) / CELL)))
+	var c1 := Vector2i(int(ceil((p.x + r) / CELL)), int(ceil((p.y + r) / CELL)))
+	var cs := cos(-yaw)
+	var sn := sin(-yaw)
+	for y in range(c0.y, c1.y + 1):
+		for x in range(c0.x, c1.x + 1):
+			var d := Vector2((x + 0.5) * CELL, (y + 0.5) * CELL) - p
+			var lx := d.x * cs - d.y * sn
+			var ly := d.x * sn + d.y * cs
+			if absf(lx) <= half.x + 0.7 and absf(ly) <= half.y + 0.7:
+				out.append(Vector2i(x, y))
 	return out
 
-## Snap a footprint centre so the footprint aligns to the grid.
-static func snap_center(p: Vector2, fp: Vector2i) -> Vector2:
+## Snap a footprint centre so an unrotated footprint aligns to the grid.
+static func snap_center(p: Vector2, fp: Vector2i, yaw := 0.0) -> Vector2:
+	if absf(wrapf(yaw, -PI, PI)) >= 0.001:
+		return Vector2(round(p.x), round(p.y))
 	var origin := Vector2i(int(round(p.x / CELL - fp.x * 0.5)), int(round(p.y / CELL - fp.y * 0.5)))
 	return Vector2((origin.x + fp.x * 0.5) * CELL, (origin.y + fp.y * 0.5) * CELL)
 
-func footprint_free(p: Vector2, fp: Vector2i, margin := 0) -> bool:
-	var cells := footprint_cells(p, fp)
+## Distance from a point to the edge of a (possibly rotated) footprint rectangle.
+static func rect_dist(p: Vector2, center: Vector2, fp: Vector2i, yaw := 0.0) -> float:
+	var half := Vector2(fp) * CELL * 0.5
+	var d := p - center
+	var cs := cos(-yaw)
+	var sn := sin(-yaw)
+	var lx := d.x * cs - d.y * sn
+	var ly := d.x * sn + d.y * cs
+	var dx := maxf(absf(lx) - half.x, 0.0)
+	var dy := maxf(absf(ly) - half.y, 0.0)
+	return sqrt(dx * dx + dy * dy)
+
+func footprint_free(p: Vector2, fp: Vector2i, margin := 0, yaw := 0.0) -> bool:
+	var cells := footprint_cells(p, fp, yaw)
 	for c in cells:
 		for dy in range(-margin, margin + 1):
 			for dx in range(-margin, margin + 1):
@@ -99,33 +131,27 @@ func nearest_free(c: Vector2i, max_r := 12) -> Vector2i:
 			return best
 	return c
 
-## Nearest free cell around a footprint (for units that need to reach a building).
-func approach_cell(from: Vector2, center: Vector2, fp: Vector2i) -> Vector2i:
-	var cells := footprint_cells(center, fp)
-	var minx := 1e9
-	var miny := 1e9
-	var maxx := -1e9
-	var maxy := -1e9
+## Nearest free cell adjacent to a set of footprint cells (for units that need to reach a building).
+func approach_cell(from: Vector2, cells: Array[Vector2i]) -> Vector2i:
+	var inside := {}
 	for c in cells:
-		minx = minf(minx, c.x)
-		miny = minf(miny, c.y)
-		maxx = maxf(maxx, c.x)
-		maxy = maxf(maxy, c.y)
+		inside[c] = true
 	var best := Vector2i(-1, -1)
 	var best_d := 1e18
-	for y in range(int(miny) - 1, int(maxy) + 2):
-		for x in range(int(minx) - 1, int(maxx) + 2):
-			var c := Vector2i(x, y)
-			if x > minx - 1 and x < maxx + 1 and y > miny - 1 and y < maxy + 1:
-				continue
-			if not in_bounds(c) or is_solid(c):
-				continue
-			var d := center_of(c).distance_squared_to(from)
-			if d < best_d:
-				best_d = d
-				best = c
+	for c in cells:
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var cc := c + Vector2i(dx, dy)
+				if inside.has(cc) or not in_bounds(cc) or is_solid(cc):
+					continue
+				var d := center_of(cc).distance_squared_to(from)
+				if d < best_d:
+					best_d = d
+					best = cc
 	if best.x < 0:
-		return nearest_free(cell_of(center))
+		if cells.is_empty():
+			return cell_of(from)
+		return nearest_free(cells[0])
 	return best
 
 ## Path in world coordinates (waypoints). Empty if unreachable.

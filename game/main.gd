@@ -17,19 +17,28 @@ var ip_edit: LineEdit
 var lobby_box: VBoxContainer
 var lobby_list: Label
 var start_btn: Button
+var bot_check: CheckButton
 var menu_box: VBoxContainer
 var args: Dictionary = {}
 var lobby_players: Array = []      # server: [{peer, name}]
 var in_lobby := false
 var game_started := false
 var my_name := "Commander"
+var port := PORT
 
 func _ready() -> void:
 	I = self
 	session = Session.new()
 	session.name = "Session"
 	add_child(session)
+	var audio := Audio.new()
+	audio.name = "Audio"
+	add_child(audio)
 	_parse_args()
+	if args.has("port"):
+		port = int(args["port"])
+	if not args.has("headless_audio_off"):
+		audio.play_music("menu")
 	_build_menu()
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
@@ -123,6 +132,11 @@ func _build_menu() -> void:
 	lobby_list = Label.new()
 	lobby_list.text = ""
 	lobby_box.add_child(lobby_list)
+	bot_check = CheckButton.new()
+	bot_check.text = "Add AI opponent (when no second player)"
+	bot_check.button_pressed = true
+	bot_check.toggled.connect(func(_on: bool) -> void: _refresh_lobby())
+	lobby_box.add_child(bot_check)
 	start_btn = Button.new()
 	start_btn.text = "Start game"
 	start_btn.pressed.connect(_on_start_pressed)
@@ -160,7 +174,7 @@ func _host() -> void:
 	if my_name == "":
 		my_name = "Host"
 	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_server(PORT, MAX_PLAYERS + 2)
+	var err := peer.create_server(port, MAX_PLAYERS + 2)
 	if err != OK:
 		_set_status("Could not open port %d (error %d). Is another copy running?" % [PORT, err])
 		return
@@ -169,7 +183,7 @@ func _host() -> void:
 	_show_lobby(true)
 	_set_status("Hosting on port %d. Waiting for an opponent... (you can also start solo to practice)" % PORT)
 	_refresh_lobby()
-	if args.has("autostart") and args.has("solo"):
+	if args.has("autostart") and (args.has("solo") or args.has("bot")):
 		_start_game()
 
 func _join() -> void:
@@ -181,7 +195,7 @@ func _join() -> void:
 		_set_status("Enter the host's IP address first.")
 		return
 	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_client(ip, PORT)
+	var err := peer.create_client(ip, port)
 	if err != OK:
 		_set_status("Could not start client (error %d)" % err)
 		return
@@ -202,6 +216,7 @@ func _show_lobby(is_host: bool) -> void:
 	menu_box.visible = false
 	lobby_box.visible = true
 	start_btn.visible = is_host
+	bot_check.visible = is_host
 	start_btn.text = "Start game"
 
 func _refresh_lobby() -> void:
@@ -212,7 +227,8 @@ func _refresh_lobby() -> void:
 		text += "  · (waiting for opponent)\n"
 	lobby_list.text = text
 	if multiplayer.is_server():
-		start_btn.text = "Start game" if lobby_players.size() >= 2 else "Start solo (sandbox)"
+		start_btn.text = "Start game" if lobby_players.size() >= 2 else ("Start vs AI" if bot_check.button_pressed else "Start solo (sandbox)")
+		bot_check.visible = lobby_players.size() < 2
 		for p in lobby_players:
 			if p["peer"] != 1:
 				session.rpc_id(p["peer"], "cl_lobby", lobby_players, text)
@@ -293,6 +309,9 @@ func _start_game() -> void:
 	for p in lobby_players:
 		peers.append(p["peer"])
 		names.append(p["name"])
+	if peers.size() == 1 and (bot_check.button_pressed or args.has("bot")) and not args.has("solo"):
+		peers.append(-1)
+		names.append("AI General")
 	var w := World.new()
 	w.debug = args.has("debug")
 	session.world = w
@@ -302,6 +321,8 @@ func _start_game() -> void:
 func begin_game(map: Dictionary, player_index: int) -> void:
 	game_started = true
 	menu.visible = false
+	Audio.I.play_music("game")
+	Audio.I.start_ambience()
 	if view == null:
 		var cv_script: GDScript = load("res://game/client/client_view.gd")
 		view = cv_script.new()
@@ -317,6 +338,8 @@ func return_to_menu() -> void:
 		session.view = null
 	session.world = null
 	game_started = false
+	Audio.I.stop_all()
+	Audio.I.play_music("menu")
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	lobby_players.clear()
 	menu.visible = true

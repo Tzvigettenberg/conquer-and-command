@@ -111,6 +111,8 @@ static func make_model(type: String, owner: int) -> Node3D:
 			var sz := (fp.y * 0.92) / maxf(size.z, 0.01)
 			var sy := float(def.get("height", 8.0)) / maxf(size.y, 0.01)
 			s = minf(minf(sx, sz), sy * 1.4)
+		elif def.get("cat", "") == "inf":
+			s = float(def.get("length", 1.8)) / maxf(size.y, 0.01)   # infantry: fit by height
 		else:
 			var l := float(def.get("length", 4.0))
 			s = l / maxf(maxf(size.x, size.z), 0.01)
@@ -161,7 +163,7 @@ static func _fallback(type: String, owner: int) -> Node3D:
 ## turret node itself is the pivot.
 static func _setup_turret(root: Node3D, inst: Node) -> void:
 	for n in inst.find_children("*", "MeshInstance3D", true, false):
-		if "Turret" in n.name and not ("Barrel" in n.name or "Hatch" in n.name):
+		if ("Turret" in n.name and not ("Barrel" in n.name or "Hatch" in n.name)) or n.name.ends_with("Gun_Horizontal") or n.name.ends_with("Remote_Weapon") or n.name.ends_with("Gunner"):
 			root.set_meta("turret", n)
 			return
 
@@ -212,13 +214,17 @@ static func sphere(r: float, color: Color) -> MeshInstance3D:
 	return mi
 
 ## Generic prefab instance for map props (rocks, trees, ruins), fitted to a footprint.
+## The model is rotated first and then fitted, so the art covers the blocked cells.
 static func make_prop(rel: String, fp: Vector2i, yaw: float, kind: String) -> Node3D:
 	var root := Node3D.new()
 	var ps := prefab(rel)
 	if ps != null:
 		var inst := ps.instantiate()
 		strip_physics(inst)
-		var aabb := local_aabb(inst)
+		var pivot := Node3D.new()
+		pivot.rotation.y = yaw
+		pivot.add_child(inst)
+		var aabb := local_aabb(pivot)
 		var s := 1.0
 		if fp != Vector2i.ZERO:
 			var w := fp.x * 2.0
@@ -227,20 +233,32 @@ static func make_prop(rel: String, fp: Vector2i, yaw: float, kind: String) -> No
 			if kind == "tree":
 				s = clampf(s * 1.6, 0.6, 2.5)
 			elif kind == "rock":
-				s = s * 1.05
-		inst.scale = Vector3.ONE * s
+				s = s * 1.1
+			elif kind == "mountain":
+				s = s * 1.2
+		var holder := Node3D.new()
+		holder.scale = Vector3.ONE * s
 		var c := aabb.get_center()
-		inst.position = Vector3(-c.x * s, -aabb.position.y * s, -c.z * s)
-		root.add_child(inst)
+		holder.position = Vector3(-c.x * s, -aabb.position.y * s, -c.z * s)
+		holder.add_child(pivot)
+		root.add_child(holder)
 	elif fp != Vector2i.ZERO:
 		var col := Color(0.45, 0.42, 0.38)
 		if kind == "tree":
 			col = Color(0.2, 0.45, 0.2)
-		var mi := box(Vector3(fp.x * 2.0 * 0.9, 3.0 + fp.x * 0.5, fp.y * 2.0 * 0.9), col)
-		mi.position.y = (3.0 + fp.x * 0.5) * 0.5
+		elif kind == "mountain":
+			col = Color(0.5, 0.42, 0.35)
+		var hgt := 3.0 + fp.x * 0.5 if kind != "mountain" else 6.0 + fp.x * 0.6
+		var mi := box(Vector3(fp.x * 2.0 * 0.95, hgt, fp.y * 2.0 * 0.95), col)
+		mi.position.y = hgt * 0.5
 		root.add_child(mi)
-	root.rotation.y = yaw
+	else:
+		root.rotation.y = yaw
 	return root
+
+## Bounding box of a model in its own space (used for click picking and icons).
+static func model_aabb(model: Node3D) -> AABB:
+	return local_aabb(model)
 
 ## Wreck for a destroyed unit, or a generic rubble block for a building.
 static func make_wreck(type: String) -> Node3D:

@@ -30,6 +30,25 @@ static func build(seed_val: int = 7) -> Dictionary:
 	for p in [Vector2(352, 90), Vector2(186, 214)]:
 		m["derricks"].append(p)
 		m["derricks"].append(mirror(p))
+	# Mountain ridges: impassable walls that split the map into lanes. Each ridge is a
+	# chain of mountain props whose footprints overlap, so the blocked cells match the art.
+	var ridges := [
+		[Vector2(150, 60), Vector2(190, 120)],     # base-side ridge, forces a detour toward the centre
+		[Vector2(60, 150), Vector2(120, 190)],
+		[Vector2(240, 150), Vector2(290, 158)],   # centre-east spur
+		[Vector2(330, 200), Vector2(380, 240)],   # east edge spur
+		[Vector2(20, 300), Vector2(40, 360)],     # border spur
+	]
+	var mtn_models := ["Environment/SM_Env_Mountain_01.tscn", "Environment/SM_Env_Mountain_02.tscn", "Environment/SM_Env_Mountain_03.tscn", "Environment/SM_Env_Mountain_04.tscn"]
+	for rd in ridges:
+		for pair in [rd, [mirror(rd[0]), mirror(rd[1])]]:
+			var a: Vector2 = pair[0]
+			var b: Vector2 = pair[1]
+			var n := int(a.distance_to(b) / 14.0) + 1
+			for i in range(n + 1):
+				var pp := a.lerp(b, float(i) / n)
+				var size := Vector2i(8 + rng.randi() % 3, 6 + rng.randi() % 3)
+				m["props"].append({"m": mtn_models[rng.randi() % mtn_models.size()], "p": pp, "yaw": rng.randf() * TAU, "s": 1.0, "fp": size, "kind": "mountain"})
 	# Rock formations shaping the lanes.
 	var rocks := [
 		{"p": Vector2(200, 118), "fp": Vector2i(14, 5)},

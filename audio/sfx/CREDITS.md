@@ -1,0 +1,36 @@
+# Sound effect credits (Freesound)
+
+- `alert.ogg` — "Wailing alarm #2 OGG" by tt_runscript — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/321679/
+- `beep.ogg` — "Radio tuning beep" by LukaCafuka — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/768681/
+- `capture.ogg` — "Walkie Talkie Beep" by SoundBiterSFX — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/732209/
+- `chime.ogg` — "Chime Notification" by Jofae — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/380482/
+- `chinook_loop.ogg` — "UH‑60 Black Hawk Helicopter Hover Loop 1" by qubodup — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/854493/
+- `crush.ogg` — "Hard Candy / Bone Crunch" by clif_creates — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/392883/
+- `defeat.ogg` — "wah wah sad trombone.wav" by kirbydx — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/175409/
+- `explosion_large.ogg` — "Explosion large" by SamsterBirdies — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/587886/
+- `explosion_small.ogg` — "explosion6.wav" by ReadeOnly — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/186957/
+- `fanfare.ogg` — "fasching fanfare - Karnevals Tusch [Tataa] (short)" by Audeption — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/418525/
+- `footsteps.ogg` — "Footsteps Gravel Running-Stop" by KikeVilaplana — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/436525/
+- `gau8.ogg` — "Navy MK 15 Phalanx CIWS Anti-Air Fast Burst" by qubodup — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/163119/
+- `grunt.ogg` — "Voice_AdultMale_PainGrunts_04.wav" by MrFossy — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/547200/
+- `jet_flyby.ogg` — "Jet.ogg" by egomassive — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/536809/
+- `jet_loop.ogg` — "Jet Engine" by m_cel — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/534856/
+- `metal_hit.ogg` — "hit - metallic - trailer - metal fender 02.wav" by Anthousai — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/406559/
+- `place_building.ogg` — "GROSS IMPACT" by magnuswaker — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/641040/
+- `plane_pass.ogg` — "Propeller plane flyby.flac" by YuriNikolai — https://creativecommons.org/licenses/by/4.0/ — https://freesound.org/s/347973/
+- `power_down.ogg` — "power-down-03.wav" by newagesoup — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/348250/
+- `power_up.ogg` — "Sci-Fi Gateway" by Bachsambora — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/752034/
+- `repair.ogg` — "ratchet socket wrench tool" by AlaskaRobotics — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/551497/
+- `ricochet.ogg` — "Ricochet 2.wav" by saturdaysoundguy — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/394183/
+- `satellite.ogg` — "jsyd_ping.wav" by jbum — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/32093/
+- `scream.ogg` — "Voice_AdultMale_DeathScream_04.wav" by MrFossy — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/547181/
+- `sniper_shot.ogg` — "Sniper Rifle Shot Sound Effect" by qubodup — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/182051/
+- `superweapon_charge.ogg` — "laser-charge.wav" by StavSounds — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/701702/
+- `superweapon_fire.ogg` — " Laser gun Cannon shot.mp3 " by soundmatch24 — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/194312/
+- `tank_engine.ogg` — "engine4_loop.wav" by ReadeOnly — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/186934/
+- `ui_click.ogg` — "SFX UI Button Click" by suntemple — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/253168/
+- `ui_error.ogg` — "Multimedia SFX - Error 01.wav" by 8bitmyketison — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/699923/
+- `ui_hover.ogg` — "Soft UI Button Click" by Jummit — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/528561/
+- `ui_select.ogg` — "Blip_C_02" by cabled_mess — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/350864/
+- `victory.ogg` — "Success Fanfare Trumpets.mp3" by FunWithSound — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/456966/
+- `wind_loop.ogg` — "Mount Horeb" by InChristAlone — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/615440/

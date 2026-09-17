@@ -54,6 +54,9 @@ func _process(dt: float) -> void:
 				n.position = f.lerp(to, a)
 			"para":
 				n.position.y = lerpf(it["from"].y, 0.0, a)
+			"track":
+				if a > 0.6:
+					_fade(n, (1.0 - a) / 0.4 * 0.55)
 			"text":
 				n.position.y += dt * 2.0
 				if n is Label3D:
@@ -308,6 +311,23 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 			ring.material_override = _own_mat(Color(0.4, 0.8, 1.0, 0.7))
 			ring.position = pos + Vector3(0, 0.3, 0)
 			_add(ring, "beam", 2.0)
+
+## Tyre / track marks left behind by vehicles.
+func track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void:
+	var n := Node3D.new()
+	n.position = Vector3(pos.x, 0.05, pos.z)
+	n.rotation.y = yaw
+	var w := 0.35 if tracked else 0.22
+	for side in [-1.0, 1.0]:
+		var m := MeshInstance3D.new()
+		var q := BoxMesh.new()
+		q.size = Vector3(w, 0.01, 1.7)
+		m.mesh = q
+		m.material_override = _own_mat(Color(0.12, 0.09, 0.05, 0.55))
+		m.position = Vector3(side * half_w, 0, 0)
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		n.add_child(m)
+	_add(n, "track", 30.0)
 
 func placed(pos: Vector3, fp: Vector2) -> void:
 	var ring := Visuals.box(Vector3(fp.x, 0.1, fp.y), Color(0.3, 1.0, 0.4, 0.5), true)

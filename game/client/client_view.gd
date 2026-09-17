@@ -11,6 +11,7 @@ var fx: Fx
 var camera: RtsCamera
 var ctl: Controller
 var hud: Hud
+var icons: Icons
 var grid := PathGrid.new()         # client-side copy for placement previews
 var alerts: Array = []
 var game_over := false
@@ -49,11 +50,16 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	ctl.name = "Controller"
 	add_child(ctl)
 	ctl.setup(self)
+	icons = Icons.new()
+	icons.name = "Icons"
+	add_child(icons)
 	hud = Hud.new()
 	hud.name = "Hud"
 	add_child(hud)
 	hud.setup(self, ctl)
+	icons.ready_changed.connect(func() -> void: hud.refresh_selection())
 	_warm_animations()
+	Audio.I.eva("welcome", 0.0)
 	if Visuals.missing_assets:
 		on_msg("Synty assets not found - using placeholder shapes")
 	on_msg("Welcome, %s. You are %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index]])
@@ -117,11 +123,12 @@ func on_spawn(id: int, type: String, owner: int, pos: Vector2, alt: float, yaw: 
 	p.setup(id, type, owner, pos, alt, yaw, extra, owner == my_index)
 	puppets[id] = p
 	if p.is_building:
-		grid.set_cells(PathGrid.footprint_cells(pos, Data.BUILDINGS[type]["fp"]), true)
+		p.set_meta("cells", PathGrid.footprint_cells(pos, Data.BUILDINGS[type]["fp"], yaw))
+		grid.set_cells(p.get_meta("cells"), true)
 
 func _unblock(p: Puppet) -> void:
-	if p.is_building:
-		grid.set_cells(PathGrid.footprint_cells(Vector2(p.cur_pos.x, p.cur_pos.z), Data.BUILDINGS[p.type]["fp"]), false)
+	if p.is_building and p.has_meta("cells"):
+		grid.set_cells(p.get_meta("cells"), false)
 
 func on_despawn(id: int, reason: String) -> void:
 	var p: Puppet = puppets.get(id)
@@ -130,10 +137,13 @@ func on_despawn(id: int, reason: String) -> void:
 	puppets.erase(id)
 	_unblock(p)
 	if reason == "killed":
+		Audio.I.death(p.type, p.cur_pos)
 		if p.cat == "inf":
 			fx.death(p.type, p.cur_pos, p.cur_yaw, p.detach_model())
 		else:
 			fx.death(p.type, p.cur_pos, p.cur_yaw)
+	elif reason == "sold" and p.team == my_index:
+		Audio.I.ui("sell")
 	ctl.selected.erase(id)
 	p.queue_free()
 	ctl._refresh_sig()
@@ -189,38 +199,83 @@ func on_events(evs: Array) -> void:
 				else:
 					continue
 				fx.shot(from, Vector3(d[2], float(d[4]) + 0.8, d[3]), str(d[1]))
+				Audio.I.weapon(str(d[1]), from)
 			"hit":
 				var wd: Dictionary = Data.WEAPONS.get(str(d[0]), {})
 				fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"))
+				Audio.I.impact(wd.get("style", "shell"), Vector3(d[1], float(d[3]), d[2]))
 			"die":
 				pass   # despawn carries the visual death
 			"cash":
-				pass
+				var b: Puppet = puppets.get(int(d[1])) if d.size() > 1 else null
+				var at := b.cur_pos + Vector3(0, float(b.def.get("height", 6.0)) * 0.7, 0) if b != null else Vector3(0, 0, 0)
+				if b != null:
+					fx.floating_text(at, "+$%d" % int(d[0]), Color(1.0, 0.9, 0.3))
+					Audio.I.sfx("cash", at, -4.0, 0.05, 0.3)
 			"alert":
 				alerts.append({"p": Vector2(d[0], d[1]), "t": Time.get_ticks_msec() / 1000.0})
+				Audio.I.ui("alert", -8.0)
 				while alerts.size() > 8:
 					alerts.pop_front()
 			"beam":
 				fx.particle_beam(Vector3(d[0], 0, d[1]))
+				Audio.I.sfx("superweapon_fire", Vector3(d[0], 5, d[1]), 4.0, 0.05, 0.5)
 			"strike":
 				fx.strike(str(d[0]), Vector3(d[1], 0, d[2]), float(d[3]), int(d[4]) if d.size() > 4 else 1)
+				match str(d[0]):
+					"a10":
+						Audio.I.sfx("jet_flyby", Vector3(d[1], 20, d[2]), 4.0)
+						Audio.I.eva("a10", 2.0)
+					"paradrop":
+						Audio.I.sfx("plane_pass", Vector3(d[1], 30, d[2]), 4.0)
+						Audio.I.eva("paradrop", 2.0)
+					"fuel_air_bomb":
+						Audio.I.sfx("jet_flyby", Vector3(d[1], 30, d[2]), 4.0)
+						Audio.I.eva("fuel_air_bomb", 2.0)
+					"spy_satellite":
+						Audio.I.sfx("satellite", Vector3(d[1], 5, d[2]), 0.0)
+						Audio.I.eva("spy_satellite", 2.0)
+					"emergency_repair":
+						Audio.I.sfx("repair", Vector3(d[1], 2, d[2]), 0.0)
+						Audio.I.eva("emergency_repair", 2.0)
 			"place":
-				pass
+				var b0: Puppet = puppets.get(int(d[0]))
+				if b0 != null:
+					Audio.I.sfx("place_building", b0.cur_pos, 0.0, 0.05, 0.2)
 			"built":
 				var b: Puppet = puppets.get(int(d[0]))
 				if b != null:
 					fx.placed(b.cur_pos, Data.footprint_size(b.type))
+					Audio.I.sfx("chime", b.cur_pos, -6.0, 0.0, 0.2)
+
+func _process(_dt: float) -> void:
+	if camera != null and camera.cam != null:
+		Audio.I.listener_pos = camera.cam.global_position
+
+func leave_track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void:
+	if fx.items.size() < 900:
+		fx.track(pos, yaw, half_w, tracked)
 
 func on_fog(bytes: PackedByteArray) -> void:
 	map_view.update_fog(bytes)
 
 func on_pstate(st: Dictionary) -> void:
 	pstate = st
+	var docks: Dictionary = st.get("docks", {})
+	for id in docks:
+		var p: Puppet = puppets.get(int(id))
+		if p != null and p.type == "supply_dock" and p.boxes != int(docks[id]):
+			p.set_crates(int(docks[id]))
 
 func on_msg(text: String) -> void:
 	print("[MSG p%d] %s" % [my_index, text])
 	if hud:
 		hud.add_message(text)
+	Audio.I.eva_for_message(text)
+	if "Insufficient funds" in text or "Cannot build" in text or "Requires" in text or "Airfield full" in text or "Limit reached" in text:
+		Audio.I.ui("ui_error", -6.0)
+	if "Low power" in text:
+		Audio.I.ui("power_down", -2.0)
 
 func on_gameover(winner: int) -> void:
 	game_over = true
@@ -234,6 +289,12 @@ func on_gameover(winner: int) -> void:
 	hud.show_gameover(text)
 	map_view.reveal_all()
 	ctl.cancel_mode()
+	if winner == my_index:
+		Audio.I.ui("victory")
+		Audio.I.eva("victory", 0.0)
+	elif winner != -2:
+		Audio.I.ui("defeat")
+		Audio.I.eva("defeat", 0.0)
 
 # ---------------------------------------------------------------------------
 # Helpers for HUD / controller
@@ -260,6 +321,13 @@ func has_upgrade(uid: String, bid := -1) -> bool:
 	if bid >= 0:
 		var ud: Dictionary = pstate.get("upg_done", {})
 		if ud.has(bid) and ud[bid].has(uid):
+			return true
+	return false
+
+func is_researching(uid: String) -> bool:
+	var research: Dictionary = pstate.get("research", {})
+	for bid in research:
+		if research[bid][0] == uid:
 			return true
 	return false
 
@@ -293,14 +361,14 @@ func sw_ready(owner: int) -> bool:
 	var sw: Dictionary = pstate.get("sw", {})
 	return sw.has(owner) and float(sw[owner]) <= 0.0
 
-func placement_ok(type: String, pos: Vector2) -> bool:
+func placement_ok(type: String, pos: Vector2, yaw := 0.0) -> bool:
 	var d: Dictionary = Data.BUILDINGS[type]
 	var fp: Vector2i = d["fp"]
-	var half := Vector2(fp) * 1.0
+	var r := Vector2(fp).length()
 	var size := float(map["size"])
-	if pos.x - half.x < 6.0 or pos.y - half.y < 6.0 or pos.x + half.x > size - 6.0 or pos.y + half.y > size - 6.0:
+	if pos.x - r < 6.0 or pos.y - r < 6.0 or pos.x + r > size - 6.0 or pos.y + r > size - 6.0:
 		return false
-	if not grid.footprint_free(pos, fp, 1):
+	if not grid.footprint_free(pos, fp, 1, yaw):
 		return false
 	if not map_view.is_explored(pos):
 		return false
@@ -355,6 +423,7 @@ func _run_test(kind: String) -> void:
 				print("[Test] WARN %s never placed" % step[0])
 				break
 	# production
+	send({"t": "cheat_cash"})
 	var bar := _own("barracks")
 	if bar:
 		for i in range(4):
@@ -369,7 +438,48 @@ func _run_test(kind: String) -> void:
 	var sc := _own("supply_center")
 	if sc:
 		send({"t": "produce", "id": sc.id, "type": "chinook"})
-	await get_tree().create_timer(40.0).timeout
+	if bar:
+		send({"t": "upgrade", "id": bar.id, "uid": "capture"})
+		send({"t": "upgrade", "id": bar.id, "uid": "capture"})   # duplicate must be rejected
+	send({"t": "cheat_cash"})
+	send({"t": "cheat_cash"})
+	# airfield + a raptor to exercise the flight model
+	var af_pos := PathGrid.snap_center(base + Vector2(-30, -20) * dir, Data.BUILDINGS["airfield"]["fp"], 0.6)
+	send({"t": "build", "id": dz.id, "type": "airfield", "x": af_pos.x, "y": af_pos.y, "yaw": 0.6})
+	await get_tree().create_timer(45.0).timeout
+	var af := _own("airfield")
+	if af and af.complete:
+		send({"t": "produce", "id": af.id, "type": "raptor"})
+		print("[Test] airfield done, raptor queued")
+	else:
+		print("[Test] WARN airfield not complete")
+	_report()
+	# capture the nearest derrick with two rangers: walk there first so it is revealed
+	var dpos: Vector2 = map["derricks"][0]
+	for dd in map["derricks"]:
+		if dd.distance_to(base) < dpos.distance_to(base):
+			dpos = dd
+	var walkers := _own_ids(func(p: Puppet) -> bool: return p.type == "ranger")
+	if walkers.size() >= 2:
+		send({"t": "move", "ids": walkers.slice(0, 2), "x": dpos.x, "y": dpos.y + 6.0, "q": false})
+		print("[Test] rangers walking to derrick at %s" % dpos)
+	await get_tree().create_timer(45.0).timeout
+	var derrick: Puppet = null
+	for pp in puppets.values():
+		if pp.type == "oil_derrick" and (derrick == null or pp.cur_pos.distance_to(Vector3(base.x, 0, base.y)) < derrick.cur_pos.distance_to(Vector3(base.x, 0, base.y))):
+			derrick = pp
+	var rangers := _own_ids(func(p: Puppet) -> bool: return p.type == "ranger")
+	if derrick != null and rangers.size() >= 2:
+		send({"t": "capture", "ids": rangers.slice(0, 2), "tid": derrick.id})
+		print("[Test] capturing derrick %d at %s" % [derrick.id, derrick.cur_pos])
+	await get_tree().create_timer(30.0).timeout
+	var raptor := _own("raptor")
+	var enemy_base0: Vector2 = map["starts"][1 - my_index] if map["starts"].size() > 1 else Vector2(200, 200)
+	if raptor:
+		send({"t": "attack_ground", "ids": [raptor.id], "x": enemy_base0.x, "y": enemy_base0.y})
+		print("[Test] raptor force-attacking enemy base")
+	if derrick != null:
+		print("[Test] derrick owner now %d" % derrick.team)
 	_report()
 	# send the army toward the enemy base
 	var enemy_base: Vector2 = map["starts"][1 - my_index] if map["starts"].size() > 1 else Vector2(200, 200)
@@ -390,3 +500,8 @@ func _report() -> void:
 		elif p.team >= 0 and not p.ghost:
 			enemy += 1
 	print("[Test p%d] t=%.0f cash=%d power=%s/%s own=%s enemies_visible=%d" % [my_index, pstate.get("time", 0.0), pstate.get("cash", 0), str(pstate.get("pp", 0)), str(pstate.get("pu", 0)), str(counts), enemy])
+	var hps := []
+	for p in puppets.values():
+		if p.team == my_index and p.is_building:
+			hps.append("%s:%.3f" % [p.type, p.hp_frac])
+	print("[Test p%d] building hp: %s" % [my_index, " ".join(hps)])

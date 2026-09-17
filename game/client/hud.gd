@@ -203,10 +203,13 @@ func _build() -> void:
 	gridp.add_child(grid)
 	for i in range(GRID_COLS * GRID_ROWS):
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(104, 54)
-		b.add_theme_font_size_override("font_size", 12)
+		b.custom_minimum_size = Vector2(100, 58)
+		b.add_theme_font_size_override("font_size", 11)
 		b.visible = false
 		b.clip_text = true
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		b.pressed.connect(_on_grid.bind(i))
 		grid.add_child(b)
 		grid_buttons.append(b)
@@ -315,7 +318,7 @@ func refresh_selection() -> void:
 		c.queue_free()
 	if sel.is_empty():
 		info_title.text = ""
-		info_body.text = "[color=#889]Left-drag: select   Right-click: move / attack   A: attack-move   S: stop   G: guard\nCtrl+1-9: group   H: command center   Middle-drag / arrows / edge: scroll   Wheel: zoom   Q/E: rotate[/color]"
+		info_body.text = "[color=#889]Left-drag: select   Right-click: move / attack   Ctrl+right-click or X: force attack   A: attack-move   S: stop   G: guard area\nN: next Dozer   B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center   Ctrl+1-9: groups   H: home\nArrows / edge / middle-drag: scroll   Wheel: zoom   Q / E: rotate camera[/color]"
 		return
 	var mine: bool = sel[0].team == view.my_index
 	if sel.size() == 1:
@@ -365,13 +368,19 @@ func refresh_selection() -> void:
 		var d := single.def
 		for ut in d.get("produces", []):
 			var ud: Dictionary = Data.UNITS[ut]
-			actions.append({"label": "%s\n$%d" % [ud["name"], ud["cost"]], "tip": "%s\n%s\nBuild time %ds" % [ud["name"], ud.get("desc", ""), int(ud["time"])],
+			actions.append({"label": "%s  $%d" % [ud["name"], ud["cost"]], "icon": ut, "tip": "%s\n%s\nBuild time %ds" % [ud["name"], ud.get("desc", ""), int(ud["time"])],
 				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and view.unit_prereq_text(ut) == "", "tip2": view.unit_prereq_text(ut)})
 		for uid in d.get("upgrades", []):
 			var ud: Dictionary = Data.UPGRADES[uid]
 			var done: bool = view.has_upgrade(uid, single.id)
-			actions.append({"label": "%s\n%s" % [ud["name"], "DONE" if done else "$%d" % ud["cost"]], "tip": "%s\n%s" % [ud["name"], ud["desc"]],
-				"cb": func() -> void: ctl.upgrade(single.id, uid), "enabled": not done and view.can_afford(ud["cost"])})
+			var researching: bool = view.is_researching(uid)
+			var lbl := "$%d" % ud["cost"]
+			if done:
+				lbl = "DONE"
+			elif researching:
+				lbl = "researching"
+			actions.append({"label": "%s  %s" % [ud["name"], lbl], "icon": uid, "tip": "%s\n%s" % [ud["name"], ud["desc"]],
+				"cb": func() -> void: ctl.upgrade(single.id, uid), "enabled": not done and not researching and view.can_afford(ud["cost"])})
 		if d.has("superweapon"):
 			var ready: bool = view.sw_ready(single.team)
 			actions.append({"label": "FIRE\nParticle Cannon", "tip": "Select a target for the beam. Steer it with the mouse while it fires.", "cb": func() -> void: ctl.sw_mode(single.id), "enabled": ready})
@@ -391,17 +400,26 @@ func refresh_selection() -> void:
 				if bd.get("neutral", false):
 					continue
 				var why: String = view.building_prereq_text(bt)
-				actions.append({"label": "%s\n$%d" % [bd["name"], bd["cost"]], "tip": "%s\n%s\nPower %+d  ·  %ds%s" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"]), ("\n" + why) if why != "" else ""],
+				actions.append({"label": "%s  $%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds%s" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"]), ("\n" + why) if why != "" else ""],
 					"cb": func() -> void: ctl.begin_place(bt), "enabled": why == "" and view.can_afford(bd["cost"])})
 		else:
 			actions.append({"label": "Attack-move (A)", "tip": "Move and engage anything on the way", "cb": func() -> void: ctl.amove_mode(), "enabled": true})
+			actions.append({"label": "Force attack (X)", "tip": "Fire at a position or at anything, including neutral or own structures (Ctrl+right-click)", "cb": func() -> void: ctl.force_mode(), "enabled": true})
 			actions.append({"label": "Stop (S)", "tip": "Halt", "cb": func() -> void: ctl.stop(), "enabled": true})
-			actions.append({"label": "Guard (G)", "tip": "Hold position and engage nearby enemies", "cb": func() -> void: ctl.guard(), "enabled": true})
+			actions.append({"label": "Guard area (G)", "tip": "Guard a circular area: engage anything entering it and return afterwards. Aircraft loiter over it and go home to rearm.", "cb": func() -> void: ctl.guard_mode(), "enabled": true})
+			var has_ranger := false
+			for p in sel:
+				if p.type == "ranger":
+					has_ranger = true
+			if has_ranger:
+				var can: bool = view.has_upgrade("capture")
+				actions.append({"label": "Capture", "icon": "capture", "tip": "Rangers take over an enemy or neutral structure (20 s next to it)." + ("" if can else "\nRequires the Capture Building upgrade at the Barracks."), "cb": func() -> void: ctl.capture_mode(), "enabled": can})
 	for i in range(mini(actions.size(), grid_buttons.size())):
 		var a: Dictionary = actions[i]
 		var b := grid_buttons[i]
 		b.visible = true
 		b.text = a["label"]
+		b.icon = view.icons.get_icon(a["icon"]) if a.has("icon") else null
 		b.tooltip_text = a["tip"] + (("\n" + a["tip2"]) if a.has("tip2") and a["tip2"] != "" else "")
 		b.disabled = not a["enabled"]
 		grid_actions[i] = a["cb"]
@@ -409,6 +427,7 @@ func refresh_selection() -> void:
 func _on_grid(i: int) -> void:
 	var cb = grid_actions[i]
 	if cb != null:
+		Audio.I.ui("ui_click", -8.0)
 		cb.call()
 
 func _update_queue() -> void:
@@ -466,9 +485,11 @@ func _update_powers(st: Dictionary) -> void:
 			continue
 		if not power_buttons.has(pid):
 			var b := Button.new()
-			b.custom_minimum_size = Vector2(170, 34)
+			b.custom_minimum_size = Vector2(170, 40)
 			b.add_theme_font_size_override("font_size", 12)
 			b.tooltip_text = pd["desc"]
+			b.icon = view.icons.get_icon(pid)
+			b.expand_icon = true
 			b.pressed.connect(func() -> void: ctl.power_mode(pid))
 			powers_box.add_child(b)
 			power_buttons[pid] = b
@@ -575,13 +596,15 @@ func _draw_minimap() -> void:
 		if now - a["t"] < 4.0:
 			var r := 4.0 + fmod(now * 2.0, 1.0) * 8.0
 			minimap.draw_arc(a["p"] * s, r, 0, TAU, 16, Color(1, 0.3, 0.2), 1.5)
-	# camera frustum
-	var corners: PackedVector2Array = view.camera.view_corners()
+	# camera view: a rectangle around the camera target, rotated with the camera
+	var cam: RtsCamera = view.camera
+	var half := Vector2(cam.height * 0.95, cam.height * 0.62)
+	var centre := Vector2(cam.target.x, cam.target.z)
 	var pts := PackedVector2Array()
-	for c in corners:
-		pts.append((c * s).clamp(Vector2.ZERO, sz))
+	for c in [Vector2(-half.x, -half.y), Vector2(half.x, -half.y), Vector2(half.x, half.y), Vector2(-half.x, half.y)]:
+		pts.append(((centre + c.rotated(-cam.yaw)) * s).clamp(Vector2.ZERO, sz))
 	pts.append(pts[0])
-	minimap.draw_polyline(pts, Color(1, 1, 1, 0.8), 1.0)
+	minimap.draw_polyline(pts, Color(1, 1, 1, 0.85), 1.0)
 	minimap.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.3, 0.35, 0.4), false, 1.0)
 
 func _minimap_input(ev: InputEvent) -> void:
@@ -639,6 +662,22 @@ func _draw_overlay() -> void:
 			overlay.draw_rect(Rect2(r.position + Vector2(0, 6), Vector2(w * (p.aux - 100) / 100.0, 3)), Color(1.0, 0.4, 0.9))
 		if p.level > 0 and not p.is_building:
 			overlay.draw_string(ThemeDB.fallback_font, sp + Vector2(w * 0.5 + 3, 0), "★".repeat(p.level), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 0.9, 0.3))
+	# guard areas of selected units
+	var guard: Dictionary = view.pstate.get("guard", {})
+	for p in ctl.selected_puppets():
+		if not p.is_building and guard.has(p.id):
+			var g: Array = guard[p.id]
+			var ring := PackedVector2Array()
+			var ok := true
+			for i in range(25):
+				var a := TAU * i / 24.0
+				var wp := Vector3(g[0] + cos(a) * g[2], 0.3, g[1] + sin(a) * g[2])
+				if cam.is_behind(wp):
+					ok = false
+					break
+				ring.append(cam.to_screen(wp))
+			if ok:
+				overlay.draw_polyline(ring, Color(0.4, 0.9, 1.0, 0.6), 1.5)
 	# rally points for selected buildings
 	var rally: Dictionary = view.pstate.get("rally", {})
 	for p in ctl.selected_puppets():

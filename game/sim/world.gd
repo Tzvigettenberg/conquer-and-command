@@ -12,6 +12,8 @@ const PSTATE_EVERY := 5
 const SPATIAL_CELL := 8.0
 const CAPTURE_TIME := 20.0
 const GHOST_TIMEOUT_TICKS := 20
+const GUARD_RADIUS := 24.0
+const ORPHAN_DRAIN := 0.035      # fraction of max hp lost per second by jets with no airfield
 
 var session: Node
 var map: Dictionary
@@ -35,6 +37,7 @@ var game_over := false
 var winner := -1
 var solo := false
 var debug := false
+var bots: Array = []             # Bot instances (server-side AI players)
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -75,7 +78,12 @@ func start(_session: Node, peers: Array, names: Array) -> void:
 		_recompute_power(i)
 	grid.flush()
 	for i in range(players.size()):
-		session.s_map(players[i]["peer"], map, i)
+		if peers[i] == -1:
+			var b := Bot.new()
+			b.setup(self, i)
+			bots.append(b)
+		else:
+			session.s_map(players[i]["peer"], map, i)
 	_update_vision()
 
 func player_of_peer(peer: int) -> int:
@@ -87,23 +95,25 @@ func player_of_peer(peer: int) -> int:
 # ---------------------------------------------------------------------------
 # Entities
 # ---------------------------------------------------------------------------
-func spawn(type: String, owner: int, pos: Vector2, complete := true) -> Ent:
+func spawn(type: String, owner: int, pos: Vector2, complete := true, yaw := 0.0) -> Ent:
 	var e := Ent.new()
 	e.setup(next_id, type, owner, pos)
 	next_id += 1
+	e.yaw = yaw
 	if e.is_building:
-		e.cells = PathGrid.footprint_cells(pos, e.def["fp"])
+		e.cells = PathGrid.footprint_cells(pos, e.def["fp"], yaw)
 		grid.set_cells(e.cells, true)
 		e.complete = complete
 		if not complete:
 			e.hp = e.max_hp * 0.1
 			e.progress = 0.0
 		var fp: Vector2i = e.def["fp"]
-		e.rally = pos + Vector2(0, fp.y + 5.0)
+		e.rally = pos + Vector2(sin(yaw), cos(yaw)) * (fp.y + 5.0)
 		e.has_rally = false
 	else:
 		if e.is_air():
 			e.alt = float(e.def.get("alt", 10.0))
+			e.flight = "fly"
 		if owner >= 0 and players[owner]["upgrades"].has("composite_armor") and (type == "crusader" or type == "paladin"):
 			e.max_hp *= 1.25
 			e.hp = e.max_hp
@@ -122,7 +132,7 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 		for o: Ent in ents.values():
 			if o.alive and o.home_id == e.id:
 				o.home_id = -1
-				o.landed = false
+				o.flight = "fly" if o.flight == "parked" else o.flight
 	if killer != null and killer.owner >= 0 and killer.owner != e.owner and e.owner >= 0:
 		var xp := float(e.def.get("cost", 100)) * 0.06
 		var kp: Dictionary = players[killer.owner]
@@ -160,13 +170,17 @@ func _flush_dead() -> void:
 
 func _exit_point(b: Ent) -> Vector2:
 	var fp: Vector2i = b.def["fp"]
-	var p := b.pos + Vector2(0, fp.y + 1.5)
+	var p := b.pos + Vector2(sin(b.yaw), cos(b.yaw)) * (fp.y + 1.5)
 	var c := grid.nearest_free(grid.cell_of(p))
 	return grid.center_of(c)
 
 func _pad_pos(air: Ent, idx: int) -> Vector2:
 	var offs := [Vector2(-7.5, -5.0), Vector2(-2.5, -5.0), Vector2(2.5, -5.0), Vector2(7.5, -5.0)]
-	return air.pos + offs[clampi(idx, 0, 3)]
+	return air.pos + offs[clampi(idx, 0, 3)].rotated(-air.yaw)
+
+## Runway direction (unit vector) of an airfield: along its local +X.
+func _runway_dir(air: Ent) -> Vector2:
+	return Vector2(cos(air.yaw), -sin(air.yaw))
 
 func _add_player_xp(p: int, xp: float) -> void:
 	var pl: Dictionary = players[p]
@@ -288,6 +302,8 @@ func step(dt: float) -> void:
 	_tick_shots()
 	_tick_strikes()
 	_tick_beams(dt)
+	for b in bots:
+		b.think(dt)
 	if tick % 10 == 0:
 		_tick_heal(0.5)
 	_flush_dead()
@@ -314,27 +330,30 @@ func _tick_unit(e: Ent, dt: float) -> void:
 			e.reload_t[i] -= dt
 			if e.reload_t[i] <= 0.0:
 				e.clip[i] = int(Data.WEAPONS[e.weapon_ids()[i]].get("clip", 0))
-	if e.is_jet() and e.landed:
-		_tick_landed_jet(e, dt)
+	if e.is_jet():
+		_tick_jet(e, dt)
+		e.last_pos = e.pos
 		return
 	match e.state:
-		"idle", "guard":
-			if e.is_jet():
-				_jet_go_home(e)
+		"idle":
+			if e.has_weapons():
+				_auto_acquire(e, dt)
+		"guard":
+			if not e.path.is_empty() and e.path_i < e.path.size():
+				_follow_path(e, dt)
 			elif e.has_weapons():
 				_auto_acquire(e, dt)
 		"move":
 			if _follow_path(e, dt):
-				if e.is_jet():
-					_jet_go_home(e)
-				else:
-					_next_order(e)
+				_next_order(e)
 		"amove":
 			if not _auto_acquire(e, dt):
 				if _follow_path(e, dt):
 					_next_order(e)
 		"attack":
 			_do_attack(e, dt)
+		"attack_ground":
+			_do_attack_ground(e, dt)
 		"gather":
 			_do_gather(e, dt)
 		"build":
@@ -343,8 +362,6 @@ func _tick_unit(e: Ent, dt: float) -> void:
 			_do_repair(e, dt)
 		"capture":
 			_do_capture(e, dt)
-		"return":
-			_do_return(e, dt)
 	e.last_pos = e.pos
 
 func _next_order(e: Ent) -> void:
@@ -352,12 +369,20 @@ func _next_order(e: Ent) -> void:
 	e.target_id = -1
 	e.path = PackedVector2Array()
 	e.path_i = 0
-	e.guard_pos = e.pos
 	if not e.resume.is_empty():
 		var r: Dictionary = e.resume
 		e.resume = {}
+		if r["state"] == "guard":
+			e.state = "guard"
+			e.guard_pos = r["goal"]
+			e.guard_radius = GUARD_RADIUS
+			if not e.is_jet():
+				_set_path(e, e.guard_pos)
+			return
 		_order_move(e, r["goal"], r["state"])
 		return
+	e.guard_pos = e.pos
+	e.guard_radius = 0.0
 	if not e.queue.is_empty():
 		var c: Dictionary = e.queue.pop_front()
 		_apply_unit_cmd(e, c)
@@ -476,9 +501,9 @@ func _order_move(e: Ent, goal: Vector2, state := "move") -> void:
 	e.state = state
 	e.target_id = -1
 	e.goal = goal
-	e.landed = false
 	_set_path(e, goal)
 
+## Target scanning for idle / guard / attack-move. Returns true if attacking.
 ## Target scanning for idle / guard / attack-move. Returns true if attacking.
 func _auto_acquire(e: Ent, dt: float) -> bool:
 	e.acquire_t -= dt
@@ -492,16 +517,20 @@ func _auto_acquire(e: Ent, dt: float) -> bool:
 	var rng := e.vision
 	for w in e.weapon_ids():
 		rng = maxf(rng, float(Data.WEAPONS[w]["range"]))
+	var centre := e.pos
+	if e.state == "guard" and e.guard_radius > 0.0:
+		centre = e.guard_pos
+		rng = maxf(rng, e.guard_radius + 10.0)
 	var best: Ent = null
 	var best_score := 1e18
-	for o: Ent in query(e.pos, rng):
+	for o: Ent in query(centre, rng):
 		if o == e or not o.alive or o.owner == e.owner or o.owner < 0:
 			continue
 		if _is_stealthed(o) and not o.detected:
 			continue
 		if _pick_weapon(e, o) < 0:
 			continue
-		var d := e.pos.distance_to(o.pos)
+		var d := centre.distance_to(o.pos)
 		if d > rng:
 			continue
 		var score := d
@@ -516,8 +545,10 @@ func _auto_acquire(e: Ent, dt: float) -> bool:
 		return false
 	if e.state == "amove":
 		e.resume = {"state": "amove", "goal": e.goal}
-	elif e.state == "guard" or e.state == "idle":
-		e.guard_pos = e.pos if e.state == "idle" else e.guard_pos
+	elif e.state == "guard":
+		e.resume = {"state": "guard", "goal": e.guard_pos}
+	elif e.state == "idle":
+		e.guard_pos = e.pos
 	e.state = "attack"
 	e.target_id = best.id
 	e.path = PackedVector2Array()
@@ -545,7 +576,7 @@ func _pick_weapon(e: Ent, t: Ent) -> int:
 		var wd: Dictionary = Data.WEAPONS[ws[i]]
 		if not _weapon_available(e, ws[i]):
 			continue
-		if t.is_air() and not t.landed:
+		if t.is_air() and t.flight != "parked":
 			if not wd["aa"]:
 				continue
 		elif not wd["ag"]:
@@ -600,33 +631,96 @@ func _do_attack(e: Ent, dt: float) -> void:
 			return
 		if e.cds[wi] <= 0.0 and (int(wd.get("clip", 0)) == 0 or e.clip[wi] > 0):
 			_fire(e, wi, t)
-		elif int(wd.get("clip", 0)) > 0 and e.clip[wi] <= 0 and float(wd.get("reload", 0.0)) < 0.0:
-			# out of ammo: jets return to base
-			e.ammo_empty = true
-			e.target_id = -1
-			_jet_go_home(e)
 		return
 	# out of range: chase
 	if e.is_building or not e.can_move():
 		return
-	if not e.is_building and e.state == "attack" and e.resume.is_empty() and e.target_id >= 0 and e.pos.distance_to(e.guard_pos) > 26.0 and not e.is_air() and e.def.get("cat", "") != "air" and _was_auto(e):
-		# wandered too far from post while auto-engaging
+	# leash: units that engaged on their own don't wander far from their post
+	var leash := 26.0
+	if not e.resume.is_empty() and e.resume["state"] == "guard":
+		leash = e.guard_radius + 6.0
+	if _was_auto(e) and e.pos.distance_to(e.guard_pos) > leash:
 		e.target_id = -1
-		_order_move(e, e.guard_pos)
+		if not e.resume.is_empty():
+			_next_order(e)
+		else:
+			_order_move(e, e.guard_pos)
 		return
 	e.repath_t -= dt
 	if e.repath_t <= 0.0 or e.path.is_empty():
 		e.repath_t = 0.6
 		var goal := t.pos
 		if t.is_building:
-			goal = grid.center_of(grid.approach_cell(e.pos, t.pos, t.def["fp"]))
+			goal = grid.center_of(grid.approach_cell(e.pos, t.cells))
 		_set_path(e, goal)
+	_follow_path(e, dt)
+
+## Force-fire at a ground position (artillery / clearing / attacking own or neutral things nearby).
+func _do_attack_ground(e: Ent, dt: float) -> void:
+	var wi := -1
+	var ws := e.weapon_ids()
+	for i in range(ws.size()):
+		var wd0: Dictionary = Data.WEAPONS[ws[i]]
+		if wd0["ag"] and _weapon_available(e, ws[i]):
+			wi = i
+			break
+	if wi < 0:
+		_next_order(e)
+		return
+	var wid: String = ws[wi]
+	var wd: Dictionary = Data.WEAPONS[wid]
+	var rng: float = wd["range"]
+	var min_rng: float = wd.get("min_range", 0.0)
+	var d := e.pos.distance_to(e.goal)
+	var want := atan2(e.goal.x - e.pos.x, e.goal.y - e.pos.y)
+	if d <= rng and d >= min_rng:
+		if e.def.get("turret", false):
+			e.turret_yaw = want
+		elif not e.is_building:
+			var turn := deg_to_rad(float(e.def.get("turn", 180.0))) * dt * 2.0
+			var diff := wrapf(want - e.yaw, -PI, PI)
+			e.yaw = wrapf(e.yaw + clampf(diff, -turn, turn), -PI, PI)
+			if absf(wrapf(want - e.yaw, -PI, PI)) > 0.5 and not e.is_air():
+				return
+		if e.is_building and not e.powered and wd.get("needs_power", false):
+			return
+		if e.cds[wi] <= 0.0 and (int(wd.get("clip", 0)) == 0 or e.clip[wi] > 0):
+			_fire_at_pos(e, wi, e.goal)
+		return
+	if e.is_building or not e.can_move():
+		return
+	if e.path.is_empty():
+		_set_path(e, e.goal)
 	_follow_path(e, dt)
 
 func _was_auto(e: Ent) -> bool:
 	return e.queue.is_empty() and e.guard_pos != Vector2.ZERO and not e.def.get("gatherer", false)
 
 func _fire(e: Ent, wi: int, t: Ent) -> void:
+	var wid: String = e.weapon_ids()[wi]
+	var wd: Dictionary = Data.WEAPONS[wid]
+	var dmg := _consume_shot(e, wi)
+	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, t.pos.x, t.pos.y, t.alt, t.id], "o": e.owner})
+	var spd := float(wd.get("speed", 0.0))
+	if spd <= 0.0:
+		_apply_hit(e, wid, t, t.pos, dmg)
+	else:
+		var d := e.pos.distance_to(t.pos)
+		shots.append({"t": time + d / spd, "wid": wid, "tid": t.id, "pos": t.pos, "dmg": dmg, "aid": e.id, "owner": e.owner})
+
+func _fire_at_pos(e: Ent, wi: int, pos: Vector2) -> void:
+	var wid: String = e.weapon_ids()[wi]
+	var wd: Dictionary = Data.WEAPONS[wid]
+	var dmg := _consume_shot(e, wi)
+	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, pos.x, pos.y, 0.0, -1], "o": e.owner})
+	var spd := float(wd.get("speed", 0.0))
+	if spd <= 0.0:
+		_apply_hit(e, wid, null, pos, dmg)
+	else:
+		shots.append({"t": time + e.pos.distance_to(pos) / spd, "wid": wid, "tid": -1, "pos": pos, "dmg": dmg, "aid": e.id, "owner": e.owner})
+
+## Cooldown / clip bookkeeping for one shot; returns the damage it will do.
+func _consume_shot(e: Ent, wi: int) -> float:
 	var wid: String = e.weapon_ids()[wi]
 	var wd: Dictionary = Data.WEAPONS[wid]
 	e.cds[wi] = float(wd["cd"])
@@ -642,13 +736,7 @@ func _fire(e: Ent, wi: int, t: Ent) -> void:
 	var dmg: float = wd["dmg"] * e.vet_dmg()
 	if e.owner >= 0 and wd["type"] == "JET_MISSILES" and players[e.owner]["upgrades"].has("laser_missiles"):
 		dmg *= 1.25
-	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, t.pos.x, t.pos.y, t.alt, t.id], "o": e.owner})
-	var spd := float(wd.get("speed", 0.0))
-	if spd <= 0.0:
-		_apply_hit(e, wid, t, t.pos, dmg)
-	else:
-		var d := e.pos.distance_to(t.pos)
-		shots.append({"t": time + d / spd, "wid": wid, "tid": t.id, "pos": t.pos, "dmg": dmg, "aid": e.id, "owner": e.owner})
+	return dmg
 
 func _tick_shots() -> void:
 	if shots.is_empty():
@@ -686,9 +774,9 @@ func _apply_hit(attacker: Ent, wid: String, target: Ent, pos: Vector2, dmg: floa
 			continue
 		if o.owner == own and own >= 0:
 			continue
-		if o.owner < 0 and dtype != "PARTICLE_BEAM":
+		if o.owner < 0 and dtype != "PARTICLE_BEAM" and target != null:
 			continue
-		if o.is_air() and not o.landed and not wd["aa"]:
+		if o.is_air() and o.flight != "parked" and not wd["aa"]:
 			continue
 		var d := o.pos.distance_to(pos) - o.radius
 		if d <= radius:
@@ -717,22 +805,209 @@ func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 		destroy(t, "killed", attacker)
 
 # ---- jets -------------------------------------------------------------------
-func _jet_go_home(e: Ent) -> void:
-	if e.home_id < 0 or ents.get(e.home_id) == null or not ents[e.home_id].alive:
+## Fixed-wing aircraft: taxi/takeoff along the runway, fly with a minimum speed
+## and a turn rate (so they arc and make attack passes), loiter in circles when
+## they have nowhere to be, and land back on their pad to rearm. With no
+## airfield left they circle and slowly lose airframe integrity.
+func _tick_jet(e: Ent, dt: float) -> void:
+	var home: Ent = ents.get(e.home_id)
+	if home != null and (not home.alive or home.owner != e.owner):
+		home = null
 		e.home_id = -1
-		for b: Ent in ents.values():
-			if b.alive and b.owner == e.owner and b.type == "airfield" and b.complete and _airfield_load(b) < int(b.def.get("pads", 4)):
-				e.home_id = b.id
-				break
+	match e.flight:
+		"parked":
+			e.alt = 0.0
+			if home == null:
+				e.flight = "fly"    # airfield vanished under us
+				e.air_spd = e.speed
+				return
+			e.pos = _pad_pos(home, _pad_index(home, e))
+			e.yaw = atan2(_runway_dir(home).x, _runway_dir(home).y)
+			var full := true
+			for i in range(e.clip.size()):
+				if e.clip[i] <= 0:
+					full = false
+			if full:
+				e.ammo_empty = false
+			if e.state == "idle" and not e.queue.is_empty():
+				var c: Dictionary = e.queue.pop_front()
+				_apply_unit_cmd(e, c)
+			if e.state != "idle" and e.state != "return" and (full or e.state == "move"):
+				e.flight = "takeoff"
+				e.air_spd = 0.0
+				e.timer = 0.0
+			elif e.state == "return":
+				e.state = "idle"
+		"takeoff":
+			var dir := _runway_dir(home) if home != null else Vector2(sin(e.yaw), cos(e.yaw))
+			e.yaw = atan2(dir.x, dir.y)
+			e.air_spd = minf(e.speed, e.air_spd + e.speed * 0.6 * dt)
+			e.pos += dir * e.air_spd * dt
+			e.timer += dt
+			if e.timer > 1.2:
+				e.alt = move_toward(e.alt, float(e.def.get("alt", 20.0)), 7.0 * dt)
+			if e.alt >= float(e.def.get("alt", 20.0)) * 0.6:
+				e.flight = "fly"
+				e.air_spd = e.speed
+		"fly":
+			_jet_fly(e, dt, home)
+
+func _jet_steer(e: Ent, to: Vector2, dt: float, spd_mult := 1.0) -> void:
+	var want := atan2(to.x - e.pos.x, to.y - e.pos.y)
+	var turn := deg_to_rad(float(e.def.get("turn", 120.0))) * dt
+	var diff := wrapf(want - e.yaw, -PI, PI)
+	e.yaw = wrapf(e.yaw + clampf(diff, -turn, turn), -PI, PI)
+	var spd := e.speed * spd_mult
+	e.pos += Vector2(sin(e.yaw), cos(e.yaw)) * spd * dt
+	e.pos.x = clampf(e.pos.x, 2.0, map_size - 2.0)
+	e.pos.y = clampf(e.pos.y, 2.0, map_size - 2.0)
+
+## Loiter: fly a circle of radius r around c.
+func _jet_loiter(e: Ent, c: Vector2, dt: float, r := 28.0) -> void:
+	var rel := e.pos - c
+	var target := c + Vector2(r, 0)
+	if rel.length() > 1.0:
+		var tangent := Vector2(-rel.y, rel.x).normalized()
+		target = c + rel.normalized() * r + tangent * 14.0
+	_jet_steer(e, target, dt)
+
+func _jet_fly(e: Ent, dt: float, home: Ent) -> void:
+	if e.state != "return":
+		e.alt = move_toward(e.alt, float(e.def.get("alt", 20.0)), 6.0 * dt)
+	match e.state:
+		"attack":
+			var t: Ent = ents.get(e.target_id)
+			if t == null or not t.alive or (_is_stealthed(t) and not t.detected):
+				_next_order(e)
+				return
+			var wi := _pick_weapon(e, t)
+			if wi < 0:
+				_next_order(e)
+				return
+			var wd: Dictionary = Data.WEAPONS[e.weapon_ids()[wi]]
+			if int(wd.get("clip", 0)) > 0 and e.clip[wi] <= 0:
+				e.ammo_empty = true
+				_jet_return_home(e)
+				return
+			_jet_pass(e, dt, t.pos, edge_dist(e.pos, t), wd, wi, t)
+		"attack_ground":
+			var wi := 0
+			var wd: Dictionary = Data.WEAPONS[e.weapon_ids()[wi]]
+			if int(wd.get("clip", 0)) > 0 and e.clip[wi] <= 0:
+				e.ammo_empty = true
+				_jet_return_home(e)
+				return
+			_jet_pass(e, dt, e.goal, e.pos.distance_to(e.goal), wd, wi, null)
+		"move":
+			_jet_steer(e, e.goal, dt)
+			if e.pos.distance_to(e.goal) < 10.0:
+				_next_order(e)
+		"guard":
+			if not _auto_acquire(e, dt):
+				_jet_loiter(e, e.guard_pos, dt)
+		"return":
+			if home == null:
+				e.state = "idle"
+				return
+			_jet_land(e, dt, home)
+		_:
+			if home != null:
+				_jet_return_home(e)
+			else:
+				_jet_orphan(e, dt)
+
+## One attack run: line up, fire when in range and roughly ahead, overshoot, turn around.
+func _jet_pass(e: Ent, dt: float, tp: Vector2, d: float, wd: Dictionary, wi: int, t: Ent) -> void:
+	var want := atan2(tp.x - e.pos.x, tp.y - e.pos.y)
+	var off := absf(wrapf(want - e.yaw, -PI, PI))
+	if e.timer > 0.0:
+		e.timer -= dt
+		_jet_steer(e, e.pos + Vector2(sin(e.yaw), cos(e.yaw)) * 50.0, dt)
+		return
+	_jet_steer(e, tp, dt)
+	if d <= float(wd["range"]) and off < 0.6 and e.cds[wi] <= 0.0 and (int(wd.get("clip", 0)) == 0 or e.clip[wi] > 0):
+		if t != null:
+			_fire(e, wi, t)
+		else:
+			_fire_at_pos(e, wi, tp)
+	elif d < 14.0 and off > 1.3:
+		e.timer = 1.6
+
+func _jet_return_home(e: Ent) -> void:
+	if e.home_id < 0 or ents.get(e.home_id) == null:
+		_jet_find_home(e)
 	if e.home_id < 0:
 		e.state = "idle"
 		return
 	e.state = "return"
 	e.target_id = -1
-	var home: Ent = ents[e.home_id]
-	e.goal = _pad_pos(home, _pad_index(home, e))
-	e.path = PackedVector2Array([e.goal])
-	e.path_i = 0
+	e.land_phase = 0
+	e.timer = 0.0
+	e.flight = "fly"
+
+func _jet_find_home(e: Ent) -> void:
+	e.home_id = -1
+	for b: Ent in ents.values():
+		if b.alive and b.owner == e.owner and b.type == "airfield" and b.complete and _airfield_load(b) < int(b.def.get("pads", 4)):
+			e.home_id = b.id
+			return
+
+## No airfield: circle where we are and bleed out.
+func _jet_orphan(e: Ent, dt: float) -> void:
+	e.orphan_t += dt
+	if e.orphan_t > 2.0:
+		e.orphan_t = 0.0
+		_jet_find_home(e)
+		if e.home_id >= 0:
+			_jet_return_home(e)
+			return
+	if e.guard_pos == Vector2.ZERO:
+		e.guard_pos = e.pos
+	_jet_loiter(e, e.guard_pos, dt)
+	e.hp -= e.max_hp * ORPHAN_DRAIN * dt
+	if e.hp <= 0.0:
+		destroy(e, "killed")
+
+## Landing: line up on the runway from the approach side, then descend onto the pad.
+func _jet_land(e: Ent, dt: float, home: Ent) -> void:
+	var dir := _runway_dir(home)
+	var pad := _pad_pos(home, _pad_index(home, e))
+	var approach := pad - dir * 45.0
+	approach.x = clampf(approach.x, 8.0, map_size - 8.0)
+	approach.y = clampf(approach.y, 8.0, map_size - 8.0)
+	if e.land_phase == 0:
+		e.alt = move_toward(e.alt, float(e.def.get("alt", 20.0)), 6.0 * dt)
+		var da := e.pos.distance_to(approach)
+		_jet_steer(e, approach, dt, 0.55 if da < 45.0 else 1.0)
+		e.timer += dt
+		if da < 20.0 or e.timer > 14.0:
+			e.land_phase = 1
+			e.timer = 0.0
+	else:
+		var want := atan2(dir.x, dir.y)
+		var d := e.pos.distance_to(pad)
+		var frac := clampf(d / 55.0, 0.0, 1.0)
+		e.alt = float(e.def.get("alt", 20.0)) * frac * 0.9
+		# slow final: a 10 m/s jet with 120 deg/s turn spirals onto the pad from anywhere
+		_jet_steer(e, pad, dt, 0.28 + 0.4 * frac)
+		if d < 4.0:
+			e.flight = "parked"
+			e.alt = 0.0
+			e.pos = pad
+			e.yaw = want
+			e.land_phase = 0
+			for i in range(e.clip.size()):
+				if e.clip[i] <= 0:
+					e.reload_t[i] = 8.0
+			e.state = "idle"
+			e.target_id = -1
+			if not e.resume.is_empty():
+				var r: Dictionary = e.resume
+				e.resume = {}
+				if r["state"] == "guard":
+					e.state = "guard"
+					e.guard_pos = r["goal"]
+					e.guard_radius = GUARD_RADIUS
 
 func _airfield_load(b: Ent) -> int:
 	var n := 0
@@ -752,47 +1027,6 @@ func _pad_index(b: Ent, e: Ent) -> int:
 				return i
 			i += 1
 	return 0
-
-func _do_return(e: Ent, dt: float) -> void:
-	if e.home_id < 0:
-		_jet_go_home(e)
-		if e.home_id < 0:
-			e.state = "idle"
-			return
-	var home: Ent = ents.get(e.home_id)
-	if home == null or not home.alive:
-		e.home_id = -1
-		return
-	e.goal = _pad_pos(home, _pad_index(home, e))
-	var d := e.pos.distance_to(e.goal)
-	if d < 12.0:
-		e.alt = move_toward(e.alt, 0.0, 6.0 * dt)
-		e.speed = float(e.def["speed"]) * 0.5
-	if _move_toward(e, e.goal, dt, true) and e.alt < 0.5:
-		e.landed = true
-		e.state = "idle"
-		e.speed = float(e.def["speed"])
-		e.alt = 0.0
-		e.yaw = 0.0
-		for i in range(e.clip.size()):
-			if e.clip[i] <= 0:
-				e.reload_t[i] = 8.0
-	elif d >= 12.0:
-		e.speed = float(e.def["speed"])
-		var talt := float(e.def.get("alt", 10.0))
-		e.alt = move_toward(e.alt, talt, 8.0 * dt)
-
-func _tick_landed_jet(e: Ent, dt: float) -> void:
-	e.alt = 0.0
-	var full := true
-	for i in range(e.clip.size()):
-		if e.clip[i] <= 0:
-			full = false
-	if full:
-		e.ammo_empty = false
-	if not e.queue.is_empty():
-		var c: Dictionary = e.queue.pop_front()
-		_apply_unit_cmd(e, c)
 
 # ---- gathering ----------------------------------------------------------------
 func _nearest_dock(e: Ent) -> Ent:
@@ -854,13 +1088,13 @@ func _do_gather(e: Ent, dt: float) -> void:
 		if d > 3.0:
 			_move_toward(e, c.pos, dt)
 			return
-		e.alt = move_toward(e.alt, 3.0, 8.0 * dt)
+		e.alt = move_toward(e.alt, 4.0, 8.0 * dt)
 		e.timer += dt
-		if e.timer >= 1.0:
+		if e.timer >= 3.0:
 			e.timer = 0.0
 			var val := float(e.carry * Data.BOX_VALUE) * float(players[e.owner]["income_mult"])
 			players[e.owner]["cash"] += val
-			events.append({"k": "cash", "p": c.pos, "d": [int(val)], "o": e.owner, "only": e.owner})
+			events.append({"k": "cash", "p": c.pos, "d": [int(val), c.id], "o": e.owner, "only": e.owner})
 			e.carry = 0
 			var dock: Ent = ents.get(e.dock_id)
 			if dock == null or not dock.alive or dock.boxes <= 0:
@@ -873,13 +1107,10 @@ func _do_gather(e: Ent, dt: float) -> void:
 ## Distance from a point to the edge of an entity (footprint rectangle for buildings).
 func edge_dist(p: Vector2, t: Ent) -> float:
 	if t.is_building:
-		var fp: Vector2i = t.def["fp"]
-		var dx := maxf(absf(p.x - t.pos.x) - fp.x, 0.0)
-		var dy := maxf(absf(p.y - t.pos.y) - fp.y, 0.0)
-		return sqrt(dx * dx + dy * dy)
+		return PathGrid.rect_dist(p, t.pos, t.def["fp"], t.yaw)
 	return p.distance_to(t.pos) - t.radius
 
-func _approach_building(e: Ent, b: Ent, dt: float, reach := 2.6) -> bool:
+func _approach_building(e: Ent, b: Ent, dt: float, reach := 4.2) -> bool:
 	var d := edge_dist(e.pos, b)
 	if d <= reach:
 		e.path = PackedVector2Array()
@@ -887,7 +1118,7 @@ func _approach_building(e: Ent, b: Ent, dt: float, reach := 2.6) -> bool:
 	e.repath_t -= dt
 	if e.path.is_empty() or e.repath_t <= 0.0:
 		e.repath_t = 2.0
-		_set_path(e, grid.center_of(grid.approach_cell(e.pos, b.pos, b.def["fp"])))
+		_set_path(e, grid.center_of(grid.approach_cell(e.pos, b.cells)))
 	_follow_path(e, dt)
 	return false
 
@@ -948,6 +1179,8 @@ func _do_capture(e: Ent, dt: float) -> void:
 		b.capture_by = e.owner
 		b.capture_t = 0.0
 	b.capture_t += dt
+	if debug and tick % 40 == 0:
+		print("[Sim] capture %s#%d by p%d %.1f/%.0f" % [b.type, b.id, e.owner, b.capture_t, CAPTURE_TIME])
 	if b.capture_t >= CAPTURE_TIME:
 		var old := b.owner
 		b.owner = e.owner
@@ -998,7 +1231,7 @@ func _tick_building(e: Ent, dt: float) -> void:
 			e.income_t = 0.0
 			var amt := float(e.def["income"]["amount"]) * float(pl["income_mult"])
 			pl["cash"] += amt
-			events.append({"k": "cash", "p": e.pos, "d": [int(amt)], "o": e.owner, "only": e.owner})
+			events.append({"k": "cash", "p": e.pos, "d": [int(amt), e.id], "o": e.owner, "only": e.owner})
 	if e.def.has("superweapon") and not e.sw_ready:
 		if e.powered:
 			e.sw_t += dt
@@ -1027,7 +1260,7 @@ func _produce(b: Ent, type: String) -> void:
 				idx += 1
 		u = spawn(type, b.owner, _pad_pos(b, idx))
 		u.home_id = b.id
-		u.landed = true
+		u.flight = "parked"
 		u.alt = 0.0
 		u.yaw = 0.0
 	elif d.get("cat", "") == "air":
@@ -1074,7 +1307,7 @@ func _tick_heal(dt: float) -> void:
 		for o: Ent in query(h.pos, float(hd["radius"])):
 			if o == h or o.owner != h.owner or o.is_building or o.cat() != hd["cat"]:
 				continue
-			if o.is_jet() and not o.landed:
+			if o.is_jet() and o.flight != "parked":
 				continue
 			o.hp = minf(o.max_hp, o.hp + float(hd["rate"]) * dt)
 	# heroic units self-heal
@@ -1154,7 +1387,8 @@ func _update_vision() -> void:
 				v.stamp(r["pos"], r["radius"])
 				keep.append(r)
 		v.reveals = keep
-		session.s_fog(players[p]["peer"], v.packed())
+		if players[p]["peer"] >= 0:
+			session.s_fog(players[p]["peer"], v.packed())
 		# ghost buildings that died out of sight
 		var done := []
 		for id in pending_despawn[p]:
@@ -1189,6 +1423,9 @@ func _send_spawn(p: int, e: Ent) -> void:
 
 func _send_snapshots() -> void:
 	for p in range(players.size()):
+		if players[p]["peer"] < 0:
+			events_seen_by_bot(p)
+			continue
 		var buf := StreamPeerBuffer.new()
 		buf.put_u32(tick)
 		var count_pos := buf.get_position()
@@ -1261,6 +1498,9 @@ func _send_snapshots() -> void:
 			session.s_events(players[p]["peer"], evs)
 	events.clear()
 
+func events_seen_by_bot(_p: int) -> void:
+	pass
+
 func _send_pstates() -> void:
 	var sw := {}
 	for e: Ent in ents.values():
@@ -1274,11 +1514,13 @@ func _send_pstates() -> void:
 			docks[e.id] = e.boxes
 	for p in range(players.size()):
 		var pl: Dictionary = players[p]
+		if pl["peer"] < 0:
+			continue
 		var st := {
 			"cash": int(pl["cash"]), "pp": pl["pp"], "pu": pl["pu"], "low": pl["low"], "rank": pl["rank"], "xp": int(pl["xp"]),
 			"next": Data.RANK_XP[pl["rank"]] if pl["rank"] < 5 else -1, "points": pl["points"], "powers": pl["powers"].duplicate(),
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
-			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "beam": beams.size() > 0 and beams[0]["owner"] == p,
+			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "beam": beams.size() > 0 and beams[0]["owner"] == p,
 		}
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
@@ -1298,6 +1540,8 @@ func _send_pstates() -> void:
 				if not e.upg_done.is_empty():
 					st["upg_done"][e.id] = e.upg_done.keys()
 			st["hp"][e.id] = [int(e.hp), int(e.max_hp)]
+			if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
+				st["guard"][e.id] = [e.guard_pos.x, e.guard_pos.y, e.guard_radius]
 		session.s_pstate(pl["peer"], st)
 
 func _check_victory() -> void:
@@ -1334,7 +1578,7 @@ func cmd(p: int, c: Dictionary) -> void:
 		return
 	var t: String = c.get("t", "")
 	match t:
-		"move", "amove", "attack", "stop", "guard", "gather", "repair", "capture":
+		"move", "amove", "attack", "attack_ground", "stop", "guard", "gather", "repair", "capture":
 			var q: bool = c.get("q", false)
 			for id in c.get("ids", []):
 				var e: Ent = ents.get(int(id))
@@ -1375,7 +1619,7 @@ func cmd(p: int, c: Dictionary) -> void:
 		"sw_steer":
 			players[p]["sw_steer"] = Vector2(float(c["x"]), float(c["y"]))
 		"cheat_cash":
-			if solo:
+			if solo or debug:
 				players[p]["cash"] += 10000.0
 
 func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
@@ -1385,35 +1629,54 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 		"move", "amove":
 			var goal := Vector2(float(c["x"]), float(c["y"]))
 			goal = _formation_goal(e, ids, goal)
-			if e.is_jet() and e.landed:
-				e.landed = false
 			if e.is_building or not e.can_move():
 				return
+			e.guard_radius = 0.0
 			_order_move(e, goal, t)
 		"attack":
 			var tgt: Ent = ents.get(int(c.get("tid", -1)))
-			if tgt == null or not tgt.alive or tgt.owner == e.owner:
+			if tgt == null or not tgt.alive:
 				return
-			if tgt.owner < 0 and tgt.def.get("neutral", false) and not tgt.def.get("capturable", false):
+			var force: bool = c.get("force", false)
+			if tgt.owner == e.owner and not force:
+				return
+			if tgt.owner < 0 and tgt.def.get("neutral", false) and not tgt.def.get("capturable", false) and not force:
 				return
 			if _pick_weapon(e, tgt) < 0:
-				if e.can_move():
+				if e.can_move() and not force:
 					_order_move(e, tgt.pos)
 				return
 			e.state = "attack"
 			e.target_id = tgt.id
-			e.landed = false
 			e.path = PackedVector2Array()
 			e.repath_t = 0.0
 			e.guard_pos = Vector2.ZERO
+			e.guard_radius = 0.0
+		"attack_ground":
+			if not e.has_weapons():
+				return
+			e.state = "attack_ground"
+			e.target_id = -1
+			e.goal = Vector2(float(c["x"]), float(c["y"]))
+			e.path = PackedVector2Array()
+			e.guard_pos = Vector2.ZERO
+			e.guard_radius = 0.0
 		"stop":
 			e.clear_orders()
 			e.resume = {}
 			e.guard_pos = e.pos
+			e.guard_radius = 0.0
 		"guard":
 			e.clear_orders()
+			e.resume = {}
 			e.state = "guard"
-			e.guard_pos = e.pos
+			e.guard_radius = GUARD_RADIUS
+			if c.has("x"):
+				e.guard_pos = _formation_goal(e, ids, Vector2(float(c["x"]), float(c["y"])))
+				if not e.is_air():
+					_set_path(e, e.guard_pos)
+			else:
+				e.guard_pos = e.pos
 		"gather":
 			if e.def.get("gatherer", 0) <= 0:
 				return
@@ -1432,7 +1695,10 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 			e.path = PackedVector2Array()
 			e.repath_t = 0.0
 		"capture":
-			if e.type != "ranger" or not players[e.owner]["upgrades"].has("capture"):
+			if e.type != "ranger":
+				return
+			if not players[e.owner]["upgrades"].has("capture"):
+				session.s_msg(players[e.owner]["peer"], "Requires the Capture Building upgrade (Barracks)")
 				return
 			var b: Ent = ents.get(int(c.get("tid", -1)))
 			if b == null or not b.alive or not b.is_building or b.owner == e.owner or b.type == "supply_dock":
@@ -1482,12 +1748,13 @@ func _cmd_build(p: int, c: Dictionary) -> void:
 	if pl["cash"] < float(d["cost"]):
 		session.s_msg(pl["peer"], "Insufficient funds")
 		return
-	var pos := PathGrid.snap_center(Vector2(float(c["x"]), float(c["y"])), d["fp"])
-	if not placement_ok(p, type, pos):
+	var yaw := wrapf(float(c.get("yaw", 0.0)), -PI, PI)
+	var pos := PathGrid.snap_center(Vector2(float(c["x"]), float(c["y"])), d["fp"], yaw)
+	if not placement_ok(p, type, pos, yaw):
 		session.s_msg(pl["peer"], "Cannot build there")
 		return
 	pl["cash"] -= float(d["cost"])
-	var site := spawn(type, p, pos, false)
+	var site := spawn(type, p, pos, false, yaw)
 	site.builder_id = dz.id
 	dz.queue.clear()
 	dz.resume = {}
@@ -1497,23 +1764,21 @@ func _cmd_build(p: int, c: Dictionary) -> void:
 	dz.repath_t = 0.0
 	events.append({"k": "place", "p": pos, "d": [site.id], "o": p})
 
-func placement_ok(p: int, type: String, pos: Vector2) -> bool:
+func placement_ok(p: int, type: String, pos: Vector2, yaw := 0.0) -> bool:
 	var d: Dictionary = Data.BUILDINGS[type]
 	var fp: Vector2i = d["fp"]
 	var half := Vector2(fp) * 1.0
-	if pos.x - half.x < 6.0 or pos.y - half.y < 6.0 or pos.x + half.x > map_size - 6.0 or pos.y + half.y > map_size - 6.0:
+	var r := half.length()
+	if pos.x - r < 6.0 or pos.y - r < 6.0 or pos.x + r > map_size - 6.0 or pos.y + r > map_size - 6.0:
 		return false
-	if not grid.footprint_free(pos, fp, 1):
+	if not grid.footprint_free(pos, fp, 1, yaw):
 		return false
 	# units standing in the footprint (other than air) block placement
-	for o: Ent in query(pos, maxf(half.x, half.y) + 1.0):
+	for o: Ent in query(pos, r + 1.0):
 		if o.is_building or o.is_air():
 			continue
-		if absf(o.pos.x - pos.x) < half.x + o.radius and absf(o.pos.y - pos.y) < half.y + o.radius:
+		if PathGrid.rect_dist(o.pos, pos, fp, yaw) < o.radius:
 			return false
-	if type == "supply_center":
-		return true
-	# must be near an existing own structure (Generals lets you build anywhere; keep a generous radius so bases stay coherent)
 	return true
 
 func _cmd_produce(p: int, c: Dictionary) -> void:

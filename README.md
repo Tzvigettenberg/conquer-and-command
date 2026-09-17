@@ -21,15 +21,39 @@ Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0
 ## Controls
 | | |
 |---|---|
-| Left-drag / click | select (double-click = all of that type on screen, Shift adds) |
-| Right-click | move / attack / repair (dozer) / gather (Chinook) / capture (Ranger + upgrade) — Shift queues |
+| Left-drag / click | select (double-click = all of that type on screen, Shift adds). Buildings are picked by their whole model. |
+| Right-click | move / attack / repair (dozer) / gather (Chinook) / capture derrick (Ranger + upgrade) — Shift queues |
+| Ctrl+right-click or X | force attack: fire at a spot, a neutral structure or one of your own |
 | A + click | attack-move |
-| S / G | stop / guard |
+| G + click | guard an area (ring shown while placing; G twice = guard here). Aircraft loiter over it and fly home to rearm, then come back. |
+| S | stop |
+| Placing a building | click to place; hold the left button and drag to rotate it freely before releasing (like Generals) |
+| N | select the next Dozer · B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center |
 | Ctrl+1..9 / 1..9 | assign / recall control group (press twice to jump there) |
 | H | jump to Command Center · Space: jump to last attack alert |
-| Arrows / edge / middle-drag | scroll · wheel: zoom · Q/E: rotate |
+| Arrows / edge / middle-drag | scroll · wheel: zoom · Q / E: rotate camera |
 | Esc | cancel placement / deselect |
 | Right-click with a factory selected | set its rally point |
+| F1 | +$10,000 (solo / debug only) |
+
+## Menu
+Host → "Start vs AI" fights the built-in AI general (build order, waves, defence, powers, superweapon).
+Untick "Add AI opponent" for an empty sandbox. A second player joining replaces the AI.
+
+## Audio
+`audio/sfx` — 50 CC0 / CC-BY effects from Freesound (`audio/sfx/CREDITS.md`, re-fetch with `tools/fetch_sfx.py`).
+`audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
+`audio/music` — 12 Kevin MacLeod tracks, CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
+Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M2)
+- Aircraft: jets taxi and take off along the runway, fly with a turn radius, make attack passes, loiter in circles when guarding or homeless, land on their pad to rearm. Sell or lose the Airfield and they look for another one, else circle and slowly break up.
+- Helicopters bank and pitch with velocity, rotors spin, wheels spin, vehicles leave tyre tracks, infantry run/fire/die animations.
+- Icons for every unit, building, upgrade and power are rendered at runtime from the models.
+- Supply Docks are crate stacks that empty as you harvest; Chinooks hover 3 s to unload and "+$600" floats over the Supply Center.
+- Unpowered buildings go dark with a blue pulse. Damaged buildings smoke.
+- Mountain ridges and rocks block movement exactly where the art is.
+- AI opponent, guard areas, force attack, free building rotation, explicit Capture button, hotkeys, square minimap view.
 
 ## What's in (M1)
 - Economy: Supply Docks ($30k each), Chinooks ($600/load), Oil Derricks (capture, $200/12s + $1000), Supply Drop Zone ($1500/2min). Start $10,000.

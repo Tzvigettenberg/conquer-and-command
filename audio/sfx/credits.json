@@ -1,0 +1,240 @@
+{
+ "sniper_shot": {
+  "id": 182051,
+  "title": "Sniper Rifle Shot Sound Effect",
+  "author": "qubodup",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/182051/"
+ },
+ "gau8": {
+  "id": 163119,
+  "title": "Navy MK 15 Phalanx CIWS Anti-Air Fast Burst",
+  "author": "qubodup",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/163119/"
+ },
+ "explosion_small": {
+  "id": 186957,
+  "title": "explosion6.wav",
+  "author": "ReadeOnly",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/186957/"
+ },
+ "explosion_large": {
+  "id": 587886,
+  "title": "Explosion large",
+  "author": "SamsterBirdies",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/587886/"
+ },
+ "ricochet": {
+  "id": 394183,
+  "title": "Ricochet 2.wav",
+  "author": "saturdaysoundguy",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/394183/"
+ },
+ "metal_hit": {
+  "id": 406559,
+  "title": "hit - metallic - trailer - metal fender 02.wav",
+  "author": "Anthousai",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/406559/"
+ },
+ "tank_engine": {
+  "id": 186934,
+  "title": "engine4_loop.wav",
+  "author": "ReadeOnly",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/186934/"
+ },
+ "jet_flyby": {
+  "id": 536809,
+  "title": "Jet.ogg",
+  "author": "egomassive",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/536809/"
+ },
+ "place_building": {
+  "id": 641040,
+  "title": "GROSS IMPACT",
+  "author": "magnuswaker",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/641040/"
+ },
+ "power_up": {
+  "id": 752034,
+  "title": "Sci-Fi Gateway",
+  "author": "Bachsambora",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/752034/"
+ },
+ "repair": {
+  "id": 551497,
+  "title": "ratchet socket wrench tool",
+  "author": "AlaskaRobotics",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/551497/"
+ },
+ "capture": {
+  "id": 732209,
+  "title": "Walkie Talkie Beep",
+  "author": "SoundBiterSFX",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/732209/"
+ },
+ "superweapon_charge": {
+  "id": 701702,
+  "title": "laser-charge.wav",
+  "author": "StavSounds",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/701702/"
+ },
+ "satellite": {
+  "id": 32093,
+  "title": "jsyd_ping.wav",
+  "author": "jbum",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/32093/"
+ },
+ "plane_pass": {
+  "id": 347973,
+  "title": "Propeller plane flyby.flac",
+  "author": "YuriNikolai",
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "url": "https://freesound.org/s/347973/"
+ },
+ "ui_click": {
+  "id": 253168,
+  "title": "SFX UI Button Click",
+  "author": "suntemple",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/253168/"
+ },
+ "ui_hover": {
+  "id": 528561,
+  "title": "Soft UI Button Click",
+  "author": "Jummit",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/528561/"
+ },
+ "ui_error": {
+  "id": 699923,
+  "title": "Multimedia SFX - Error 01.wav",
+  "author": "8bitmyketison",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/699923/"
+ },
+ "ui_select": {
+  "id": 350864,
+  "title": "Blip_C_02",
+  "author": "cabled_mess",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/350864/"
+ },
+ "alert": {
+  "id": 321679,
+  "title": "Wailing alarm #2 OGG",
+  "author": "tt_runscript",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/321679/"
+ },
+ "chime": {
+  "id": 380482,
+  "title": "Chime Notification",
+  "author": "Jofae",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/380482/"
+ },
+ "fanfare": {
+  "id": 418525,
+  "title": "fasching fanfare - Karnevals Tusch [Tataa] (short)",
+  "author": "Audeption",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/418525/"
+ },
+ "victory": {
+  "id": 456966,
+  "title": "Success Fanfare Trumpets.mp3",
+  "author": "FunWithSound",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/456966/"
+ },
+ "defeat": {
+  "id": 175409,
+  "title": "wah wah sad trombone.wav",
+  "author": "kirbydx",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/175409/"
+ },
+ "wind_loop": {
+  "id": 615440,
+  "title": "Mount Horeb",
+  "author": "InChristAlone",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/615440/"
+ },
+ "scream": {
+  "id": 547181,
+  "title": "Voice_AdultMale_DeathScream_04.wav",
+  "author": "MrFossy",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/547181/"
+ },
+ "grunt": {
+  "id": 547200,
+  "title": "Voice_AdultMale_PainGrunts_04.wav",
+  "author": "MrFossy",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/547200/"
+ },
+ "crush": {
+  "id": 392883,
+  "title": "Hard Candy / Bone Crunch",
+  "author": "clif_creates",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/392883/"
+ },
+ "beep": {
+  "id": 768681,
+  "title": "Radio tuning beep",
+  "author": "LukaCafuka",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/768681/"
+ },
+ "jet_loop": {
+  "id": 534856,
+  "title": "Jet Engine",
+  "author": "m_cel",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/534856/"
+ },
+ "chinook_loop": {
+  "id": 854493,
+  "title": "UH\u201160 Black Hawk Helicopter Hover Loop 1",
+  "author": "qubodup",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/854493/"
+ },
+ "power_down": {
+  "id": 348250,
+  "title": "power-down-03.wav",
+  "author": "newagesoup",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/348250/"
+ },
+ "superweapon_fire": {
+  "id": 194312,
+  "title": " Laser gun Cannon shot.mp3 ",
+  "author": "soundmatch24",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/194312/"
+ },
+ "footsteps": {
+  "id": 436525,
+  "title": "Footsteps Gravel Running-Stop",
+  "author": "KikeVilaplana",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/436525/"
+ }
+}

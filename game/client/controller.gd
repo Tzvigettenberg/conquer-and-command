@@ -22,6 +22,11 @@ var last_click_id := -1
 var hover_id := -1
 var steer_t := 0.0
 var sig := ""
+var place_yaw := 0.0
+var place_press := Vector2(-1, -1)      # screen point where LMB went down in place mode
+var place_rotating := false
+var guard_ring: MeshInstance3D = null
+var dozer_cycle := 0
 
 func setup(_view: ClientView) -> void:
 	view = _view
@@ -49,9 +54,15 @@ func _refresh_sig() -> void:
 func hint_text() -> String:
 	match mode:
 		"place":
-			return "Place %s  ·  Left-click to build, right-click / Esc to cancel" % Data.BUILDINGS[place_type]["name"]
+			return "Place %s  ·  click to build, hold and drag to rotate, right-click / Esc to cancel" % Data.BUILDINGS[place_type]["name"]
 		"amove":
 			return "Attack-move: click a destination"
+		"guard":
+			return "Guard area: click where to guard (press G again to guard here)"
+		"force":
+			return "Force attack: click a target or the ground"
+		"capture":
+			return "Capture: click an enemy or neutral structure"
 		"rally":
 			return "Click to set the rally point"
 		"power":
@@ -84,10 +95,16 @@ func set_selection(ids: Array) -> void:
 		mode = ""
 		_clear_ghost()
 	_refresh_sig()
+	if not ids.is_empty():
+		Audio.I.ui("ui_select", -10.0)
+		var first: Puppet = view.puppets.get(ids[0])
+		if first != null and first.team == view.my_index and not first.is_building:
+			Audio.I.voice(first.type, "select")
 
 func _puppet_at(screen: Vector2) -> Puppet:
 	var best: Puppet = null
 	var best_d := PICK_RADIUS
+	var best_is_unit := false
 	for pu in view.puppets.values():
 		var p: Puppet = pu
 		if p.ghost and not p.is_building:
@@ -96,36 +113,23 @@ func _puppet_at(screen: Vector2) -> Puppet:
 		if cam.is_behind(centre):
 			continue
 		var sp := cam.to_screen(centre)
-		var r := PICK_RADIUS
+		var rect := p.screen_rect(cam)
 		if p.is_building:
-			var fp: Vector2 = Data.footprint_size(p.type)
-			# buildings: test against the projected footprint rectangle
-			var half := Vector3(fp.x * 0.5, 0, fp.y * 0.5)
-			var pts := []
-			for c in [Vector3(-half.x, 0, -half.z), Vector3(half.x, 0, -half.z), Vector3(half.x, 0, half.z), Vector3(-half.x, 0, half.z),
-					Vector3(-half.x, float(p.def.get("height", 5.0)) * 0.6, -half.z), Vector3(half.x, float(p.def.get("height", 5.0)) * 0.6, half.z)]:
-				pts.append(cam.to_screen(p.cur_pos + c))
-			var minx := 1e9
-			var miny := 1e9
-			var maxx := -1e9
-			var maxy := -1e9
-			for q in pts:
-				minx = minf(minx, q.x)
-				miny = minf(miny, q.y)
-				maxx = maxf(maxx, q.x)
-				maxy = maxf(maxy, q.y)
-			if Rect2(minx, miny, maxx - minx, maxy - miny).has_point(screen):
-				var d := sp.distance_to(screen) + 30.0   # units on top of buildings win
-				if d < best_d + 40.0 and (best == null or not (not best.is_building)):
+			if rect.size != Vector2.ZERO and rect.grow(2.0).has_point(screen) and not best_is_unit:
+				var d := sp.distance_to(screen)
+				if best == null or best.is_building and d < best_d:
 					best = p
 					best_d = d
 			continue
 		var d := sp.distance_to(screen)
+		if rect.size != Vector2.ZERO and rect.grow(3.0).has_point(screen):
+			d = minf(d, PICK_RADIUS * 0.5)
 		if p.team != view.my_index:
 			d += 4.0
-		if d < best_d:
+		if d < best_d or (best != null and best.is_building and d <= PICK_RADIUS):
 			best_d = d
 			best = p
+			best_is_unit = true
 	return best
 
 func _select_box(r: Rect2, additive: bool) -> void:
@@ -178,6 +182,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 		mouse_pos = ev.position
 		if drag_start.x >= 0 and not dragging and mouse_pos.distance_to(drag_start) > DRAG_MIN and mode == "":
 			dragging = true
+		if mode == "place" and place_press.x >= 0 and mouse_pos.distance_to(place_press) > DRAG_MIN:
+			place_rotating = true
+			var a := cam.ground_at(place_press)
+			var b := cam.ground_at(mouse_pos)
+			if a.x >= 0 and b.x >= 0 and a.distance_to(b) > 0.5:
+				place_yaw = atan2(b.x - a.x, b.y - a.y)
 		_update_hover()
 		_update_ghost()
 		return
@@ -188,12 +198,23 @@ func _unhandled_input(ev: InputEvent) -> void:
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
+				if mode == "place":
+					place_press = mb.position
+					get_viewport().set_input_as_handled()
+					return
 				if mode != "":
 					_mode_click(mb.position)
 					get_viewport().set_input_as_handled()
 					return
 				drag_start = mb.position
 			else:
+				if mode == "place" and place_press.x >= 0:
+					var anchor := place_press
+					place_press = Vector2(-1, -1)
+					place_rotating = false
+					_mode_click(anchor)
+					get_viewport().set_input_as_handled()
+					return
 				if dragging:
 					_select_box(drag_rect(), mb.shift_pressed)
 				elif drag_start.x >= 0:
@@ -204,6 +225,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			if mode != "":
 				cancel_mode()
+			elif mb.ctrl_pressed:
+				_force_attack(mb.position)
 			else:
 				_context_command(mb.position, mb.shift_pressed)
 			get_viewport().set_input_as_handled()
@@ -223,12 +246,30 @@ func _unhandled_input(ev: InputEvent) -> void:
 			KEY_S:
 				stop()
 			KEY_G:
-				guard()
+				if mode == "guard":
+					guard()
+				elif not _own_units_selected().is_empty():
+					guard_mode()
 			KEY_A:
 				if not _own_units_selected().is_empty():
 					amove_mode()
+			KEY_X:
+				if not _own_units_selected().is_empty():
+					force_mode()
 			KEY_H:
 				_jump_home()
+			KEY_N:
+				_select_next("dozer", true)
+			KEY_B:
+				_select_next("barracks", false)
+			KEY_F:
+				_select_next("war_factory", false)
+			KEY_I:
+				_select_next("airfield", false)
+			KEY_C:
+				_select_next("command_center", false)
+			KEY_Y:
+				_select_next("supply_center", false)
 			KEY_SPACE:
 				if not view.alerts.is_empty():
 					cam.jump_to(view.alerts[view.alerts.size() - 1]["p"])
@@ -313,12 +354,14 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 		if target.team != view.my_index and target.team >= 0:
 			view.send({"t": "attack", "ids": ids, "tid": target.id, "q": queue})
 			view.fx.floating_text(target.cur_pos, "✕", Color(1, 0.3, 0.3))
+			_voice_for(ids, "attack")
 			return
 		if target.type == "supply_dock":
 			var chinooks := _filter_ids(ids, func(p: Puppet) -> bool: return p.def.get("gatherer", 0) > 0)
 			var others := _filter_ids(ids, func(p: Puppet) -> bool: return p.def.get("gatherer", 0) <= 0)
 			if not chinooks.is_empty():
 				view.send({"t": "gather", "ids": chinooks, "tid": target.id, "q": queue})
+				_voice_for(chinooks, "gather")
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
 			return
@@ -327,6 +370,7 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 			var others := _filter_ids(ids, func(p: Puppet) -> bool: return not p.def.get("builder", false))
 			if not builders.is_empty():
 				view.send({"t": "repair", "ids": builders, "tid": target.id, "q": queue})
+				_voice_for(builders, "repair")
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
 			return
@@ -334,10 +378,22 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 			var rangers := _filter_ids(ids, func(p: Puppet) -> bool: return p.type == "ranger")
 			if not rangers.is_empty() and view.has_upgrade("capture"):
 				view.send({"t": "capture", "ids": rangers, "tid": target.id, "q": queue})
+				_voice_for(rangers, "capture")
 				return
 	if g.x >= 0:
 		view.send({"t": "move", "ids": ids, "x": g.x, "y": g.y, "q": queue})
 		view.fx.floating_text(Vector3(g.x, 0, g.y), "▼", Color(0.4, 1.0, 0.5))
+		_voice_for(ids, "move")
+
+func _voice_for(ids: Array, kind: String) -> void:
+	if ids.is_empty():
+		return
+	var p: Puppet = view.puppets.get(ids[rng_pick(ids.size())])
+	if p != null:
+		Audio.I.voice(p.type, kind)
+
+func rng_pick(n: int) -> int:
+	return randi() % maxi(n, 1)
 
 func _filter_ids(ids: Array, pred: Callable) -> Array:
 	var out := []
@@ -359,13 +415,47 @@ func _jump_home() -> void:
 			cam.jump_to(Vector2(pu.cur_pos.x, pu.cur_pos.z))
 			return
 
+## Cycle through own entities of a type (idle first for units), select and centre.
+func _select_next(type: String, idle_first: bool) -> void:
+	var list := []
+	for pu in view.puppets.values():
+		if pu.team == view.my_index and pu.type == type and not pu.ghost:
+			list.append(pu)
+	if list.is_empty():
+		view.on_msg("No %s" % Data.def(type)["name"])
+		return
+	list.sort_custom(func(a: Puppet, b: Puppet) -> bool: return a.id < b.id)
+	var pick: Puppet = null
+	if list.size() == 1 or not selected.has(list[0].id) and not _any_selected(list):
+		pick = list[0]
+	else:
+		for i in range(list.size()):
+			if selected.has(list[i].id):
+				pick = list[(i + 1) % list.size()]
+				break
+	if pick == null:
+		pick = list[0]
+	set_selection([pick.id])
+	cam.jump_to(Vector2(pick.cur_pos.x, pick.cur_pos.z))
+
+func _any_selected(list: Array) -> bool:
+	for p in list:
+		if selected.has(p.id):
+			return true
+	return false
+
 # ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
 func cancel_mode() -> void:
 	mode = ""
 	mode_arg = null
+	place_press = Vector2(-1, -1)
+	place_rotating = false
 	_clear_ghost()
+	if guard_ring != null:
+		guard_ring.queue_free()
+		guard_ring = null
 	_refresh_sig()
 
 func _mode_click(pos: Vector2) -> void:
@@ -374,14 +464,32 @@ func _mode_click(pos: Vector2) -> void:
 		return
 	match mode:
 		"place":
-			var snapped := PathGrid.snap_center(g, Data.BUILDINGS[place_type]["fp"])
+			var fp: Vector2i = Data.BUILDINGS[place_type]["fp"]
+			var snapped := PathGrid.snap_center(g, fp, place_yaw)
 			var dozer := _first_builder()
 			if dozer >= 0:
-				view.send({"t": "build", "id": dozer, "type": place_type, "x": snapped.x, "y": snapped.y})
+				view.send({"t": "build", "id": dozer, "type": place_type, "x": snapped.x, "y": snapped.y, "yaw": place_yaw})
+				Audio.I.voice("dozer", "build")
 			cancel_mode()
 		"amove":
 			view.send({"t": "amove", "ids": _own_units_selected(), "x": g.x, "y": g.y, "q": Input.is_key_pressed(KEY_SHIFT)})
 			view.fx.floating_text(Vector3(g.x, 0, g.y), "▼", Color(1.0, 0.5, 0.3))
+			_voice_for(_own_units_selected(), "attack")
+			cancel_mode()
+		"guard":
+			view.send({"t": "guard", "ids": _own_units_selected(), "x": g.x, "y": g.y})
+			_voice_for(_own_units_selected(), "move")
+			cancel_mode()
+		"force":
+			_force_attack(pos)
+			cancel_mode()
+		"capture":
+			var target := _puppet_at(pos)
+			if target != null and target.is_building and target.team != view.my_index:
+				var rangers := _filter_ids(_own_units_selected(), func(p: Puppet) -> bool: return p.type == "ranger")
+				view.send({"t": "capture", "ids": rangers, "tid": target.id, "q": false})
+				view.fx.floating_text(target.cur_pos, "CAPTURE", Color(1.0, 0.5, 0.9))
+				_voice_for(rangers, "capture")
 			cancel_mode()
 		"rally":
 			view.send({"t": "rally", "id": mode_arg, "x": g.x, "y": g.y})
@@ -392,6 +500,23 @@ func _mode_click(pos: Vector2) -> void:
 		"sw":
 			view.send({"t": "sw", "id": mode_arg, "x": g.x, "y": g.y})
 			cancel_mode()
+
+func _force_attack(pos: Vector2) -> void:
+	var ids := _own_units_selected()
+	if ids.is_empty():
+		return
+	var target := _puppet_at(pos)
+	if target != null and not (target.team == view.my_index and _all_selected(target)):
+		view.send({"t": "attack", "ids": ids, "tid": target.id, "force": true, "q": Input.is_key_pressed(KEY_SHIFT)})
+		view.fx.floating_text(target.cur_pos, "✕", Color(1, 0.3, 0.3))
+		return
+	var g := cam.ground_at(pos)
+	if g.x >= 0:
+		view.send({"t": "attack_ground", "ids": ids, "x": g.x, "y": g.y, "q": Input.is_key_pressed(KEY_SHIFT)})
+		view.fx.floating_text(Vector3(g.x, 0, g.y), "✕", Color(1, 0.3, 0.3))
+
+func _all_selected(p: Puppet) -> bool:
+	return selected.has(p.id)
 
 func _first_builder() -> int:
 	for p in selected_puppets():
@@ -404,6 +529,9 @@ func begin_place(type: String) -> void:
 		return
 	mode = "place"
 	place_type = type
+	place_yaw = 0.0
+	place_press = Vector2(-1, -1)
+	place_rotating = false
 	_clear_ghost()
 	ghost = Node3D.new()
 	var fp: Vector2 = Data.footprint_size(type)
@@ -434,19 +562,40 @@ func _clear_ghost() -> void:
 		ghost_mesh = null
 
 func _update_ghost() -> void:
+	if guard_ring != null:
+		var gg := cam.ground_at(mouse_pos)
+		if gg.x >= 0:
+			guard_ring.position = Vector3(gg.x, 0.2, gg.y)
 	if ghost == null:
 		return
-	var g := cam.ground_at(mouse_pos)
+	var g := cam.ground_at(place_press if place_rotating else mouse_pos)
 	if g.x < 0:
 		return
 	var fp: Vector2i = Data.BUILDINGS[place_type]["fp"]
-	var snapped := PathGrid.snap_center(g, fp)
+	var snapped := PathGrid.snap_center(g, fp, place_yaw)
 	ghost.position = Vector3(snapped.x, 0, snapped.y)
-	var ok: bool = view.placement_ok(place_type, snapped)
+	ghost.rotation.y = place_yaw
+	var ok: bool = view.placement_ok(place_type, snapped, place_yaw)
 	ghost_mesh.material_override = Visuals.flat_mat(Color(0.3, 1.0, 0.4, 0.4) if ok else Color(1.0, 0.25, 0.2, 0.5))
 
 func amove_mode() -> void:
 	mode = "amove"
+	_refresh_sig()
+
+func guard_mode() -> void:
+	mode = "guard"
+	guard_ring = Visuals.ring(World.GUARD_RADIUS, Color(0.4, 0.9, 1.0, 0.7), 0.5)
+	guard_ring.material_override = Visuals.flat_mat(Color(0.4, 0.9, 1.0, 0.6))
+	view.add_child(guard_ring)
+	_update_ghost()
+	_refresh_sig()
+
+func force_mode() -> void:
+	mode = "force"
+	_refresh_sig()
+
+func capture_mode() -> void:
+	mode = "capture"
 	_refresh_sig()
 
 func rally_mode(bid: int) -> void:
@@ -480,6 +629,7 @@ func guard() -> void:
 
 func produce(bid: int, type: String) -> void:
 	view.send({"t": "produce", "id": bid, "type": type})
+	Audio.I.ui("ui_click", -6.0)
 
 func cancel(bid: int, i: int) -> void:
 	view.send({"t": "cancel", "id": bid, "i": i})
