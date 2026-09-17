@@ -29,6 +29,7 @@ const PREVIEW_PX := 240
 ## Host-owned lobby state, mirrored to clients. slots[i] = {kind: open|closed|ai|human, peer, name, level, team}
 var lobby_opts := {"map": "desert2", "cash": 10000, "superweapons": true, "slots": []}
 var menu_box: VBoxContainer
+var menu_scene: Node3D = null
 var args: Dictionary = {}
 var lobby_players: Array = []      # server: [{peer, name}]
 var in_lobby := false
@@ -87,14 +88,23 @@ func _build_menu() -> void:
 	menu.layer = 5
 	add_child(menu)
 	var bg := ColorRect.new()
-	bg.color = Color(0.06, 0.07, 0.08)
+	bg.color = Color(0.02, 0.03, 0.05, 0.35)   # the 3D shell map shows through
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	menu.add_child(bg)
+	_show_menu_scene(true)
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	menu.add_child(center)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(520, 0)
+	var pst := StyleBoxFlat.new()
+	pst.bg_color = Color(0.05, 0.06, 0.08, 0.86)
+	pst.set_content_margin_all(14)
+	pst.set_corner_radius_all(6)
+	pst.border_color = Color(0.3, 0.35, 0.45)
+	pst.set_border_width_all(1)
+	panel.add_theme_stylebox_override("panel", pst)
 	center.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
@@ -237,6 +247,16 @@ func _build_menu() -> void:
 	quit.text = "Quit"
 	quit.pressed.connect(func() -> void: get_tree().quit())
 	v.add_child(quit)
+
+## Living 3D backdrop behind the menu (freed when a match starts).
+func _show_menu_scene(on: bool) -> void:
+	if on and menu_scene == null and not args.has("headless_audio_off") and DisplayServer.get_name() != "headless":
+		menu_scene = MenuScene.new()
+		menu_scene.name = "MenuScene"
+		add_child(menu_scene)
+	elif not on and menu_scene != null:
+		menu_scene.queue_free()
+		menu_scene = null
 
 func _label(t: String) -> Label:
 	var l := Label.new()
@@ -702,6 +722,7 @@ func _start_game() -> void:
 func begin_game(map: Dictionary, player_index: int) -> void:
 	game_started = true
 	menu.visible = false
+	_show_menu_scene(false)
 	Audio.I.play_music("game")
 	Audio.I.start_ambience()
 	if view == null:
@@ -727,4 +748,5 @@ func return_to_menu() -> void:
 	lobby_box.visible = false
 	menu_box.visible = true
 	in_lobby = false
+	_show_menu_scene(true)
 	_set_status("")

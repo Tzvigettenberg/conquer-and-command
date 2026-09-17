@@ -6,6 +6,7 @@ var items: Array = []     # [{node, kind, t, life, from, to, ...}]
 var wrecks: Array = []
 
 func _process(dt: float) -> void:
+	_tick_pbeams(dt)
 	var keep := []
 	for it in items:
 		it["t"] += dt
@@ -47,6 +48,28 @@ func _process(dt: float) -> void:
 			"ring":
 				n.scale = Vector3(1.0 + a * 4.0, 1.0, 1.0 + a * 4.0) * it["size"]
 				_fade(n, (1.0 - a) * 0.7)
+			"debris":
+				var v: Vector3 = it["vel"]
+				v.y -= 24.0 * dt
+				it["vel"] = v
+				n.position += v * dt
+				if n.position.y < 0.1:
+					n.position.y = 0.1
+					it["vel"] = Vector3(v.x * 0.5, -v.y * 0.3, v.z * 0.5)
+				n.rotation += it["spin"] * dt
+			"marker":
+				n.rotation.y += dt * 0.8
+				var inner := n.get_node_or_null("Inner")
+				if inner != null:
+					inner.scale = Vector3.ONE * (0.6 + 0.4 * abs(sin(it["t"] * 6.0)))
+				if a > 0.85:
+					_fade(n, (1.0 - a) / 0.15)
+			"bomb":
+				var f: Vector3 = it["from"]
+				var to: Vector3 = it["to"]
+				var k := a * a
+				n.position = f.lerp(to, k)
+				n.look_at(f.lerp(to, minf(k + 0.05, 1.0)), Vector3.UP)
 			"smoke":
 				n.position.y += dt * 1.5
 				n.scale = Vector3.ONE * (0.5 + a * 1.5) * it["size"]
@@ -146,12 +169,22 @@ func _puff(pos: Vector3, size: float, color: Color, life: float, grow := 2.0) ->
 	_add(sm, "puff", life, {"grow": grow, "alpha": color.a})
 
 ## Wingtip vapour trails: a short thin segment per wingtip that fades and widens.
+## Wingtip contrails: thin, faint, short-lived.
 func contrail(a: Vector3, b: Vector3) -> void:
 	for p in [a, b]:
-		var sm := Visuals.sphere(0.22, Color(1, 1, 1, 0.45))
-		sm.material_override = _own_mat(Color(1, 1, 1, 0.45))
+		var sm := Visuals.sphere(0.12, Color(1, 1, 1, 0.16))
+		sm.material_override = _own_mat(Color(1, 1, 1, 0.16))
 		sm.position = p
-		_add(sm, "puff", 1.6, {"grow": 3.0, "alpha": 0.45})
+		_add(sm, "puff", 0.9, {"grow": 1.6, "alpha": 0.16})
+
+## Point-defence laser flash.
+func laser(from: Vector3, to: Vector3) -> void:
+	var b := _beam_mesh(from, to, Color(0.5, 1.0, 0.9, 0.9), 0.15)
+	_add(b, "beam", 0.15)
+	var p := Visuals.sphere(0.5, Color(0.6, 1.0, 1.0, 0.9))
+	p.material_override = _own_mat(Color(0.6, 1.0, 1.0, 0.9))
+	p.position = to
+	_add(p, "flash", 0.2)
 
 ## Aircraft death: jets nose over along their heading, helicopters spin down. Explodes on impact.
 func crash(type: String, pos: Vector3, yaw: float, model: Node3D, speed_hint := 20.0) -> void:
@@ -280,25 +313,75 @@ func impact(pos: Vector3, style: String) -> void:
 		return
 	explosion(pos, size)
 
+## Explosion: bright core flash, a couple of fireballs, shockwave ring, debris
+## chunks that arc out, dark smoke that lingers. size 1 = a tank shell, 4 = a bomb.
 func explosion(pos: Vector3, size: float) -> void:
-	var ball := Visuals.sphere(1.0, Color(1.0, 0.55, 0.15, 0.9))
-	ball.material_override = _own_mat(Color(1.0, 0.55, 0.15, 0.9))
-	ball.position = pos + Vector3(0, size * 0.6, 0)
+	var core := Visuals.sphere(1.0, Color(1.0, 0.95, 0.7, 1.0))
+	core.material_override = _own_mat(Color(1.0, 0.95, 0.7, 1.0))
+	core.position = pos + Vector3(0, size * 0.5, 0)
 	var light := OmniLight3D.new()
-	light.light_color = Color(1.0, 0.6, 0.3)
-	light.omni_range = 8.0 * size
-	light.light_energy = 6.0
-	ball.add_child(light)
-	_add(ball, "boom", 0.45 + size * 0.1, {"size": size, "light": light})
-	var ring := Visuals.disc(1.0, Color(1.0, 0.8, 0.4, 0.7))
-	ring.material_override = _own_mat(Color(1.0, 0.8, 0.4, 0.7))
+	light.light_color = Color(1.0, 0.65, 0.3)
+	light.omni_range = 10.0 * size
+	light.light_energy = 8.0
+	core.add_child(light)
+	_add(core, "boom", 0.3 + size * 0.06, {"size": size * 0.8, "light": light})
+	var nballs := 2 + int(size)
+	for i in range(nballs):
+		var ball := Visuals.sphere(1.0, Color(1.0, 0.5, 0.12, 0.95))
+		ball.material_override = _own_mat(Color(1.0, 0.45 + randf() * 0.2, 0.1, 0.95))
+		ball.position = pos + Vector3(randf_range(-0.6, 0.6) * size, size * (0.4 + randf() * 0.6), randf_range(-0.6, 0.6) * size)
+		_add(ball, "boom", 0.45 + size * 0.12 + randf() * 0.15, {"size": size * (0.7 + randf() * 0.5)})
+	var ring := Visuals.disc(1.0, Color(1.0, 0.85, 0.5, 0.75))
+	ring.material_override = _own_mat(Color(1.0, 0.85, 0.5, 0.75))
 	ring.position = pos + Vector3(0, 0.15, 0)
-	_add(ring, "ring", 0.5, {"size": size})
-	for i in range(3 if size > 0.8 else 1):
+	_add(ring, "ring", 0.45 + size * 0.08, {"size": size * 1.3})
+	# debris
+	var nd := 3 + int(size * 3.0)
+	for i in range(mini(nd, 18)):
+		var chunk := Visuals.box(Vector3(0.25, 0.25, 0.25) * (0.6 + randf() * size * 0.4), Color(0.12, 0.1, 0.09))
+		chunk.position = pos + Vector3(0, 0.5, 0)
+		var v := Vector3(randf_range(-1, 1), randf_range(1.2, 2.4), randf_range(-1, 1)) * (4.0 + size * 3.0)
+		_add(chunk, "debris", 0.9 + randf() * 0.7, {"vel": v, "spin": Vector3(randf(), randf(), randf()) * 8.0})
+	for i in range(2 + int(size)):
 		var sm := Visuals.sphere(1.0, Color(0.15, 0.15, 0.15, 0.5))
-		sm.material_override = _own_mat(Color(0.2, 0.2, 0.2, 0.5))
+		sm.material_override = _own_mat(Color(0.18, 0.17, 0.16, 0.55))
 		sm.position = pos + Vector3(randf_range(-1, 1) * size, size * 0.8 + i * 0.6 * size, randf_range(-1, 1) * size)
-		_add(sm, "smoke", 1.5 + size * 0.4, {"size": size})
+		_add(sm, "smoke", 1.8 + size * 0.5, {"size": size})
+	if size >= 3.0:
+		# big one: scorch mark and a dust wall
+		var scorch := Visuals.disc(size * 2.2, Color(0.06, 0.04, 0.03, 0.7))
+		scorch.position = pos + Vector3(0, 0.05, 0)
+		_add(scorch, "track", 60.0)
+		var dust := Visuals.ring(1.0, Color(0.6, 0.5, 0.35, 0.6), size * 0.8)
+		dust.material_override = _own_mat(Color(0.6, 0.5, 0.35, 0.6))
+		dust.position = pos + Vector3(0, 0.6, 0)
+		_add(dust, "ring", 1.2, {"size": size * 3.0})
+
+## Ground target marker for an incoming strike (ring + rotating ticks + countdown pulse).
+func strike_marker(pos: Vector3, seconds: float, col: Color) -> void:
+	var n := Node3D.new()
+	n.position = pos + Vector3(0, 0.25, 0)
+	var r1 := Visuals.ring(7.0, col, 0.35)
+	r1.material_override = _own_mat(col)
+	n.add_child(r1)
+	var r2 := Visuals.ring(2.5, col, 0.25)
+	r2.material_override = _own_mat(col)
+	r2.name = "Inner"
+	n.add_child(r2)
+	for i in range(4):
+		var tick := Visuals.box(Vector3(0.4, 0.1, 3.0), col, true)
+		tick.material_override = _own_mat(col)
+		tick.position = Vector3(sin(i * PI * 0.5) * 8.5, 0, cos(i * PI * 0.5) * 8.5)
+		tick.rotation.y = i * PI * 0.5
+		n.add_child(tick)
+	_add(n, "marker", seconds)
+
+## A bomb falling from an aircraft onto pos (visual only; the sim's hit does the damage).
+func bomb_drop(from: Vector3, pos: Vector3, seconds: float) -> void:
+	var b := Visuals.box(Vector3(0.7, 0.7, 2.6), Color(0.25, 0.27, 0.3))
+	b.position = from
+	b.look_at_from_position(from, pos, Vector3.UP)
+	_add(b, "bomb", seconds, {"from": from, "to": pos})
 
 func death(type: String, pos: Vector3, yaw: float, model: Node3D = null) -> void:
 	var def := Data.def(type)
@@ -340,16 +423,60 @@ func death(type: String, pos: Vector3, yaw: float, model: Node3D = null) -> void
 		sm.position = pos + Vector3(randf_range(-2, 2), 2.0, randf_range(-2, 2))
 		_add(sm, "smoke", 6.0, {"size": size})
 
-func particle_beam(pos: Vector3) -> void:
-	var b := _beam_mesh(pos + Vector3(0, 120, 0), pos, Color(0.6, 0.9, 1.0, 0.9), 1.6)
-	_add(b, "beam", 0.3)
-	var core := _beam_mesh(pos + Vector3(0, 120, 0), pos, Color(1.0, 1.0, 1.0, 1.0), 0.5)
-	_add(core, "beam", 0.3)
-	explosion(pos, 2.0)
+## Particle cannon: one continuous beam per firing cannon (kept alive by the sim's
+## 4 Hz ticks and slid toward the newest target point), plus the uplink from the
+## cannon spire into the sky and a ground-level scorch / explosion.
+var pbeams: Dictionary = {}   # owner -> {node, core, up, target, t}
+func particle_beam(pos: Vector3, owner: int, spire: Vector3) -> void:
+	var key := owner
+	if not pbeams.has(key):
+		var outer := _beam_mesh(pos + Vector3(0, 160, 0), pos, Color(0.55, 0.85, 1.0, 0.55), 2.4)
+		var core := _beam_mesh(pos + Vector3(0, 160, 0), pos, Color(1.0, 1.0, 1.0, 1.0), 0.7)
+		add_child(outer)
+		add_child(core)
+		var up: Node3D = null
+		if spire.x >= 0.0:
+			up = _beam_mesh(spire, spire + Vector3(0, 160, 0), Color(0.55, 0.85, 1.0, 0.7), 1.2)
+			add_child(up)
+		pbeams[key] = {"outer": outer, "core": core, "up": up, "target": pos, "pos": pos, "t": 0.0, "life": 0.7}
+	var pb: Dictionary = pbeams[key]
+	pb["target"] = pos
+	pb["life"] = 0.7
+	explosion(pos, 1.6)
+	var scorch := Visuals.disc(4.0, Color(0.05, 0.03, 0.02, 0.6))
+	scorch.position = pos + Vector3(0, 0.06, 0)
+	_add(scorch, "track", 40.0)
+
+func _tick_pbeams(dt: float) -> void:
+	if pbeams.is_empty():
+		return
+	var gone := []
+	for key in pbeams:
+		var pb: Dictionary = pbeams[key]
+		pb["life"] -= dt
+		pb["t"] += dt
+		if pb["life"] <= 0.0:
+			for k in ["outer", "core", "up"]:
+				if pb[k] != null:
+					pb[k].queue_free()
+			gone.append(key)
+			continue
+		var p: Vector3 = (pb["pos"] as Vector3).move_toward(pb["target"], 12.0 * dt)
+		pb["pos"] = p
+		var top := p + Vector3(0, 160, 0)
+		for k in ["outer", "core"]:
+			var n: Node3D = pb[k]
+			n.position = top
+			n.look_at(p, Vector3.UP)
+			var w := (2.4 if k == "outer" else 0.7) * (0.85 + 0.15 * sin(pb["t"] * 40.0))
+			n.get_child(0).scale = Vector3(w / (2.4 if k == "outer" else 0.7), w / (2.4 if k == "outer" else 0.7), 1.0)
+	for key in gone:
+		pbeams.erase(key)
 
 func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 	match kind:
 		"a10":
+			strike_marker(pos, 4.0, Color(1.0, 0.8, 0.2, 0.9))
 			for i in range(maxi(1, level)):
 				var jet := Visuals.make_model("raptor", -1)
 				jet.scale = Vector3.ONE * 1.1
@@ -374,6 +501,7 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 						var jp: Vector3 = from.lerp(to, delay / 8.0)
 						shot(jp, pos + side + dir * (k * 4.0), "a10_missile"))
 		"paradrop":
+			strike_marker(pos, 6.0, Color(0.4, 0.9, 1.0, 0.8))
 			var plane := Visuals.make_model("chinook", -1)
 			plane.scale = Vector3.ONE * 1.5
 			var from := pos + Vector3(-150, 40, 0)
@@ -387,13 +515,17 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 				chute.position = pos + Vector3(randf_range(-4, 4), 30, randf_range(-4, 4))
 				_add(chute, "para", 6.0, {"from": chute.position})
 		"fuel_air_bomb":
+			strike_marker(pos, 5.5, Color(1.0, 0.4, 0.2, 0.9))
 			var plane := Visuals.make_model("aurora", -1)
-			plane.scale = Vector3.ONE * 2.0
+			plane.scale = Vector3.ONE * 1.4
 			var from := pos + Vector3(0, 45, -200)
 			var to := pos + Vector3(0, 45, 200)
 			plane.look_at_from_position(from, to, Vector3.UP)
 			plane.rotate_y(PI)
 			_add(plane, "jet", 8.0, {"from": from, "to": to})
+			_later(3.9, func() -> void:
+				bomb_drop(pos + Vector3(0, 44, -5), pos, 1.6)
+				Audio.I.sfx("bomb_whistle", pos + Vector3(0, 20, 0), 2.0, 0.0, 0.5))
 		"spy_satellite":
 			var ring := Visuals.ring(60.0, Color(0.4, 1.0, 0.6, 0.6), 0.6)
 			ring.material_override = _own_mat(Color(0.4, 1.0, 0.6, 0.6))

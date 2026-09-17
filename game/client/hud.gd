@@ -32,6 +32,8 @@ var chat_allies := false
 var surrender_btn: Button
 const QUEUE_PX := 50
 var powers_box: VBoxContainer
+var powers_panel: PanelContainer
+var sw_buttons: Dictionary = {}
 var power_buttons: Dictionary = {}
 var promo_panel: PanelContainer
 var promo_backdrop: ColorRect
@@ -133,11 +135,8 @@ func _build() -> void:
 	add_child(pp)
 	powers_box = VBoxContainer.new()
 	pp.add_child(powers_box)
-	var pl := Label.new()
-	pl.text = "GENERAL'S POWERS"
-	pl.add_theme_font_size_override("font_size", 12)
-	pl.modulate = Color(0.7, 0.75, 0.8)
-	powers_box.add_child(pl)
+	pp.visible = false
+	powers_panel = pp
 
 	# ---- promotion / tech tree modal ----
 	promo_backdrop = ColorRect.new()
@@ -665,12 +664,15 @@ func refresh_selection() -> void:
 		var d := single.def
 		for ut in d.get("produces", []):
 			var ud: Dictionary = Data.UNITS[ut]
+			var uwhy: String = view.unit_prereq_text(ut)
+			if uwhy == "" and ud.get("jet", false) and view.airfield_full(single.id):
+				uwhy = "Airfield full"
 			actions.append({"label": "%s\n$%d" % [ud["name"], ud["cost"]], "icon": ut, "tip": "%s\n%s\nBuild time %ds" % [ud["name"], ud.get("desc", ""), int(ud["time"])],
-				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and view.unit_prereq_text(ut) == "", "why": view.unit_prereq_text(ut)})
+				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and uwhy == "", "why": uwhy})
 		for uid in d.get("upgrades", []):
 			var ud: Dictionary = Data.UPGRADES[uid]
 			var done: bool = view.has_upgrade(uid, single.id)
-			var researching: bool = view.is_researching(uid)
+			var researching: bool = view.is_researching(uid, single.id)
 			var lbl := "$%d" % ud["cost"]
 			if done:
 				lbl = "DONE"
@@ -881,6 +883,38 @@ func _update_powers(st: Dictionary) -> void:
 		else:
 			b.text = "%s  READY" % name
 			b.disabled = false
+	# superweapons live in the same side panel
+	var sw: Dictionary = st.get("sw", {})
+	var seen := {}
+	for pu in view.puppets.values():
+		var p: Puppet = pu
+		if p.team != view.my_index or not p.is_building or not p.def.has("superweapon") or not p.complete:
+			continue
+		seen[p.id] = true
+		if not sw_buttons.has(p.id):
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(170, 40)
+			b.add_theme_font_size_override("font_size", 12)
+			b.tooltip_text = "Fire the Particle Cannon: pick a target, then steer the beam with the mouse."
+			b.icon = view.icons.get_icon(p.type)
+			b.expand_icon = true
+			var bid := p.id
+			b.pressed.connect(func() -> void: ctl.sw_mode(bid))
+			powers_box.add_child(b)
+			sw_buttons[p.id] = b
+		var b: Button = sw_buttons[p.id]
+		var rem := float(sw.get(view.my_index, 0.0))
+		if rem > 0.0:
+			b.text = "Particle Cannon  %d:%02d" % [int(rem) / 60, int(rem) % 60]
+			b.disabled = true
+		else:
+			b.text = "PARTICLE CANNON  READY"
+			b.disabled = false
+	for bid in sw_buttons.keys():
+		if not seen.has(bid):
+			sw_buttons[bid].queue_free()
+			sw_buttons.erase(bid)
+	powers_panel.visible = powers_box.get_child_count() > 0
 	if promo_panel.visible:
 		var key := str([st.get("rank", 1), st.get("points", 0), st.get("powers", {})])
 		if key != promo_key:

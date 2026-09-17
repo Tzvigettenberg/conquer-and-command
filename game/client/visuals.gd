@@ -128,14 +128,7 @@ static func make_extras(type: String, keys: Array, team: int, aabb: AABB) -> Nod
 					(tip.material_override as StandardMaterial3D).emission = Color(0.3, 0.7, 1.0)
 				any = true
 		"power_plant":
-			if keys.has("control_rods"):
-				# glowing rods sticking out of the reactor dome
-				for i in range(4):
-					var ang := i * TAU / 4.0 + 0.4
-					var rod := Buildings.cyl(root, 0.16, 0.16, 2.4, Vector3(sin(ang) * 1.6, top + 0.4, cos(ang) * 1.6), Color(0.5, 1.0, 0.6), 6)
-					(rod.material_override as StandardMaterial3D).emission_enabled = true
-					(rod.material_override as StandardMaterial3D).emission = Color(0.3, 1.0, 0.4)
-				any = true
+			pass   # control rods: the reactor steam turns blue (see Puppet.set_extras)
 		"supply_center":
 			if keys.has("supply_lines"):
 				for i in range(3):
@@ -145,6 +138,17 @@ static func make_extras(type: String, keys: Array, team: int, aabb: AABB) -> Nod
 			if keys.has("capture"):
 				Buildings.box(root, Vector3(0.1, 4.5, 0.1), Vector3(aabb.position.x + 0.6, 2.25, aabb.end.z - 0.6), metal)
 				Buildings.box(root, Vector3(1.4, 0.8, 0.05), Vector3(aabb.position.x + 1.3, 4.0, aabb.end.z - 0.6), tc)
+				any = true
+		"particle_cannon":
+			if keys.has("sw_ready"):
+				# charged: a glowing orb on the spire and a halo
+				var orb := Buildings.sphere(root, 1.1, Vector3(-2.0, 11.0, 0), Color(0.6, 0.9, 1.0))
+				(orb.material_override as StandardMaterial3D).emission_enabled = true
+				(orb.material_override as StandardMaterial3D).emission = Color(0.4, 0.8, 1.0)
+				(orb.material_override as StandardMaterial3D).emission_energy_multiplier = 2.0
+				var halo := Visuals.ring(2.6, Color(0.5, 0.85, 1.0, 0.5), 0.3)
+				halo.position = Vector3(-2.0, 11.0, 0)
+				root.add_child(halo)
 				any = true
 		"strategy_center":
 			if keys.has("advanced_training"):
@@ -161,6 +165,9 @@ static func make_model(type: String, owner: int) -> Node3D:
 	if is_bld:
 		# structures are procedural (sized to the footprint, painted with team colour)
 		return Buildings.make(type, owner)
+	# units are our own blocky models (see Units)
+	if def.get("cat", "") in ["inf", "veh", "air"] or def.get("builder", false):
+		return Units.make(type, owner)
 	var root := Node3D.new()
 	root.name = "Model"
 	var ps := prefab(def.get("model", ""))
@@ -353,6 +360,15 @@ static func make_wreck(type: String) -> Node3D:
 			guess = m.replace("_01.tscn", "_Destroyed_01.tscn")
 			if ResourceLoader.exists(Data.PREFAB + guess):
 				rel = guess
+	if not Data.is_building(type):
+		# charred, squashed copy of our own model
+		var m := Units.make(type, -1)
+		for mi in m.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).material_override = flat_mat(Color(0.12, 0.11, 0.1), false)
+		m.scale = Vector3(1.05, 0.55, 1.05)
+		m.rotation.z = 0.12
+		root.add_child(m)
+		return root
 	var ps := prefab(rel)
 	if ps != null:
 		var inst := ps.instantiate()

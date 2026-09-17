@@ -5,6 +5,8 @@ ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 TRACKS = {
     "menu": ["Long Note Two", "Oppressive Gloom"],
     "game": ["Five Armies", "Volatile Reaction", "Exhilarate", "Machinations", "Stormfront", "Unrelenting", "Rocket", "Impact Prelude", "Mechanolith", "Crypto"],
+    "victory": ["Heroic Age"],
+    "defeat": ["Dark Times"],
 }
 os.makedirs(ROOT, exist_ok=True)
 credits = {}

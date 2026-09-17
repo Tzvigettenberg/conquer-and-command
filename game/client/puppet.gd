@@ -48,6 +48,18 @@ var trail_t := 0.0
 
 var model: Node3D
 var turret: Node3D = null
+var limbs: Dictionary = {}
+var door_t := 0.0
+var scaffold: Node3D = null
+var site_label: Label3D = null
+var site_bar: MeshInstance3D = null
+var site_bar_bg: MeshInstance3D = null
+var rev_t := 0.0
+var was_moving := false
+var door_node: Node3D = null
+var door_y := 0.0
+var door_lights: Array = []
+var walk_t := 0.0
 var extras_key := ""              # which upgrade / plan add-ons are shown
 var extras_node: Node3D = null
 var rotors: Array[Node3D] = []
@@ -104,8 +116,17 @@ func _build_visual(mine: bool) -> void:
 		turret = model.get_meta("turret")
 	if model.has_meta("anim"):
 		anims = model.get_meta("anim")
-	if not is_building and cat != "inf":
+	if not is_building and cat != "inf" and not model.has_meta("procedural"):
 		Visuals.tint_unit(model, team)
+	door_node = model.find_child("Door", true, false)
+	if door_node != null:
+		door_y = door_node.position.y
+		for n in model.find_children("Light*", "MeshInstance3D", true, false):
+			door_lights.append(n)
+	for nm in ["LegL", "LegR", "ArmL", "ArmR"]:
+		var limb := model.find_child(nm, true, false)
+		if limb != null:
+			limbs[nm] = limb
 	for n in model.find_children("*", "MeshInstance3D", true, false):
 		var nm: String = n.name
 		if "Rotor" in nm or "Blade" in nm or "Propeller" in nm:
@@ -299,10 +320,75 @@ func _process(dt: float) -> void:
 			team_ring.visible = want_alpha >= 1.0
 	sel_ring.visible = selected or hovered
 
+## Construction site dressing: yellow scaffold posts and rails around the footprint,
+## a progress bar and an UNFINISHED warning when nobody is building.
+func _build_scaffold() -> void:
+	scaffold = Node3D.new()
+	add_child(scaffold)
+	var fp: Vector2 = Data.footprint_size(type)
+	var h := float(def.get("height", 6.0)) * 0.6
+	var col := Color(0.95, 0.75, 0.2)
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			var post := Visuals.box(Vector3(0.18, h, 0.18), col)
+			post.position = Vector3(sx * fp.x * 0.5, h * 0.5, sz * fp.y * 0.5)
+			scaffold.add_child(post)
+		var rail := Visuals.box(Vector3(fp.x, 0.12, 0.12), col)
+		rail.position = Vector3(0, h, sx * fp.y * 0.5)
+		scaffold.add_child(rail)
+		var rail2 := Visuals.box(Vector3(0.12, 0.12, fp.y), col)
+		rail2.position = Vector3(sx * fp.x * 0.5, h, 0)
+		scaffold.add_child(rail2)
+	site_bar_bg = Visuals.box(Vector3(fp.x * 0.8, 0.25, 0.5), Color(0.1, 0.1, 0.1, 0.9), true)
+	site_bar_bg.position = Vector3(0, h + 0.8, fp.y * 0.5)
+	scaffold.add_child(site_bar_bg)
+	site_bar = Visuals.box(Vector3(fp.x * 0.8, 0.3, 0.55), Color(0.3, 0.95, 0.4), true)
+	site_bar.position = Vector3(0, h + 0.8, fp.y * 0.5)
+	scaffold.add_child(site_bar)
+	site_label = Label3D.new()
+	site_label.font_size = 56
+	site_label.pixel_size = 0.02
+	site_label.modulate = Color(1.0, 0.6, 0.2)
+	site_label.outline_size = 8
+	site_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	site_label.no_depth_test = true
+	site_label.position = Vector3(0, h + 2.4, 0)
+	scaffold.add_child(site_label)
+
+## Factory door: slides up, lights flash, closes again after a while.
+func open_door(seconds: float) -> void:
+	door_t = seconds
+
+func _door_anim(dt: float, now: float) -> void:
+	if door_node == null:
+		return
+	var open := door_t > 0.0
+	door_t = maxf(0.0, door_t - dt)
+	var target := door_y + (3.2 if open else 0.0)
+	door_node.position.y = move_toward(door_node.position.y, target, 5.0 * dt)
+	for l in door_lights:
+		l.visible = open and fmod(now * 4.0, 1.0) < 0.5
+
 func _process_building(now: float) -> void:
+	_door_anim(get_process_delta_time(), now)
 	if not complete:
 		var f := clampf(aux / 100.0, 0.02, 1.0)
 		model.scale = Vector3(1, f, 1)
+		if scaffold == null:
+			_build_scaffold()
+		scaffold.visible = true
+		# no dozer working on it: flash the warning so half-built sites are obvious
+		var idle := aux2 == 0
+		site_label.visible = idle and fmod(now * 2.0, 1.0) < 0.6
+		site_label.text = "UNFINISHED  %d%%" % aux
+		site_bar.scale.x = maxf(f, 0.02)
+		site_bar_bg.visible = true
+		site_bar.visible = true
+	elif scaffold != null:
+		scaffold.visible = false
+		site_label.visible = false
+		site_bar.visible = false
+		site_bar_bg.visible = false
 	var unpowered := (flags & 16) != 0 and complete
 	if unpowered != blackout:
 		blackout = unpowered
@@ -339,6 +425,16 @@ func set_extras(keys: Array) -> void:
 		var cannon := model.find_child("Cannon", true, false)
 		if cannon != null:
 			cannon.visible = keys.has("plan_bombardment")
+		if type == "power_plant":
+			# control rods: blue-white steam instead of grey
+			var rods := keys.has("control_rods")
+			for ps in model.find_children("*", "CPUParticles3D", true, false):
+				var m := (ps as CPUParticles3D).material_override as StandardMaterial3D
+				if m != null:
+					m.albedo_color = Color(0.45, 0.75, 1.0, 0.5) if rods else Color(0.9, 0.9, 0.9, 0.35)
+					m.emission_enabled = rods
+					m.emission = Color(0.3, 0.6, 1.0)
+				(ps as CPUParticles3D).amount = 18 if rods else 10
 	var parts := Visuals.make_extras(type, keys, team, aabb)
 	if parts != null:
 		extras_node = parts
@@ -449,6 +545,18 @@ func _process_unit(dt: float, now: float) -> void:
 			_play("run")
 		else:
 			_play("idle")
+	elif not limbs.is_empty():
+		# blocky soldier: swing legs and arms while walking
+		if moving or speed > 0.3:
+			walk_t += dt * 9.0
+			var a := sin(walk_t) * 0.7
+			limbs["LegL"].rotation.x = a
+			limbs["LegR"].rotation.x = -a
+			limbs["ArmL"].rotation.x = -a * 0.6
+			limbs["ArmR"].rotation.x = a * 0.6
+		else:
+			for k in limbs:
+				limbs[k].rotation.x = lerpf(limbs[k].rotation.x, 0.0, 0.2)
 	# rotors always spin on helicopters; on jets only while airborne
 	var airborne := cat == "air" and cur_pos.y > 0.3
 	for r in rotors:
@@ -485,12 +593,19 @@ func _process_unit(dt: float, now: float) -> void:
 		tilt.rotation.x = lerpf(tilt.rotation.x, pitch, 0.15)
 		tilt.rotation.z = lerpf(tilt.rotation.z, roll, 0.15)
 	if loop != null:
+		var mv := speed > 0.5
+		if mv and not was_moving:
+			rev_t = 1.2   # engine revs up when it sets off
+		was_moving = mv
+		rev_t = maxf(0.0, rev_t - dt)
 		if cat == "air" and def.get("jet", false):
-			loop.volume_db = loop_base_db + 4.0 if airborne else -80.0
+			loop.volume_db = loop_base_db + 4.0 if airborne else (loop_base_db - 6.0 if speed > 0.2 else -80.0)
+			loop.pitch_scale = 1.0 + (0.25 if airborne else 0.0)
 		elif cat == "air":
 			loop.volume_db = loop_base_db + 2.0
 		else:
-			loop.volume_db = loop_base_db + (0.0 if speed > 0.5 else -8.0)
+			loop.volume_db = loop_base_db + (0.0 if mv else -9.0) + rev_t * 5.0
+			loop.pitch_scale = 0.9 + minf(speed / 8.0, 1.0) * 0.25 + rev_t * 0.1
 	# tyre tracks
 	if cat == "veh" and speed > 0.3 and cur_pos.y < 0.5:
 		track_dist += speed * dt
@@ -504,7 +619,7 @@ func _process_unit(dt: float, now: float) -> void:
 	# contrails from fast fixed-wing aircraft
 	if cat == "air" and def.get("jet", false) and airborne and speed > 12.0:
 		trail_t += dt
-		if trail_t > 0.05:
+		if trail_t > 0.12:
 			trail_t = 0.0
 			var view := get_parent()
 			if view != null and view.has_method("contrail"):

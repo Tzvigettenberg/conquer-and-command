@@ -27,6 +27,9 @@ var level := "medium"
 var powers_after := 240.0
 var bonus_t := 0.0
 var unit_cap := 40
+var wave_gap := 90.0
+var wave_grow := 3
+var wave_max := 18
 
 func setup(_w: World, _p: int, _level := "medium") -> void:
 	w = _w
@@ -35,20 +38,30 @@ func setup(_w: World, _p: int, _level := "medium") -> void:
 	rng.seed = 100 + p
 	match level:
 		"easy":
-			wave_t = 300.0
+			wave_t = 360.0
 			wave_size = 8
-			powers_after = 480.0
-			unit_cap = 18
+			powers_after = 600.0
+			unit_cap = 16
+			wave_gap = 180.0
+			wave_grow = 1
+			wave_max = 10
 		"hard":
 			wave_t = 120.0
 			wave_size = 6
 			powers_after = 150.0
 			unit_cap = 60
+			wave_gap = 60.0
+			wave_grow = 3
+			wave_max = 18
 		_:
-			wave_t = 180.0
+			# medium: a real opponent but one you can out-macro - fewer units, slower waves, later powers
+			wave_t = 300.0
 			wave_size = 6
-			powers_after = 240.0
-			unit_cap = 40
+			powers_after = 420.0
+			unit_cap = 24
+			wave_gap = 120.0
+			wave_grow = 2
+			wave_max = 12
 
 func think(dt: float) -> void:
 	t += dt
@@ -252,15 +265,16 @@ func _production() -> void:
 	var cash := _cash()
 	var army := _own_units().size()
 	var reserve := 600.0 if _count_built("war_factory") > 0 else 0.0
+	var qmax := 2 if level == "hard" else 1
 	for b: Ent in _own("barracks"):
-		if b.prod.size() < 2 and cash > reserve + 300 and army < unit_cap:
+		if b.prod.size() < qmax and cash > reserve + 300 and army < unit_cap:
 			var pick := "ranger" if rng.randf() < 0.55 else "missile_defender"
 			if _count_built("strategy_center") > 0 and rng.randf() < 0.15:
 				pick = "pathfinder" if w.players[p]["powers"].has("pathfinder") else pick
 			w.cmd(p, {"t": "produce", "id": b.id, "type": pick})
 			cash -= float(Data.UNITS[pick]["cost"])
 	for b: Ent in _own("war_factory"):
-		if b.prod.size() < 2 and cash > 900 and army < unit_cap:
+		if b.prod.size() < qmax and cash > 900 and army < unit_cap:
 			var roll := rng.randf()
 			var pick := "crusader"
 			if w.players[p]["powers"].has("paladin") and roll < 0.35:
@@ -409,7 +423,7 @@ func _army() -> void:
 			for u in units:
 				ids.append(u.id)
 			w.cmd(p, {"t": "amove", "ids": ids, "x": attack_target.x, "y": attack_target.y, "q": false})
-			wave_size = mini(wave_size + 3, 18)
+			wave_size = mini(wave_size + wave_grow, wave_max)
 		elif t > 40.0:
 			# idle units gather at a rally point between base and the enemy
 			var base := _base_pos()
@@ -437,7 +451,7 @@ func _army() -> void:
 					attack_target = e.pos
 		if alive < 3 or (near_target > 0 and not enemy_left):
 			attacking = false
-			wave_t = t + 60.0
+			wave_t = t + wave_gap
 			if not enemy_left:
 				# pick another known enemy building
 				known_enemy = Vector2(-1, -1)

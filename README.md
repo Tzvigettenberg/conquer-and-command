@@ -52,8 +52,25 @@ Everyone starts at rank 1 with one promotion point (as in Generals).
 ## Audio
 `audio/sfx` — 50 CC0 / CC-BY effects from Freesound (`audio/sfx/CREDITS.md`, re-fetch with `tools/fetch_sfx.py`).
 `audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
-`audio/music` — 12 Kevin MacLeod tracks, CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
+`audio/music` — 14 Kevin MacLeod tracks (menu, game, victory, defeat), CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M6)
+- Our own low-poly unit models for everything (tanks, Humvee, Avenger, Tomahawk, Ambulance, Dozer, Comanche, Chinook, Raptor, Stealth Fighter, Aurora, infantry with walking limbs) — no Synty needed; wrecks are charred copies.
+- Airfield remake: four hangars, taxiway, runway lights, helipad and tower. Jets roll out of the hangar, taxi to the runway, take off, and taxi back in after landing. Helicopters lift off from the helipad.
+- War Factory door slides open with flashing lights when a vehicle rolls out.
+- Unit AI: parked friends step aside for movers (no more dozer stuck behind a tank); guard radius = the unit's own weapon range; idle Dozers repair damaged structures nearby; units that fire at you show up even outside your vision (muzzle flash reveal).
+- Avenger and Paladin laser point-defence: incoming missiles and shells are burned out of the air (Avenger every 0.35 s, Paladin every 1.5 s — salvos get through). Comanche gun always works, only the rockets reload (12 s).
+- Splash damage on missiles, shells and bombs (inner / outer radius); the FAB is a proper fireball.
+- Strike markers on the ground for A-10 / paradrop / fuel-air bomb, a visible bomb drop, much bigger explosions with debris and scorch marks, subtle contrails.
+- Fog of war is drawn on the ground only (no floating cloud layer), lighter dimming; unexplored = black.
+- Particle Cannon: continuous beam from the sky plus an uplink from the spire, 10 s, glowing orb on the spire when charged; button lives in the side panel with the general's powers (no label).
+- Cursors change with what you're doing: attack crosshair, force-fire, guard shield, build, beacon, capture, rally, power star, superweapon reticle, repair.
+- Construction sites: scaffold, progress bar and a flashing UNFINISHED warning when no Dozer is on it.
+- Control rods: reactor steam turns blue; research is no longer slowed by low power (and each reactor's button reflects its own research).
+- Captures fade out when the capturer leaves; airfield-full jets are greyed out; Medium AI is easier (24-unit cap, 5-minute first wave, slower growth); Easy easier still.
+- Sound: listener sits where you're looking (everything was too quiet), engines rev when vehicles set off, victory / defeat music, all weapons mapped.
+- Main menu plays over a living shell map (base, tank column, patrol helicopter, circling jet).
 
 ## What's in (M5)
 - Lobby rework: per-slot AI with its own difficulty, map preview with clickable spawn points, four maps with 2 / 4 / 4 / 6 slots (6 team colours).

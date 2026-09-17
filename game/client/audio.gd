@@ -36,7 +36,7 @@ const WEAPON_SFX := {
 	"crusader_gun": "tank_cannon", "paladin_gun": "tank_cannon", "md_missile": "missile_launch", "humvee_tow": "missile_launch",
 	"patriot": "missile_launch", "raptor_missile": "missile_launch", "stealth_missile": "missile_launch", "comanche_rockets": "rocket_pod",
 	"tomahawk": "missile_launch", "firebase_gun": "artillery_fire", "avenger_laser": "laser_zap", "pathfinder_rifle": "sniper_shot",
-	"burton_rifle": "sniper_shot", "aurora_bomb": "bomb_whistle", "a10_gun": "gau8", "fab": "explosion_large", "particle": "superweapon_fire",
+	"burton_rifle": "sniper_shot", "aurora_bomb": "bomb_whistle", "a10_gun": "gau8", "a10_missile": "missile_launch", "sc_cannon": "artillery_fire", "fab": "explosion_large", "particle": "superweapon_fire", "pd_laser": "laser_zap",
 }
 const IMPACT_SFX := {"bullet": "ricochet", "shell": "explosion_small", "missile": "explosion_small", "cruise": "explosion_medium", "bomb": "explosion_medium", "beam": ""}
 const VOICE_CLASS := {"crusader": "tank", "paladin": "tank"}
@@ -145,8 +145,8 @@ func _get3d() -> AudioStreamPlayer3D:
 	if pool3d.size() < MAX_3D:
 		var p := AudioStreamPlayer3D.new()
 		p.bus = "SFX"
-		p.unit_size = 14.0
-		p.max_distance = 260.0
+		p.unit_size = 18.0
+		p.max_distance = 300.0
 		p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 		p.panning_strength = 1.2
 		add_child(p)

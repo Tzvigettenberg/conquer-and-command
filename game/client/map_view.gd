@@ -13,6 +13,7 @@ uniform vec3 col_b = vec3(0.30, 0.25, 0.17);
 uniform vec3 col_c = vec3(0.36, 0.36, 0.24);
 uniform vec3 road_col = vec3(0.30, 0.26, 0.20);
 uniform int use_vcol = 0;
+uniform int fog_on = 1;
 varying vec4 vcol;
 void vertex() {
 	vcol = COLOR;
@@ -33,11 +34,15 @@ void fragment() {
 		vec3 rock = vcol.rgb * (0.8 + 0.35 * n2) * (0.9 + 0.2 * n3);
 		col = mix(col, rock, vcol.a);
 	}
-	// fog of war: explored-but-not-visible areas are dimmed here (no separate plane, so hills dim too)
+	// fog of war, all in the ground shader (no floating planes): unexplored = black,
+	// explored-but-not-visible = dimmed; hills get it too
 	vec2 f = texture(fog_tex, uv).rg;
-	float dim = (1.0 - smoothstep(0.2, 0.7, f.r)) * 0.42;
-	if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { dim = 0.92; }
+	float dim = (1.0 - smoothstep(0.2, 0.7, f.r)) * 0.3;
+	float shroud = 1.0 - smoothstep(0.15, 0.6, f.g);
+	if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { shroud = 1.0; }
+	if (fog_on == 0) { dim = 0.0; shroud = 0.0; }
 	col = mix(col, vec3(0.02, 0.02, 0.05), dim);
+	col = mix(col, vec3(0.0), shroud);
 	ALBEDO = col;
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.05;
@@ -349,7 +354,6 @@ func _build_fog() -> void:
 	fog_img = Image.create(fog_cells, fog_cells, false, Image.FORMAT_RG8)
 	fog_img.fill(Color(0, 0, 0))
 	fog_tex = ImageTexture.create_from_image(fog_img)
-	shroud_plane = _fog_plane(0, 45.0)
 	_terrain_material().set_shader_parameter("fog_tex", fog_tex)
 	if terrain_mesh:
 		(terrain_mesh.material_override as ShaderMaterial).set_shader_parameter("fog_tex", fog_tex)
@@ -395,6 +399,12 @@ func is_explored(p: Vector2) -> bool:
 	var x := clampi(int(p.x / Vision.FCELL), 0, fog_cells - 1)
 	var y := clampi(int(p.y / Vision.FCELL), 0, fog_cells - 1)
 	return explored[y * fog_cells + x] == 1
+
+## Menu backdrop: no fog at all, not even outside the map.
+func disable_fog() -> void:
+	_terrain_material().set_shader_parameter("fog_on", 0)
+	if terrain_mesh:
+		(terrain_mesh.material_override as ShaderMaterial).set_shader_parameter("fog_on", 0)
 
 func reveal_all() -> void:
 	explored.fill(1)

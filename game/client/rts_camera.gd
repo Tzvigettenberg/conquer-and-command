@@ -8,6 +8,7 @@ const MAX_H := 150.0
 const EDGE := 14
 
 var cam: Camera3D
+var listener: AudioListener3D
 var height := 85.0
 var yaw := 0.0
 var pitch := PITCH_DEG
@@ -27,6 +28,11 @@ func setup(size: float, start: Vector2) -> void:
 	cam.far = 1200.0
 	add_child(cam)
 	cam.current = true
+	# listener sits just above the point the camera looks at, so what you see is what you hear
+	listener = AudioListener3D.new()
+	listener.position = Vector3(0, 14.0, 0)
+	add_child(listener)
+	listener.make_current()
 	_apply()
 
 func _apply() -> void:
@@ -35,6 +41,9 @@ func _apply() -> void:
 	var back := height / tan(deg_to_rad(pitch))
 	cam.position = Vector3(0, height, back)
 	cam.rotation_degrees = Vector3(-pitch, 0, 0)
+	if listener != null:
+		listener.position = Vector3(0, 10.0 + height * 0.15, back * 0.15)
+		listener.rotation_degrees = Vector3(-pitch * 0.5, 0, 0)
 
 func _unhandled_input(ev: InputEvent) -> void:
 	if not enabled:

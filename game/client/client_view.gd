@@ -71,9 +71,22 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	on_msg("Welcome, %s. You are %s." % [names[index] if index < names.size() else "Commander", Data.TEAM_NAMES[index]])
 	if args.has("test"):
 		_run_test(str(args["test"]))
+	if args.has("zoom"):
+		camera.height = float(args["zoom"])
+		camera._apply()
 	if args.has("look"):
 		var xy := str(args["look"]).split(",")
 		camera.jump_to(Vector2(float(xy[0]), float(xy[1])))
+	if args.has("showcase"):
+		# debug: every unit model in a grid by the base
+		var i := 0
+		for t in Data.UNITS:
+			var mdl := Visuals.make_model(t, my_index)
+			mdl.position = Vector3(start.x - 30 + (i % 6) * 12.0, 0, start.y + 30 + (i / 6) * 12.0)
+			mdl.rotation.y = 0.6
+			add_child(mdl)
+			i += 1
+		camera.jump_to(start + Vector2(0, 40))
 	if args.has("select"):
 		get_tree().create_timer(3.0).timeout.connect(func() -> void:
 			var p := _own(str(args["select"]))
@@ -219,8 +232,18 @@ func on_events(evs: Array) -> void:
 				Audio.I.weapon(str(d[1]), from)
 			"hit":
 				var wd: Dictionary = Data.WEAPONS.get(str(d[0]), {})
-				fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"))
-				Audio.I.impact(wd.get("style", "shell"), Vector3(d[1], float(d[3]), d[2]))
+				if str(d[0]) == "fab":
+					fx.explosion(Vector3(d[1], 0, d[2]), 9.0)
+					Audio.I.sfx("explosion_large", Vector3(d[1], 2, d[2]), 8.0, 0.0, 0.5)
+				else:
+					fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"))
+					Audio.I.impact(wd.get("style", "shell"), Vector3(d[1], float(d[3]), d[2]))
+			"pd":
+				# point-defence laser zaps an incoming missile
+				var dp: Puppet = puppets.get(int(d[0]))
+				if dp != null:
+					fx.laser(dp.cur_pos + Vector3(0, 2.2, 0), Vector3(d[1], float(d[3]), d[2]))
+					Audio.I.sfx("laser_zap", dp.cur_pos, -4.0, 0.1, 0.1)
 			"die":
 				pass   # despawn carries the visual death
 			"cash":
@@ -234,6 +257,12 @@ func on_events(evs: Array) -> void:
 				Audio.I.ui("alert", -8.0)
 				while alerts.size() > 8:
 					alerts.pop_front()
+			"produced":
+				var fac: Puppet = puppets.get(int(d[0]))
+				if fac != null:
+					fac.open_door(3.2)
+					if fac.type == "war_factory":
+						Audio.I.sfx("door", fac.cur_pos + Vector3(0, 2, 0), -6.0, 0.05, 0.5)
 			"beacon":
 				var who := int(d[2])
 				alerts.append({"p": Vector2(d[0], d[1]), "t": Time.get_ticks_msec() / 1000.0, "beacon": true})
@@ -241,8 +270,9 @@ func on_events(evs: Array) -> void:
 				on_msg("%s placed a beacon (Space to jump there)" % (names[who] if who < names.size() else "Ally"))
 				Audio.I.ui("alert", -6.0)
 			"beam":
-				fx.particle_beam(Vector3(d[0], 0, d[1]))
-				Audio.I.sfx("superweapon_fire", Vector3(d[0], 5, d[1]), 4.0, 0.05, 0.5)
+				var src: Puppet = puppets.get(int(d[2])) if d.size() > 2 else null
+				fx.particle_beam(Vector3(d[0], 0, d[1]), int(d[3]) if d.size() > 3 else -1, src.cur_pos + Vector3(0, 10.5, 0) if src != null else Vector3(-1, -1, -1))
+				Audio.I.sfx("superweapon_fire", Vector3(d[0], 5, d[1]), 4.0, 0.05, 1.5)
 			"strike":
 				fx.strike(str(d[0]), Vector3(d[1], 0, d[2]), float(d[3]), int(d[4]) if d.size() > 4 else 1)
 				match str(d[0]):
@@ -273,7 +303,7 @@ func on_events(evs: Array) -> void:
 
 func _process(_dt: float) -> void:
 	if camera != null and camera.cam != null:
-		Audio.I.listener_pos = camera.cam.global_position
+		Audio.I.listener_pos = camera.listener.global_position if camera.listener != null else camera.cam.global_position
 
 func contrail(a: Vector3, b: Vector3) -> void:
 	if fx.items.size() < 1400:
@@ -306,6 +336,8 @@ func _push_extras(st: Dictionary) -> void:
 				keys.append(k)
 		if p.type == "strategy_center" and p.team < plans.size() and str(plans[p.team]) != "":
 			keys.append("plan_" + str(plans[p.team]))
+		if p.type == "particle_cannon" and sw_ready(p.team):
+			keys.append("sw_ready")
 		keys.sort()
 		p.set_extras(keys)
 
@@ -356,8 +388,10 @@ func on_gameover(winner: int, rep: Array = []) -> void:
 	if winner == my_team:
 		Audio.I.ui("victory")
 		Audio.I.eva("victory", 0.0)
+		Audio.I.play_music("victory")
 	elif winner != -2:
 		Audio.I.ui("defeat")
+		Audio.I.play_music("defeat")
 		Audio.I.eva("defeat", 0.0)
 
 func on_paused(on: bool) -> void:
@@ -401,12 +435,22 @@ func has_upgrade(uid: String, bid := -1) -> bool:
 			return true
 	return false
 
-func is_researching(uid: String) -> bool:
+## Is this upgrade being researched (anywhere, or - for per-building upgrades like
+## control rods - at this particular building)?
+func is_researching(uid: String, bid := -1) -> bool:
 	var research: Dictionary = pstate.get("research", {})
-	for bid in research:
-		if research[bid][0] == uid:
+	if bid >= 0 and Data.UPGRADES[uid].get("per_building", false):
+		return research.has(bid) and research[bid][0] == uid
+	for b in research:
+		if research[b][0] == uid:
 			return true
 	return false
+
+func airfield_full(bid: int) -> bool:
+	var al: Dictionary = pstate.get("air_load", {})
+	if not al.has(bid):
+		return false
+	return int(al[bid][0]) >= int(al[bid][1])
 
 func building_prereq_text(type: String) -> String:
 	var d: Dictionary = Data.BUILDINGS[type]

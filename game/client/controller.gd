@@ -31,6 +31,7 @@ var guard_press := Vector2(-1, -1)      # screen point where LMB went down in gu
 var guard_centre := Vector2.ZERO        # ground point of that press
 var guard_radius := World.GUARD_RADIUS
 var rmb_press := Vector2(-1, -1)
+var cursor_kind := ""
 var rmb_dragged := false
 
 func setup(_view: ClientView) -> void:
@@ -48,7 +49,42 @@ func selected_puppets() -> Array:
 func selection_signature() -> String:
 	return sig
 
+## Pointer shows what's "equipped": the mode, or attack/repair when hovering a valid target.
+func _update_cursor() -> void:
+	var kind := ""
+	match mode:
+		"place":
+			kind = "build"
+		"amove":
+			kind = "amove"
+		"guard":
+			kind = "guard"
+		"force":
+			kind = "force"
+		"capture":
+			kind = "capture"
+		"rally":
+			kind = "rally"
+		"power":
+			kind = "power"
+		"sw":
+			kind = "sw"
+		"beacon":
+			kind = "beacon"
+		_:
+			var hp: Puppet = view.puppets.get(hover_id) if hover_id >= 0 else null
+			var units := _own_units_selected()
+			if hp != null and not units.is_empty():
+				if hp.team >= 0 and not view.is_ally(hp.team):
+					kind = "attack"
+				elif hp.is_building and hp.team == view.my_index and hp.hp_frac < 0.999 and _first_builder() >= 0:
+					kind = "repair"
+	if kind != cursor_kind:
+		cursor_kind = kind
+		Cursors.apply(kind)
+
 func _refresh_sig() -> void:
+	_update_cursor()
 	var parts := []
 	for id in selected:
 		var p = view.puppets.get(id)
@@ -376,6 +412,7 @@ func _update_hover() -> void:
 		hover_id = nid
 		if p != null:
 			p.hovered = true
+		_update_cursor()
 
 func _click_select(pos: Vector2, shift: bool, _ctrl: bool) -> void:
 	var p := _puppet_at(pos)

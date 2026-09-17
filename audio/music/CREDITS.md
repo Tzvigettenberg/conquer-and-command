@@ -3,6 +3,7 @@
 All tracks by Kevin MacLeod (incompetech.com), Licensed under Creative Commons: By Attribution 4.0 License
 http://creativecommons.org/licenses/by/4.0/
 
+- `defeat_dark_times.ogg` — "Dark Times"
 - `game_crypto.ogg` — "Crypto"
 - `game_exhilarate.ogg` — "Exhilarate"
 - `game_five_armies.ogg` — "Five Armies"
@@ -15,3 +16,4 @@ http://creativecommons.org/licenses/by/4.0/
 - `game_volatile_reaction.ogg` — "Volatile Reaction"
 - `menu_long_note_two.ogg` — "Long Note Two"
 - `menu_oppressive_gloom.ogg` — "Oppressive Gloom"
+- `victory_heroic_age.ogg` — "Heroic Age"
