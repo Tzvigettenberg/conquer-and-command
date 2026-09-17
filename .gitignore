@@ -3,3 +3,4 @@
 # Synty assets are licensed, not redistributable - keep them out of any public repo
 Assets/
 build/
+site/dist/download/

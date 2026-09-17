@@ -3,9 +3,11 @@
 
     python3 tools/publish_site.py
 
-Builds the site first, then replaces the `gh-pages` branch with exactly what is in `site/dist`.
-The branch holds only the built site - no history to prune, no Jekyll, nothing else - so the page
-at https://<owner>.github.io/<repo>/ is always the current build.
+Builds the site first, then replaces the `gh-pages` branch with exactly what is in `site/dist`,
+plus the newest Windows zip from `build/` as `download/ConquerAndCommand_ZeroBudget_win64.zip`.
+The branch is force-pushed as a single commit, so it holds only the current site and the current
+build - the download link never changes and the branch never grows. The zip is deliberately *not*
+in `site/dist` (and is git-ignored there), so it never lands in the main branch's history.
 
 Needs the same `~/.frontline/keys.env` as tools/release.py (GITHUB_REPO + GITHUB_TOKEN with
 Contents: read/write). One-off: in the repo's Settings -> Pages, set the source to "Deploy from a
@@ -20,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "site" / "dist"
 BRANCH = "gh-pages"
+DOWNLOAD_NAME = "ConquerAndCommand_ZeroBudget_win64.zip"
 
 
 def load_keys() -> dict:
@@ -44,12 +47,18 @@ def main() -> None:
         sys.exit("site/dist/index.html missing")
     remote = f"https://x-access-token:{env['GITHUB_TOKEN']}@github.com/{env['GITHUB_REPO']}.git"
     owner, repo = env["GITHUB_REPO"].split("/", 1)
+    zips = sorted((ROOT / "build").glob("*_win64.zip"), key=lambda p: p.stat().st_mtime)
+    build_zip = zips[-1] if zips and "--no-build" not in sys.argv else None
 
     # a throwaway repo holding only the built site, force-pushed onto the branch
     with tempfile.TemporaryDirectory() as tmp:
         git = ["git", "-C", tmp]
         subprocess.check_call(git + ["init", "-q", "-b", BRANCH])
         subprocess.check_call(["cp", "-r"] + [str(p) for p in DIST.iterdir()] + [tmp])
+        if build_zip:
+            (Path(tmp) / "download").mkdir()
+            subprocess.check_call(["cp", str(build_zip), str(Path(tmp) / "download" / DOWNLOAD_NAME)])
+            print(f"including {build_zip.name} ({build_zip.stat().st_size / 1_000_000:.0f} MB) as download/{DOWNLOAD_NAME}")
         subprocess.check_call(git + ["add", "-A"])
         subprocess.check_call(git + [
             "-c", "user.name=Tzvi Gettenberg", "-c", "user.email=tzvigettenberg@gmail.com",
