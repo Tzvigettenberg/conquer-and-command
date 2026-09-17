@@ -213,8 +213,6 @@ func _build_menu() -> void:
 	room_public.tooltip_text = "Off: nobody sees the room; friends join by IP as before."
 	if not rooms.enabled():
 		room_public.button_pressed = false
-		room_public.disabled = true
-		room_public.tooltip_text = "This build has no room list - friends join by IP."
 	hg.add_child(room_public)
 	var host_btn := Button.new()
 	host_btn.text = "HOST GAME"
@@ -232,6 +230,10 @@ func _build_menu() -> void:
 	refresh_btn.pressed.connect(func() -> void: rooms.refresh())
 	jh.add_child(refresh_btn)
 	menu_box.add_child(jh)
+	if not rooms.enabled():
+		# nothing to name or lock without a list: just host, and say so below
+		hg.visible = false
+		jh.visible = false
 	room_rows = VBoxContainer.new()
 	room_rows.add_theme_constant_override("separation", 4)
 	menu_box.add_child(room_rows)
