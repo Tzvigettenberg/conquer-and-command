@@ -55,6 +55,9 @@ func _ready() -> void:
 	if not args.has("headless_audio_off"):
 		audio.play_music("menu")
 	_build_menu()
+	if args.has("shell_only"):
+		# website / trailer capture: just the living shell map, no panels
+		menu.visible = false
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected)

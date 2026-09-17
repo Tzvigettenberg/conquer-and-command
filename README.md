@@ -196,6 +196,24 @@ Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
 Numbers come from the Zero Hour INI files (Weapon.ini / Armor.ini / Locomotor.ini / America*.ini),
 scaled to metres at 1 Generals unit = 0.2 m. See `game/data.gd`.
 
+## Website and releases
+The landing page (background shell-map video, Download button, how-to-play-with-friends) is a claude.ai artifact;
+its Download button points at the GitHub Releases *latest* asset, so it never needs editing:
+```
+https://github.com/<GITHUB_REPO>/releases/latest/download/ConquerAndCommand_ZeroBudget_win64.zip
+```
+Shipping an update = export the Windows build into `build/`, then:
+```
+python3 tools/release.py --push      # pushes source, tags vGAME_VERSION, uploads the zip (stable + versioned name)
+```
+It needs `GITHUB_REPO=owner/repo` and a `GITHUB_TOKEN` (fine-grained, Contents read/write) in `~/.frontline/keys.env`.
+Re-running for the same version replaces the assets. Bump `GAME_VERSION` in `game/main.gd` first - the host rejects
+mismatched clients, so every release is a new version.
+
+The site's background clip is the game's own shell map: `--shell_only` hides the menu panels and Godot's Movie Maker
+records it (`godot --path . --write-movie shell.avi --fixed-fps 30 --quit-after 960 -- --shell_only`, then
+`ffmpeg -i shell.avi -an -vf scale=1280:720 -c:v libx264 -crf 27 -pix_fmt yuv420p shell.mp4`).
+
 ## Layout
 ```
 game/main.gd            menu, lobby, host/join
