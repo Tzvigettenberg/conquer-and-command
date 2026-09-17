@@ -41,6 +41,7 @@ var solo := false
 var debug := false
 var bots: Array = []             # Bot instances (server-side AI players)
 var options: Dictionary = {}
+var paused := false
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -53,9 +54,12 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 	grid.setup(map_size)
 	solo = peers.size() == 1
 	var start_cash := float(opts.get("cash", Data.STARTING_CASH))
+	var teams: Array = opts.get("teams", [])
 	for i in range(peers.size()):
 		players.append({
 			"peer": peers[i], "name": names[i], "cash": start_cash, "xp": 0.0, "rank": 1, "points": 1, "lost_msg_t": -100.0,
+			"stats": {"units_built": 0, "units_lost": 0, "units_killed": 0, "bld_built": 0, "bld_lost": 0, "bld_killed": 0, "cash_earned": 0},
+			"team": int(teams[i]) if i < teams.size() else i,
 			"powers": {}, "cds": {}, "upgrades": {}, "defeated": false, "pp": 0, "pu": 0, "low": false,
 			"sw_steer": Vector2(-1, -1), "attack_msg_t": -100.0, "income_mult": 1.0,
 		})
@@ -90,6 +94,21 @@ func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) ->
 		else:
 			session.s_map(players[i]["peer"], map, i)
 	_update_vision()
+
+## Same player or same lobby team. Neutral (-1) is never allied.
+func allied(a: int, b: int) -> bool:
+	if a == b:
+		return true
+	if a < 0 or b < 0 or a >= players.size() or b >= players.size():
+		return false
+	return players[a]["team"] == players[b]["team"]
+
+## Vision shared across a team.
+func team_visible(p: int, pos: Vector2) -> bool:
+	for i in range(players.size()):
+		if allied(p, i) and visions[i].visible(pos):
+			return true
+	return false
 
 func player_of_peer(peer: int) -> int:
 	for i in range(players.size()):
@@ -138,7 +157,10 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 			if o.alive and o.home_id == e.id:
 				o.home_id = -1
 				o.flight = "fly" if o.flight == "parked" else o.flight
+	if e.owner >= 0 and reason == "killed":
+		players[e.owner]["stats"]["bld_lost" if e.is_building else "units_lost"] += 1
 	if killer != null and killer.owner >= 0 and killer.owner != e.owner and e.owner >= 0:
+		players[killer.owner]["stats"]["bld_killed" if e.is_building else "units_killed"] += 1
 		var xp := float(e.def.get("cost", 100)) * 0.06
 		var kp: Dictionary = players[killer.owner]
 		if kp["upgrades"].has("advanced_training"):
@@ -478,7 +500,7 @@ func _separate(e: Ent, dt: float) -> void:
 
 func _crush(e: Ent) -> void:
 	for o: Ent in query(e.pos, e.radius):
-		if o == e or o.owner == e.owner or o.owner < 0 or not o.def.get("crushable", false):
+		if o == e or allied(o.owner, e.owner) or o.owner < 0 or not o.def.get("crushable", false):
 			continue
 		if o.pos.distance_to(e.pos) < e.radius * 0.9:
 			_damage(o, 10000.0, "CRUSH", e)
@@ -552,7 +574,7 @@ func _auto_acquire(e: Ent, dt: float) -> bool:
 	var best: Ent = null
 	var best_score := 1e18
 	for o: Ent in query(centre, rng):
-		if o == e or not o.alive or o.owner == e.owner or o.owner < 0:
+		if o == e or not o.alive or allied(o.owner, e.owner) or o.owner < 0:
 			continue
 		if _is_stealthed(o) and not o.detected:
 			continue
@@ -628,7 +650,7 @@ func _is_stealthed(e: Ent) -> bool:
 
 func _do_attack(e: Ent, dt: float) -> void:
 	var t: Ent = ents.get(e.target_id)
-	if t == null or not t.alive or (_is_stealthed(t) and not t.detected and t.owner != e.owner):
+	if t == null or not t.alive or (_is_stealthed(t) and not t.detected and not allied(t.owner, e.owner)):
 		if e.is_building:
 			e.state = "idle"
 			e.target_id = -1
@@ -806,7 +828,7 @@ func _apply_hit(attacker: Ent, wid: String, target: Ent, pos: Vector2, dmg: floa
 	for o: Ent in query(pos, r):
 		if o == target or not o.alive:
 			continue
-		if o.owner == own and own >= 0:
+		if allied(o.owner, own) and own >= 0:
 			continue
 		if o.owner < 0 and dtype != "PARTICLE_BEAM" and target != null:
 			continue
@@ -825,7 +847,7 @@ func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 	if t.owner < 0 and t.def.get("neutral", false) and not t.def.get("capturable", false):
 		return
 	t.hp -= amount * mult
-	if t.owner >= 0 and attacker != null and attacker.owner != t.owner:
+	if t.owner >= 0 and attacker != null and not allied(attacker.owner, t.owner):
 		var pl: Dictionary = players[t.owner]
 		if time - pl["attack_msg_t"] > 8.0:
 			pl["attack_msg_t"] = time
@@ -1134,6 +1156,7 @@ func _do_gather(e: Ent, dt: float) -> void:
 			e.timer = 0.0
 			var val := float(e.carry * Data.BOX_VALUE) * float(players[e.owner]["income_mult"])
 			players[e.owner]["cash"] += val
+			players[e.owner]["stats"]["cash_earned"] += int(val)
 			events.append({"k": "cash", "p": c.pos, "d": [int(val), c.id], "o": e.owner, "only": e.owner})
 			e.carry = 0
 			var dock: Ent = ents.get(e.dock_id)
@@ -1183,6 +1206,7 @@ func _complete_building(b: Ent) -> void:
 	b.progress = 1.0
 	b.hp = b.max_hp
 	b.builder_id = -1
+	players[b.owner]["stats"]["bld_built"] += 1
 	_recompute_power(b.owner)
 	session.s_msg(players[b.owner]["peer"], "%s complete" % b.def["name"])
 	events.append({"k": "built", "p": b.pos, "d": [b.id], "o": b.owner})
@@ -1194,7 +1218,7 @@ func _complete_building(b: Ent) -> void:
 
 func _do_repair(e: Ent, dt: float) -> void:
 	var b: Ent = ents.get(e.target_id)
-	if b == null or not b.alive or b.owner != e.owner:
+	if b == null or not b.alive or not allied(b.owner, e.owner):
 		_next_order(e)
 		return
 	if not b.complete:
@@ -1245,9 +1269,15 @@ func _do_capture(e: Ent, dt: float) -> void:
 # Buildings
 # ---------------------------------------------------------------------------
 func _tick_building(e: Ent, dt: float) -> void:
+	if e.sold:
+		e.progress -= dt / maxf(float(e.def["time"]) * 0.35, 2.0)
+		if e.progress <= 0.0:
+			var refund := float(e.def["cost"]) * Data.REFUND
+			players[e.owner]["cash"] += refund
+			session.s_msg(players[e.owner]["peer"], "%s sold for $%d" % [e.def["name"], int(refund)])
+			destroy(e, "sold")
+		return
 	if not e.complete:
-		if e.capture_by >= 0 and e.capture_t > 0.0:
-			pass
 		return
 	if e.owner < 0:
 		return
@@ -1271,6 +1301,7 @@ func _tick_building(e: Ent, dt: float) -> void:
 			e.income_t = 0.0
 			var amt := float(e.def["income"]["amount"]) * float(pl["income_mult"])
 			pl["cash"] += amt
+			pl["stats"]["cash_earned"] += int(amt)
 			events.append({"k": "cash", "p": e.pos, "d": [int(amt), e.id], "o": e.owner, "only": e.owner})
 	if e.def.has("superweapon") and not e.sw_ready:
 		if e.powered:
@@ -1292,6 +1323,7 @@ func _tick_building(e: Ent, dt: float) -> void:
 
 func _produce(b: Ent, type: String) -> void:
 	var d: Dictionary = Data.UNITS[type]
+	players[b.owner]["stats"]["units_built"] += 1
 	var u: Ent
 	if d.get("jet", false):
 		var idx := 0
@@ -1432,11 +1464,11 @@ func _update_vision() -> void:
 				keep.append(r)
 		v.reveals = keep
 		if players[p]["peer"] >= 0:
-			session.s_fog(players[p]["peer"], v.packed())
+			session.s_fog(players[p]["peer"], _team_fog(p))
 		# ghost buildings that died out of sight
 		var done := []
 		for id in pending_despawn[p]:
-			if v.visible(pending_despawn[p][id]):
+			if team_visible(p, pending_despawn[p][id]):
 				session.s_despawn(players[p]["peer"], id, "gone")
 				known[p].erase(id)
 				done.append(id)
@@ -1446,10 +1478,38 @@ func _update_vision() -> void:
 	for e: Ent in ents.values():
 		e.detected = false
 
+## Bit-packed union of every allied player's vision.
+func _team_fog(p: int) -> PackedByteArray:
+	var v: Vision = visions[p]
+	var out := PackedByteArray()
+	out.resize((v.size * v.size + 7) / 8)
+	out.fill(0)
+	for i in range(players.size()):
+		if not allied(p, i):
+			continue
+		var vis: PackedByteArray = visions[i].vis
+		for k in range(vis.size()):
+			if vis[k] == 1:
+				out[k >> 3] = out[k >> 3] | (1 << (k & 7))
+	return out
+
 func _visible_to(p: int, e: Ent) -> bool:
-	if e.owner == p:
+	if allied(e.owner, p):
 		return true
-	if not visions[p].visible(e.pos):
+	if e.is_building:
+		# a structure is visible if any of its footprint corners or its centre is in view
+		if not team_visible(p, e.pos):
+			var fp: Vector2i = e.def["fp"]
+			var half := Vector2(fp) * PathGrid.CELL * 0.5
+			var seen := false
+			for c in [Vector2(-half.x, -half.y), Vector2(half.x, -half.y), Vector2(half.x, half.y), Vector2(-half.x, half.y)]:
+				if team_visible(p, e.pos + c.rotated(-e.yaw)):
+					seen = true
+					break
+			if not seen:
+				return false
+		return true
+	if not team_visible(p, e.pos):
 		return false
 	if e.owner >= 0 and _is_stealthed(e) and not e.detected:
 		return false
@@ -1542,7 +1602,7 @@ func _send_snapshots() -> void:
 		for ev in events:
 			if ev.has("only") and ev["only"] != p:
 				continue
-			if ev.get("all", false) or ev.get("o", -1) == p or visions[p].visible(ev["p"]) or ev.has("only"):
+			if ev.get("all", false) or allied(ev.get("o", -1), p) or team_visible(p, ev["p"]) or ev.has("only"):
 				evs.append([ev["k"], ev["d"]])
 		if not evs.is_empty():
 			session.s_events(players[p]["peer"], evs)
@@ -1550,6 +1610,12 @@ func _send_snapshots() -> void:
 
 func events_seen_by_bot(_p: int) -> void:
 	pass
+
+func _teams_array() -> Array:
+	var out := []
+	for pl in players:
+		out.append(pl["team"])
+	return out
 
 func _send_pstates() -> void:
 	var sw := {}
@@ -1570,7 +1636,7 @@ func _send_pstates() -> void:
 			"cash": int(pl["cash"]), "pp": pl["pp"], "pu": pl["pu"], "low": pl["low"], "rank": pl["rank"], "xp": int(pl["xp"]),
 			"next": Data.RANK_XP[pl["rank"]] if pl["rank"] < 5 else -1, "points": pl["points"], "powers": pl["powers"].duplicate(),
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
-			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "beam": beams.size() > 0 and beams[0]["owner"] == p,
+			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": beams.size() > 0 and beams[0]["owner"] == p,
 		}
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
@@ -1613,12 +1679,33 @@ func _check_victory() -> void:
 	if solo:
 		if alive_players.is_empty():
 			game_over = true
-			session.s_gameover(-1)
+			session.s_gameover(-1, report())
 		return
-	if alive_players.size() <= 1:
+	var teams_alive := {}
+	for p in alive_players:
+		teams_alive[players[p]["team"]] = true
+	if teams_alive.size() <= 1:
 		game_over = true
-		winner = alive_players[0] if alive_players.size() == 1 else -1
-		session.s_gameover(winner)
+		winner = -1
+		if teams_alive.size() == 1:
+			winner = int(teams_alive.keys()[0])
+		session.s_gameover(winner, report())
+
+## End-of-match statistics for every player.
+func report() -> Array:
+	var out := []
+	for p in range(players.size()):
+		var pl: Dictionary = players[p]
+		var st: Dictionary = pl["stats"].duplicate()
+		st["name"] = pl["name"]
+		st["ai"] = pl["peer"] < 0
+		st["rank"] = pl["rank"]
+		st["xp"] = int(pl["xp"])
+		st["defeated"] = pl["defeated"]
+		st["team"] = pl["team"]
+		st["time"] = int(time)
+		out.append(st)
+	return out
 
 # ---------------------------------------------------------------------------
 # Commands (from clients)
@@ -1671,6 +1758,15 @@ func cmd(p: int, c: Dictionary) -> void:
 		"cheat_cash":
 			if solo or debug:
 				players[p]["cash"] += 10000.0
+		"pause":
+			# only when no other human is in the match
+			var humans := 0
+			for pl in players:
+				if pl["peer"] >= 0:
+					humans += 1
+			if humans <= 1:
+				paused = bool(c.get("on", false))
+				session.s_paused(paused)
 
 func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 	var t: String = c["t"]
@@ -1688,7 +1784,7 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 			if tgt == null or not tgt.alive:
 				return
 			var force: bool = c.get("force", false)
-			if tgt.owner == e.owner and not force:
+			if allied(tgt.owner, e.owner) and not force:
 				return
 			if tgt.owner < 0 and tgt.def.get("neutral", false) and not tgt.def.get("capturable", false) and not force:
 				return
@@ -1738,7 +1834,7 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 			if not e.def.get("builder", false):
 				return
 			var b: Ent = ents.get(int(c.get("tid", -1)))
-			if b == null or not b.alive or not b.is_building or b.owner != e.owner:
+			if b == null or not b.alive or not b.is_building or not allied(b.owner, e.owner):
 				return
 			e.state = "repair" if b.complete else "build"
 			e.target_id = b.id
@@ -1751,7 +1847,7 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 				session.s_msg(players[e.owner]["peer"], "Requires the Capture Building upgrade (Barracks)")
 				return
 			var b: Ent = ents.get(int(c.get("tid", -1)))
-			if b == null or not b.alive or not b.is_building or b.owner == e.owner or b.type == "supply_dock":
+			if b == null or not b.alive or not b.is_building or allied(b.owner, e.owner) or b.type == "supply_dock":
 				return
 			if b.owner >= 0 and not b.complete:
 				return
@@ -1870,17 +1966,25 @@ func _cmd_cancel(p: int, c: Dictionary) -> void:
 
 func _cmd_sell(p: int, c: Dictionary) -> void:
 	var b: Ent = ents.get(int(c.get("id", -1)))
-	if b == null or not b.alive or b.owner != p or not b.is_building or b.def.get("neutral", false):
+	if b == null or not b.alive or b.owner != p or not b.is_building or b.def.get("neutral", false) or b.sold:
 		return
-	var refund := float(b.def["cost"]) * (Data.REFUND if b.complete else (1.0 - clampf(b.progress, 0.0, 1.0)))
+	# refund queued production / research right away, then "unbuild" the structure;
+	# the sale money only arrives when it has fully sunk (destroyed meanwhile = nothing)
+	var refund := 0.0
 	for q in b.prod:
 		refund += float(Data.UNITS[q["type"]]["cost"])
 	for r in b.research:
 		refund += float(Data.UPGRADES[r["id"]]["cost"])
+	b.prod.clear()
+	b.research.clear()
 	players[p]["cash"] += refund
 	b.sold = true
-	destroy(b, "sold")
-	session.s_msg(players[p]["peer"], "%s sold for $%d" % [b.def["name"], int(refund)])
+	if b.complete:
+		b.progress = 1.0
+	b.complete = false
+	b.builder_id = -1
+	_recompute_power(p)
+	session.s_msg(players[p]["peer"], "Selling %s" % b.def["name"])
 
 func _cmd_upgrade(p: int, c: Dictionary) -> void:
 	var b: Ent = ents.get(int(c.get("id", -1)))

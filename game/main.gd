@@ -23,7 +23,7 @@ var opt_ai_level: OptionButton
 var opt_map: OptionButton
 var opt_cash: OptionButton
 var opt_sw: CheckButton
-var lobby_opts := {"ai": 1, "ai_level": "medium", "map": "desert", "cash": 10000, "superweapons": true}
+var lobby_opts := {"ai": 1, "ai_level": "medium", "map": "desert", "cash": 10000, "superweapons": true, "teams": []}
 var menu_box: VBoxContainer
 var args: Dictionary = {}
 var lobby_players: Array = []      # server: [{peer, name}]
@@ -43,6 +43,7 @@ func _ready() -> void:
 	_parse_args()
 	if args.has("port"):
 		port = int(args["port"])
+	Settings.apply()
 	if not args.has("headless_audio_off"):
 		audio.play_music("menu")
 	_build_menu()
@@ -275,9 +276,28 @@ func _opts_changed() -> void:
 	lobby_opts = {
 		"ai": opt_ai.selected, "ai_level": opt_ai_level.get_item_metadata(opt_ai_level.selected),
 		"map": opt_map.get_item_metadata(opt_map.selected), "cash": opt_cash.get_item_metadata(opt_cash.selected),
-		"superweapons": opt_sw.button_pressed,
+		"superweapons": opt_sw.button_pressed, "teams": lobby_opts.get("teams", []),
 	}
 	_refresh_lobby()
+
+## Team per lobby slot (humans first, then AIs). Defaults to free-for-all.
+func _slot_teams(total: int) -> Array:
+	var teams: Array = lobby_opts.get("teams", [])
+	while teams.size() < total:
+		teams.append(teams.size())
+	lobby_opts["teams"] = teams
+	return teams
+
+func _team_picker(slot: int, total: int, is_host: bool) -> OptionButton:
+	var ob := OptionButton.new()
+	for t in range(4):
+		ob.add_item("Team %d" % (t + 1))
+	ob.select(clampi(int(_slot_teams(total)[slot]), 0, 3))
+	ob.mouse_filter = Control.MOUSE_FILTER_STOP if is_host else Control.MOUSE_FILTER_IGNORE
+	ob.item_selected.connect(func(i: int) -> void:
+		_slot_teams(total)[slot] = i
+		_refresh_lobby())
+	return ob
 
 func _apply_opts_ui() -> void:
 	for i in range(opt_map.item_count):
@@ -297,6 +317,7 @@ func _refresh_lobby() -> void:
 		c.queue_free()
 	var is_host := multiplayer.is_server()
 	var ai_n := clampi(int(lobby_opts["ai"]), 0, MAX_PLAYERS - lobby_players.size())
+	var total := lobby_players.size() + ai_n
 	for i in range(lobby_players.size()):
 		var p: Dictionary = lobby_players[i]
 		var h := HBoxContainer.new()
@@ -308,6 +329,7 @@ func _refresh_lobby() -> void:
 		l.text = "  %s%s" % [p["name"], "  (host)" if p["peer"] == 1 else ""]
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		h.add_child(l)
+		h.add_child(_team_picker(i, total, is_host))
 		if is_host and p["peer"] != 1:
 			var kick := Button.new()
 			kick.text = "Kick"
@@ -322,7 +344,9 @@ func _refresh_lobby() -> void:
 		h.add_child(sw)
 		var l := Label.new()
 		l.text = "  AI General (%s)" % str(lobby_opts["ai_level"]).capitalize()
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		h.add_child(l)
+		h.add_child(_team_picker(lobby_players.size() + i, total, is_host))
 		lobby_rows.add_child(h)
 	if lobby_players.size() + ai_n < 2:
 		var l := Label.new()
@@ -406,7 +430,7 @@ func _on_conn_failed() -> void:
 func _on_server_disconnected() -> void:
 	if view:
 		view.on_msg("Host disconnected")
-		view.on_gameover(-2)
+		view.on_gameover(-2, [])
 	else:
 		_set_status("Host disconnected.")
 		_leave()
@@ -445,7 +469,12 @@ func _start_game() -> void:
 	var w := World.new()
 	w.debug = args.has("debug")
 	session.world = w
-	w.start(session, peers, names, {"map": opts["map"], "cash": opts["cash"], "superweapons": opts["superweapons"], "ai": opts["ai_level"]})
+	var teams: Array = _slot_teams(peers.size()).slice(0, peers.size())
+	if args.has("teams"):
+		teams = []
+		for t in str(args["teams"]).split(","):
+			teams.append(int(t))
+	w.start(session, peers, names, {"map": opts["map"], "cash": opts["cash"], "superweapons": opts["superweapons"], "ai": opts["ai_level"], "teams": teams})
 	if args.has("simtest"):
 		w.probe_ridge()
 		get_tree().quit()

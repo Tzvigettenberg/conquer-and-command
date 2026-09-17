@@ -113,7 +113,7 @@ func _scan_enemy() -> void:
 	# The bot "sees" like a player: only remembers enemy buildings its vision has covered.
 	var v: Vision = w.visions[p]
 	for e: Ent in w.ents.values():
-		if e.alive and e.owner >= 0 and e.owner != p and e.is_building and v.visible(e.pos):
+		if e.alive and e.owner >= 0 and not w.allied(e.owner, p) and e.is_building and v.visible(e.pos):
 			known_enemy = e.pos
 	if known_enemy.x < 0 and t > 30.0:
 		known_enemy = _nearest_enemy_start()
@@ -123,7 +123,7 @@ func _nearest_enemy_start() -> Vector2:
 	var best := Vector2(200, 200)
 	var bd := 1e18
 	for i in range(w.players.size()):
-		if i == p or w.players[i]["defeated"]:
+		if w.allied(i, p) or w.players[i]["defeated"]:
 			continue
 		var s: Vector2 = w.map["starts"][i]
 		if s.distance_squared_to(base) < bd:
@@ -352,7 +352,7 @@ func _enemy_cluster(near: Vector2) -> Vector2:
 	var best := near
 	var best_n := 0
 	for e: Ent in w.ents.values():
-		if not e.alive or e.owner == p or e.owner < 0 or not w.visions[p].visible(e.pos):
+		if not e.alive or w.allied(e.owner, p) or e.owner < 0 or not w.visions[p].visible(e.pos):
 			continue
 		var n := 0
 		for o: Ent in w.query(e.pos, 12.0):
@@ -377,7 +377,7 @@ func _army() -> void:
 		# find the nearest enemy to the base
 		var nearest: Ent = null
 		for e: Ent in w.ents.values():
-			if e.alive and e.owner >= 0 and e.owner != p and not e.is_building and e.pos.distance_to(base) < 110.0:
+			if e.alive and e.owner >= 0 and not w.allied(e.owner, p) and not e.is_building and e.pos.distance_to(base) < 110.0:
 				if nearest == null or e.pos.distance_squared_to(base) < nearest.pos.distance_squared_to(base):
 					nearest = e
 		if nearest != null:
@@ -427,7 +427,7 @@ func _army() -> void:
 				near_target += 1
 		var enemy_left := false
 		for e: Ent in w.ents.values():
-			if e.alive and e.owner >= 0 and e.owner != p and e.is_building and e.pos.distance_to(attack_target) < 70.0:
+			if e.alive and e.owner >= 0 and not w.allied(e.owner, p) and e.is_building and e.pos.distance_to(attack_target) < 70.0:
 				enemy_left = true
 				if w.visions[p].visible(e.pos):
 					attack_target = e.pos
@@ -438,7 +438,7 @@ func _army() -> void:
 				# pick another known enemy building
 				known_enemy = Vector2(-1, -1)
 				for e: Ent in w.ents.values():
-					if e.alive and e.owner >= 0 and e.owner != p and e.is_building:
+					if e.alive and e.owner >= 0 and not w.allied(e.owner, p) and e.is_building:
 						known_enemy = e.pos
 						break
 				if known_enemy.x < 0:

@@ -45,6 +45,7 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	var start: Vector2 = m["starts"][index]
 	camera.setup(float(m["size"]), start + Vector2(0, 10))
 	camera.yaw = float(m["start_yaw"][index])
+	camera.edge_scroll = bool(Settings.load_cfg().get("edge_scroll", true))
 	camera._apply()
 	ctl = Controller.new()
 	ctl.name = "Controller"
@@ -248,7 +249,7 @@ func on_events(evs: Array) -> void:
 			"built":
 				var b: Puppet = puppets.get(int(d[0]))
 				if b != null:
-					fx.placed(b.cur_pos, Data.footprint_size(b.type))
+					fx.placed(b.cur_pos, Data.footprint_size(b.type), b.cur_yaw)
 					Audio.I.sfx("chime", b.cur_pos, -6.0, 0.0, 0.2)
 
 func _process(_dt: float) -> void:
@@ -284,24 +285,41 @@ func on_msg(text: String) -> void:
 	if "Low power" in text:
 		Audio.I.ui("power_down", -2.0)
 
-func on_gameover(winner: int) -> void:
+func on_gameover(winner: int, rep: Array = []) -> void:
 	game_over = true
+	var my_team := my_index
+	var teams: Array = pstate.get("teams", [])
+	if my_index < teams.size():
+		my_team = int(teams[my_index])
 	var text := "DEFEAT"
 	if winner == -2:
 		text = "DISCONNECTED"
-	elif winner == my_index:
+	elif winner == my_team:
 		text = "VICTORY"
 	elif winner == -1:
 		text = "GAME OVER"
-	hud.show_gameover(text)
+	hud.show_gameover(text, rep)
 	map_view.reveal_all()
 	ctl.cancel_mode()
-	if winner == my_index:
+	if winner == my_team:
 		Audio.I.ui("victory")
 		Audio.I.eva("victory", 0.0)
 	elif winner != -2:
 		Audio.I.ui("defeat")
 		Audio.I.eva("defeat", 0.0)
+
+func on_paused(on: bool) -> void:
+	hud.set_paused(on)
+
+func is_ally(team_idx: int) -> bool:
+	if team_idx == my_index:
+		return true
+	if team_idx < 0:
+		return false
+	var teams: Array = pstate.get("teams", [])
+	if my_index < teams.size() and team_idx < teams.size():
+		return teams[my_index] == teams[team_idx]
+	return false
 
 # ---------------------------------------------------------------------------
 # Helpers for HUD / controller
@@ -342,24 +360,24 @@ func building_prereq_text(type: String) -> String:
 	var d: Dictionary = Data.BUILDINGS[type]
 	for r in d.get("prereq", []):
 		if not has_building(r):
-			return "Requires %s" % Data.BUILDINGS[r]["name"]
+			return "Needs %s" % Data.BUILDINGS[r]["name"]
 	if d.has("prereq_any"):
 		var ok := false
 		for r in d["prereq_any"]:
 			if has_building(r):
 				ok = true
 		if not ok:
-			return "Requires %s" % Data.BUILDINGS[d["prereq_any"][0]]["name"]
+			return "Needs %s" % Data.BUILDINGS[d["prereq_any"][0]]["name"]
 	return ""
 
 func unit_prereq_text(type: String) -> String:
 	var d: Dictionary = Data.UNITS[type]
 	for r in d.get("prereq", []):
 		if not has_building(r):
-			return "Requires %s" % Data.BUILDINGS[r]["name"]
+			return "Needs %s" % Data.BUILDINGS[r]["name"]
 	if d.has("needs_power"):
 		if int(pstate.get("powers", {}).get(d["needs_power"], 0)) <= 0:
-			return "Requires promotion: %s" % Data.POWERS[d["needs_power"]]["name"]
+			return "Needs promotion (%s)" % Data.POWERS[d["needs_power"]]["name"]
 	if d.has("limit") and count_own(type) >= int(d["limit"]):
 		return "Limit reached"
 	return ""
@@ -431,12 +449,20 @@ func _run_test(kind: String) -> void:
 				break
 	# production
 	send({"t": "cheat_cash"})
+	if args.has("screenshot"):
+		ctl.set_selection([dz.id])          # build menu in the shots
+		await get_tree().create_timer(9.0).timeout
+		hud._toggle_promo()
+		await get_tree().create_timer(9.0).timeout
+		hud.close_promo()
 	var bar := _own("barracks")
 	if bar:
 		for i in range(4):
 			send({"t": "produce", "id": bar.id, "type": "ranger"})
 		send({"t": "produce", "id": bar.id, "type": "missile_defender"})
 	var wf := _own("war_factory")
+	if wf and args.has("screenshot"):
+		ctl.set_selection([wf.id])
 	if wf:
 		for i in range(3):
 			send({"t": "produce", "id": wf.id, "type": "crusader"})

@@ -178,6 +178,8 @@ func _own_units_selected() -> Array:
 func _unhandled_input(ev: InputEvent) -> void:
 	if view.game_over:
 		return
+	if view.hud.pause_panel.visible and not (ev is InputEventKey and (ev.keycode == KEY_ESCAPE or ev.keycode == KEY_F10)):
+		return
 	if ev is InputEventMouseMotion:
 		mouse_pos = ev.position
 		if drag_start.x >= 0 and not dragging and mouse_pos.distance_to(drag_start) > DRAG_MIN and mode == "":
@@ -233,11 +235,13 @@ func _unhandled_input(ev: InputEvent) -> void:
 		return
 	if ev is InputEventKey and ev.pressed:
 		var k := ev as InputEventKey
-		if k.keycode == KEY_ESCAPE:
+		if k.keycode == KEY_ESCAPE or k.keycode == KEY_F10:
 			if mode != "":
 				cancel_mode()
+			elif view.hud.promo_panel.visible:
+				view.hud.close_promo()
 			else:
-				set_selection([])
+				view.hud.toggle_pause_menu()
 			get_viewport().set_input_as_handled()
 			return
 		if k.echo:
@@ -246,7 +250,10 @@ func _unhandled_input(ev: InputEvent) -> void:
 			KEY_S:
 				stop()
 			KEY_G:
-				guard()
+				if mode == "guard":
+					guard()
+				elif not _own_units_selected().is_empty():
+					guard_mode()
 			KEY_A:
 				if not _own_units_selected().is_empty():
 					amove_mode()
@@ -348,7 +355,7 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 			view.send({"t": "rally", "id": sel[0].id, "x": g.x, "y": g.y})
 		return
 	if target != null:
-		if target.team != view.my_index and target.team >= 0:
+		if target.team >= 0 and not view.is_ally(target.team):
 			if target.cat == "air" and target.cur_pos.y > 0.5:
 				var aa := _filter_ids(ids, func(p: Puppet) -> bool:
 					for w in p.def.get("weapons", []):
@@ -372,7 +379,7 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
 			return
-		if target.team == view.my_index and target.is_building:
+		if target.team >= 0 and view.is_ally(target.team) and target.is_building:
 			var builders := _filter_ids(ids, func(p: Puppet) -> bool: return p.def.get("builder", false))
 			var others := _filter_ids(ids, func(p: Puppet) -> bool: return not p.def.get("builder", false))
 			if not builders.is_empty():
@@ -518,6 +525,8 @@ func _force_attack(pos: Vector2) -> void:
 		return
 	var target := _puppet_at(pos)
 	if target != null and not (target.team == view.my_index and _all_selected(target)):
+		if target.team >= 0 and view.is_ally(target.team):
+			view.on_msg("Force-firing on an ally!")
 		view.send({"t": "attack", "ids": ids, "tid": target.id, "force": true, "q": Input.is_key_pressed(KEY_SHIFT)})
 		view.fx.floating_text(target.cur_pos, "✕", Color(1, 0.3, 0.3))
 		return

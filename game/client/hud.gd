@@ -3,7 +3,7 @@ extends CanvasLayer
 ## Generals-style command bar: minimap, selection info, command grid, top bar,
 ## general's powers, messages, world-space overlay (health bars, selection box).
 
-const BAR_H := 200.0
+const BAR_H := 256.0
 const GRID_COLS := 4
 const GRID_ROWS := 3
 
@@ -22,11 +22,21 @@ var info_body: RichTextLabel
 var queue_box: HBoxContainer
 var grid_buttons: Array[Button] = []
 var grid_actions: Array = []
+var grid_why: Array[Label] = []
 var powers_box: VBoxContainer
 var power_buttons: Dictionary = {}
 var promo_panel: PanelContainer
 var promo_backdrop: ColorRect
+var pause_panel: PanelContainer
+var pause_backdrop: ColorRect
+var pause_box: VBoxContainer
+var settings_box: VBoxContainer
+var paused_label: Label
+var sim_paused := false
 var promo_list: VBoxContainer
+var promo_scroll: ScrollContainer
+var promo_key := ""
+var promo_xp: Label
 var minimap: Control
 var overlay: Control
 var gameover_panel: PanelContainer
@@ -131,14 +141,25 @@ func _build() -> void:
 			promo_backdrop.visible = false
 			promo_panel.visible = false)
 	add_child(promo_backdrop)
+	var promo_center := CenterContainer.new()
+	promo_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	promo_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(promo_center)
 	promo_panel = _panel(Color(0.08, 0.09, 0.12, 0.98))
-	promo_panel.set_anchors_preset(Control.PRESET_CENTER)
 	promo_panel.visible = false
-	promo_panel.custom_minimum_size = Vector2(760, 0)
-	add_child(promo_panel)
+	promo_panel.custom_minimum_size = Vector2(800, 0)
+	promo_center.add_child(promo_panel)
+	promo_scroll = ScrollContainer.new()
+	promo_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	promo_scroll.custom_minimum_size = Vector2(800, 400)
+	promo_panel.add_child(promo_scroll)
 	promo_list = VBoxContainer.new()
-	promo_list.add_theme_constant_override("separation", 8)
-	promo_panel.add_child(promo_list)
+	promo_list.add_theme_constant_override("separation", 6)
+	promo_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	promo_scroll.add_child(promo_list)
+	get_viewport().size_changed.connect(func() -> void:
+		if promo_panel.visible:
+			_fit_promo())
 
 	# ---- messages ----
 	msg_box = VBoxContainer.new()
@@ -209,39 +230,91 @@ func _build() -> void:
 	bh.add_child(gridp)
 	var grid := GridContainer.new()
 	grid.columns = GRID_COLS
-	grid.add_theme_constant_override("h_separation", 4)
-	grid.add_theme_constant_override("v_separation", 4)
+	grid.add_theme_constant_override("h_separation", 3)
+	grid.add_theme_constant_override("v_separation", 3)
 	gridp.add_child(grid)
 	for i in range(GRID_COLS * GRID_ROWS):
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(100, 58)
-		b.add_theme_font_size_override("font_size", 11)
+		b.custom_minimum_size = Vector2(124, 74)
+		b.add_theme_font_size_override("font_size", 10)
 		b.visible = false
-		b.clip_text = true
+		b.clip_text = false
+		b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		b.expand_icon = true
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		b.pressed.connect(_on_grid.bind(i))
 		grid.add_child(b)
+		# requirement / status line drawn as a wrapping label over the bottom of the button
+		var wl := Label.new()
+		wl.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		wl.offset_left = 3
+		wl.offset_right = -3
+		wl.offset_top = -19
+		wl.offset_bottom = -4
+		wl.grow_vertical = Control.GROW_DIRECTION_BEGIN
+		wl.clip_text = true
+		wl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		wl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		wl.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		wl.add_theme_font_size_override("font_size", 10)
+		wl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.35))
+		wl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		wl.visible = false
+		b.add_child(wl)
+		grid_why.append(wl)
 		grid_buttons.append(b)
 		grid_actions.append(null)
 
-	# ---- game over ----
-	gameover_panel = _panel(Color(0.05, 0.05, 0.07, 0.95))
-	gameover_panel.set_anchors_preset(Control.PRESET_CENTER)
+	# modal above the command bar (bar was added after it)
+	move_child(promo_backdrop, -1)
+	move_child(promo_panel.get_parent(), -1)
+
+	# ---- pause menu ----
+	pause_backdrop = ColorRect.new()
+	pause_backdrop.color = Color(0, 0, 0, 0.5)
+	pause_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_backdrop.visible = false
+	add_child(pause_backdrop)
+	var pause_center := CenterContainer.new()
+	pause_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(pause_center)
+	pause_panel = _panel(Color(0.07, 0.08, 0.11, 0.98))
+	pause_panel.visible = false
+	pause_panel.custom_minimum_size = Vector2(420, 0)
+	pause_center.add_child(pause_panel)
+	pause_box = VBoxContainer.new()
+	pause_box.add_theme_constant_override("separation", 8)
+	pause_panel.add_child(pause_box)
+	_build_pause_menu()
+	paused_label = Label.new()
+	paused_label.text = "PAUSED"
+	paused_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	paused_label.position = Vector2(-100, 60)
+	paused_label.size = Vector2(200, 40)
+	paused_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	paused_label.add_theme_font_size_override("font_size", 30)
+	paused_label.add_theme_color_override("font_color", Color(1, 0.9, 0.4))
+	paused_label.visible = false
+	add_child(paused_label)
+
+	# ---- game over / report ----
+	var go_center := CenterContainer.new()
+	go_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	go_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(go_center)
+	gameover_panel = _panel(Color(0.05, 0.05, 0.07, 0.96))
 	gameover_panel.visible = false
-	add_child(gameover_panel)
+	go_center.add_child(gameover_panel)
 	var gv := VBoxContainer.new()
+	gv.name = "Box"
 	gv.add_theme_constant_override("separation", 12)
 	gameover_panel.add_child(gv)
 	gameover_label = Label.new()
 	gameover_label.add_theme_font_size_override("font_size", 36)
 	gameover_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	gv.add_child(gameover_label)
-	var back := Button.new()
-	back.text = "Return to menu"
-	back.pressed.connect(func() -> void: Main.I.return_to_menu())
-	gv.add_child(back)
 
 func is_mouse_over_ui(p: Vector2) -> bool:
 	var vs := get_viewport().get_visible_rect().size
@@ -312,9 +385,127 @@ func add_message(text: String) -> void:
 		var m: Dictionary = msgs.pop_front()
 		m["label"].queue_free()
 
-func show_gameover(text: String) -> void:
+func show_gameover(text: String, rep: Array = []) -> void:
 	gameover_label.text = text
+	var gv: VBoxContainer = gameover_panel.get_node("Box")
+	for c in gv.get_children():
+		if c != gameover_label:
+			c.queue_free()
+	if not rep.is_empty():
+		var t := int(rep[0].get("time", 0))
+		var sub := Label.new()
+		sub.text = "Match time %d:%02d" % [t / 60, t % 60]
+		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sub.modulate = Color(0.75, 0.75, 0.75)
+		gv.add_child(sub)
+		var grid := GridContainer.new()
+		grid.columns = 9
+		grid.add_theme_constant_override("h_separation", 18)
+		grid.add_theme_constant_override("v_separation", 4)
+		gv.add_child(grid)
+		for h in ["Player", "Team", "Result", "Rank", "Units built", "Units lost", "Units killed", "Structures built / lost / killed", "Cash earned"]:
+			var l := Label.new()
+			l.text = h
+			l.add_theme_font_size_override("font_size", 12)
+			l.add_theme_color_override("font_color", Color(0.7, 0.75, 0.85))
+			grid.add_child(l)
+		for i in range(rep.size()):
+			var r: Dictionary = rep[i]
+			var col: Color = Data.TEAM_COLORS[i % Data.TEAM_COLORS.size()]
+			var vals := [r.get("name", "?"), "Team %d" % (int(r.get("team", i)) + 1), "Defeated" if r.get("defeated", false) else "Survived",
+				"★".repeat(int(r.get("rank", 1))), str(r.get("units_built", 0)), str(r.get("units_lost", 0)), str(r.get("units_killed", 0)),
+				"%d / %d / %d" % [r.get("bld_built", 0), r.get("bld_lost", 0), r.get("bld_killed", 0)], "$%d" % int(r.get("cash_earned", 0))]
+			for k in range(vals.size()):
+				var l := Label.new()
+				l.text = str(vals[k])
+				l.add_theme_font_size_override("font_size", 13)
+				if k == 0:
+					l.add_theme_color_override("font_color", col)
+				elif k == 2:
+					l.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4) if r.get("defeated", false) else Color(0.5, 0.9, 0.6))
+				grid.add_child(l)
+	var back := Button.new()
+	back.text = "Return to menu"
+	back.pressed.connect(func() -> void: Main.I.return_to_menu())
+	gv.add_child(back)
 	gameover_panel.visible = true
+	pause_panel.visible = false
+	pause_backdrop.visible = false
+
+# ---------------------------------------------------------------------------
+# Pause menu / settings
+# ---------------------------------------------------------------------------
+func _build_pause_menu() -> void:
+	var title := Label.new()
+	title.text = "GAME MENU"
+	title.add_theme_font_size_override("font_size", 22)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pause_box.add_child(title)
+	var resume := Button.new()
+	resume.text = "Resume  (Esc)"
+	resume.pressed.connect(toggle_pause_menu)
+	pause_box.add_child(resume)
+	var settings_hdr := Label.new()
+	settings_hdr.text = "SETTINGS"
+	settings_hdr.add_theme_font_size_override("font_size", 12)
+	settings_hdr.modulate = Color(0.7, 0.75, 0.8)
+	pause_box.add_child(settings_hdr)
+	settings_box = VBoxContainer.new()
+	pause_box.add_child(settings_box)
+	var cfg := Settings.load_cfg()
+	for pair in [["Master volume", "master"], ["Sound effects", "sfx"], ["Voices", "voice"], ["Music", "music"]]:
+		var h := HBoxContainer.new()
+		var l := Label.new()
+		l.text = pair[0]
+		l.custom_minimum_size = Vector2(150, 0)
+		h.add_child(l)
+		var sl := HSlider.new()
+		sl.min_value = 0.0
+		sl.max_value = 1.0
+		sl.step = 0.05
+		sl.value = float(cfg.get(pair[1], 1.0))
+		sl.custom_minimum_size = Vector2(200, 0)
+		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var key: String = pair[1]
+		sl.value_changed.connect(func(v: float) -> void:
+			Settings.set_value(key, v)
+			Settings.apply())
+		h.add_child(sl)
+		settings_box.add_child(h)
+	var edge := CheckButton.new()
+	edge.text = "Edge scrolling"
+	edge.button_pressed = bool(cfg.get("edge_scroll", true))
+	edge.toggled.connect(func(on: bool) -> void:
+		Settings.set_value("edge_scroll", on)
+		Settings.apply()
+		view.camera.edge_scroll = on)
+	settings_box.add_child(edge)
+	var leave := Button.new()
+	leave.text = "Leave match"
+	leave.pressed.connect(func() -> void: Main.I.return_to_menu())
+	pause_box.add_child(leave)
+	var quit := Button.new()
+	quit.text = "Quit to desktop"
+	quit.pressed.connect(func() -> void: get_tree().quit())
+	pause_box.add_child(quit)
+
+func toggle_pause_menu() -> void:
+	if gameover_panel.visible:
+		return
+	var open := not pause_panel.visible
+	pause_panel.visible = open
+	pause_backdrop.visible = open
+	view.camera.enabled = not open
+	# single-player: actually freeze the simulation
+	view.send({"t": "pause", "on": open})
+
+func set_paused(on: bool) -> void:
+	sim_paused = on
+	paused_label.visible = on
+
+func close_promo() -> void:
+	promo_panel.visible = false
+	promo_backdrop.visible = false
 
 # ---------------------------------------------------------------------------
 # Selection / command grid
@@ -379,7 +570,7 @@ func refresh_selection() -> void:
 		var d := single.def
 		for ut in d.get("produces", []):
 			var ud: Dictionary = Data.UNITS[ut]
-			actions.append({"label": "%s  $%d" % [ud["name"], ud["cost"]], "icon": ut, "tip": "%s\n%s\nBuild time %ds" % [ud["name"], ud.get("desc", ""), int(ud["time"])],
+			actions.append({"label": "%s\n$%d" % [ud["name"], ud["cost"]], "icon": ut, "tip": "%s\n%s\nBuild time %ds" % [ud["name"], ud.get("desc", ""), int(ud["time"])],
 				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and view.unit_prereq_text(ut) == "", "why": view.unit_prereq_text(ut)})
 		for uid in d.get("upgrades", []):
 			var ud: Dictionary = Data.UPGRADES[uid]
@@ -390,7 +581,7 @@ func refresh_selection() -> void:
 				lbl = "DONE"
 			elif researching:
 				lbl = "researching"
-			actions.append({"label": "%s  %s" % [ud["name"], lbl], "icon": uid, "tip": "%s\n%s" % [ud["name"], ud["desc"]],
+			actions.append({"label": "%s\n%s" % [ud["name"], lbl], "icon": uid, "tip": "%s\n%s" % [ud["name"], ud["desc"]],
 				"cb": func() -> void: ctl.upgrade(single.id, uid), "enabled": not done and not researching and view.can_afford(ud["cost"])})
 		if d.has("superweapon"):
 			var ready: bool = view.sw_ready(single.team)
@@ -411,7 +602,7 @@ func refresh_selection() -> void:
 				if bd.get("neutral", false):
 					continue
 				var why: String = view.building_prereq_text(bt)
-				actions.append({"label": "%s  $%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"])],
+				actions.append({"label": "%s\n$%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"])],
 					"cb": func() -> void: ctl.begin_place(bt), "enabled": why == "" and view.can_afford(bd["cost"]), "why": why})
 		else:
 			actions.append({"label": "Attack-move (A)", "tip": "Move and engage anything on the way", "cb": func() -> void: ctl.amove_mode(), "enabled": true})
@@ -434,9 +625,11 @@ func refresh_selection() -> void:
 		var why: String = a.get("why", "")
 		b.tooltip_text = a["tip"] + (("\n" + why) if why != "" else "")
 		b.disabled = not a["enabled"]
+		grid_why[i].visible = why != ""
+		grid_why[i].text = why
 		if why != "":
-			b.text = "%s\n%s" % [a["label"], why]
-			b.add_theme_color_override("font_disabled_color", Color(1.0, 0.35, 0.3))
+			b.text = a["label"] + "\n "
+			b.add_theme_color_override("font_disabled_color", Color(0.8, 0.6, 0.55))
 		elif not a["enabled"]:
 			b.add_theme_color_override("font_disabled_color", Color(0.95, 0.8, 0.3))
 		else:
@@ -523,18 +716,24 @@ func _update_powers(st: Dictionary) -> void:
 			b.text = "%s  READY" % name
 			b.disabled = false
 	if promo_panel.visible:
-		_fill_promo(st)
+		var key := str([st.get("rank", 1), st.get("points", 0), st.get("powers", {})])
+		if key != promo_key:
+			_fill_promo(st)
+		elif is_instance_valid(promo_xp):
+			promo_xp.text = _promo_xp_text(st)
 
 func _toggle_promo() -> void:
 	promo_panel.visible = not promo_panel.visible
 	promo_backdrop.visible = promo_panel.visible
 	if promo_panel.visible:
+		promo_key = ""
 		_fill_promo(view.pstate)
 
 ## Tech-tree style promotion screen: one row per rank tier, cards with icons,
 ## unlocked / available / locked states.
 func _fill_promo(st: Dictionary) -> void:
 	for c in promo_list.get_children():
+		promo_list.remove_child(c)
 		c.queue_free()
 	var rank := int(st.get("rank", 1))
 	var pts := int(st.get("points", 0))
@@ -544,9 +743,10 @@ func _fill_promo(st: Dictionary) -> void:
 	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
 	promo_list.add_child(title)
+	promo_key = str([st.get("rank", 1), st.get("points", 0), st.get("powers", {})])
 	var xp_l := Label.new()
-	var nxt := int(st.get("next", -1))
-	xp_l.text = "%d xp%s  ·  earn experience by destroying enemy units and structures" % [int(st.get("xp", 0)), ("  (next rank at %d)" % nxt) if nxt > 0 else "  (max rank)"]
+	promo_xp = xp_l
+	xp_l.text = _promo_xp_text(st)
 	xp_l.add_theme_font_size_override("font_size", 12)
 	xp_l.modulate = Color(0.75, 0.75, 0.75)
 	promo_list.add_child(xp_l)
@@ -568,27 +768,27 @@ func _fill_promo(st: Dictionary) -> void:
 			var unlocked := lvl >= maxl
 			var can: bool = rank >= tier and pts > 0 and not unlocked and not pd.get("auto", false)
 			var card := _panel(Color(0.14, 0.17, 0.22, 1.0) if unlocked else (Color(0.12, 0.13, 0.16, 1.0) if rank >= tier else Color(0.09, 0.09, 0.1, 1.0)))
-			card.custom_minimum_size = Vector2(176, 0)
+			card.custom_minimum_size = Vector2(150, 0)
 			var cv := VBoxContainer.new()
 			card.add_child(cv)
 			var ic := TextureRect.new()
 			ic.texture = view.icons.get_icon(pid)
-			ic.custom_minimum_size = Vector2(64, 64)
+			ic.custom_minimum_size = Vector2(48, 48)
 			ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			ic.modulate = Color.WHITE if rank >= tier else Color(0.45, 0.45, 0.45)
 			cv.add_child(ic)
 			var nm := Label.new()
 			nm.text = pd["name"] + ((" %d/%d" % [lvl, maxl]) if maxl > 1 else "")
-			nm.add_theme_font_size_override("font_size", 13)
+			nm.add_theme_font_size_override("font_size", 12)
 			nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			cv.add_child(nm)
 			var ds := Label.new()
 			ds.text = pd["desc"]
 			ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			ds.add_theme_font_size_override("font_size", 11)
+			ds.add_theme_font_size_override("font_size", 10)
 			ds.modulate = Color(0.75, 0.75, 0.75)
-			ds.custom_minimum_size = Vector2(160, 40)
+			ds.custom_minimum_size = Vector2(134, 34)
 			cv.add_child(ds)
 			var st_l := Label.new()
 			st_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -619,6 +819,21 @@ func _fill_promo(st: Dictionary) -> void:
 		promo_panel.visible = false
 		promo_backdrop.visible = false)
 	promo_list.add_child(close)
+	_fit_promo.call_deferred()
+
+func _promo_xp_text(st: Dictionary) -> String:
+	var nxt := int(st.get("next", -1))
+	return "%d xp%s  ·  earn experience by destroying enemy units and structures" % [int(st.get("xp", 0)), ("  (next rank at %d)" % nxt) if nxt > 0 else "  (max rank)"]
+
+## Size the scroll area to its content but never taller than the screen, so the
+## modal stays centred and the last rank row is reachable (scrolls if needed).
+func _fit_promo() -> void:
+	if not is_instance_valid(promo_scroll):
+		return
+	var want: float = promo_list.get_combined_minimum_size().y + 4.0
+	var cap: float = get_viewport().get_visible_rect().size.y - 90.0
+	promo_scroll.custom_minimum_size = Vector2(800, clampf(want, 200.0, cap))
+	promo_panel.reset_size()
 
 # ---------------------------------------------------------------------------
 # Minimap

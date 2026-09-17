@@ -420,9 +420,10 @@ func track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void:
 func _later(delay: float, cb: Callable) -> void:
 	get_tree().create_timer(delay).timeout.connect(cb)
 
-func placed(pos: Vector3, fp: Vector2) -> void:
+func placed(pos: Vector3, fp: Vector2, yaw := 0.0) -> void:
 	var ring := Visuals.box(Vector3(fp.x, 0.1, fp.y), Color(0.3, 1.0, 0.4, 0.5), true)
 	ring.position = pos + Vector3(0, 0.2, 0)
+	ring.rotation.y = yaw
 	_add(ring, "beam", 0.8)
 
 func floating_text(pos: Vector3, text: String, color: Color) -> void:

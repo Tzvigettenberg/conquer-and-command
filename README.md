@@ -25,14 +25,14 @@ Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0
 | Right-click | move / attack / repair (dozer) / gather (Chinook) / capture derrick (Ranger + upgrade) — Shift queues |
 | Ctrl+right-click or X | force attack: fire at a spot, a neutral structure or one of your own |
 | A + click | attack-move |
-| G | guard here: hold, engage anything that comes near, return afterwards (aircraft loiter overhead, rearm and come back) |
+| G | guard: press once then click a spot (or a unit) to guard there; press G twice to guard where they stand. Aircraft loiter over it, rearm and come back |
 | S | stop |
 | Placing a building | click to place; hold the left button and drag to rotate it freely before releasing (like Generals) |
 | N | select the next Dozer · B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center |
 | Ctrl+1..9 / 1..9 | assign / recall control group (press twice to jump there) |
 | H | jump to Command Center · Space: jump to last attack alert |
 | Arrows / edge / middle-drag | scroll · wheel: zoom · Q / E: rotate camera |
-| Esc | cancel placement / deselect |
+| Esc / F10 | cancel placement / deselect · with nothing to cancel: pause menu (solo/AI games actually pause; volume sliders, edge-scroll toggle, surrender) |
 | Right-click with a factory selected | set its rally point |
 | F1 | +$10,000 (solo / debug only) |
 
@@ -40,7 +40,9 @@ Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0
 Host a game and set it up before starting: **map** (Desert Divide / Frozen Front / Green Valley),
 **AI opponents** (0-3) and **difficulty** (Easy: slow, small waves, no powers for 8 min · Medium ·
 Hard: bigger waves, earlier powers, +$150 every 10 s), **starting cash**, **superweapons** on/off,
-**kick** buttons next to joined players. Up to 4 players + AI; players start in the four corners.
+**kick** buttons next to joined players, and a **team** picker per slot (humans and AI). Up to 4 players + AI;
+players start in the four corners. Teammates share vision, can't be attacked without force-fire (X / Ctrl+RMB —
+friendly fire only when you mean it), can capture/repair each other's stuff, and win or lose together.
 Everyone starts at rank 1 with one promotion point (as in Generals) — that's how an AI can have an
 A-10 strike early; on Easy/Medium it now waits several minutes before using any power.
 
@@ -49,6 +51,16 @@ A-10 strike early; on Easy/Medium it now waits several minutes before using any 
 `audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
 `audio/music` — 12 Kevin MacLeod tracks, CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M4)
+- Pause menu (Esc / F10) with Master / SFX / Voice / Music sliders and an edge-scroll toggle, saved to `user://settings.cfg`; solo and vs-AI games freeze while it's open, multiplayer keeps running.
+- Post-game report: units built / lost / killed, structures built / lost / destroyed, cash earned, captures, rank — for every player.
+- Teams: lobby team picker; allied vision, no accidental friendly fire (force-fire still works), team victory.
+- Selling "unbuilds" the structure over half its build time; the refund only lands when it finishes — destroyed mid-sale pays nothing.
+- Enemy structures you're shelling from outside your vision now show their real health (any seen corner of the footprint counts, and ghosts refresh on damage).
+- Guard works on aircraft and every ground unit (button or G then click).
+- Command bar rebuilt so prices and names never clip (three rows fit, requirements on their own red line); promotion screen is centred, sized to the screen and scrolls if needed.
+- Completion flash matches the rotated footprint of the finished building.
 
 ## What's in (M3)
 - All structures are new procedural low-poly models sized to their footprints and painted with the owner's colour: Command Center (radar dish), Reactor (dome + steaming stacks), Barracks, Supply Center (H pad + crane), War Factory (hangar door, roof fan), Airfield (real runway with lights, tower, four pads), Strategy Center (dish + antenna farm), Drop Zone (beacon), Patriot (rotating 4-tube launcher), Firebase (sandbag ring + traversing howitzer), Particle Cannon (spinning focus rings), Oil Derrick (nodding pump-jack), Supply Dock (crate stacks). Every model has an idle animation. Dozers got a blade.

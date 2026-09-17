@@ -12,7 +12,7 @@ func _ready() -> void:
 	my_peer = multiplayer.get_unique_id()
 
 func _physics_process(_delta: float) -> void:
-	if world != null:
+	if world != null and not world.paused:
 		world.step(World.TICK)
 
 # ---------------------------------------------------------------------------
@@ -64,9 +64,13 @@ func s_map(peer: int, map: Dictionary, player_index: int) -> void:
 func s_msg(peer: int, text: String) -> void:
 	_to(peer, "cl_msg", [text])
 
-func s_gameover(winner: int) -> void:
+func s_gameover(winner: int, rep: Array) -> void:
 	for p in world.players:
-		_to(p["peer"], "cl_gameover", [winner])
+		_to(p["peer"], "cl_gameover", [winner, rep])
+
+func s_paused(on: bool) -> void:
+	for p in world.players:
+		_to(p["peer"], "cl_paused", [on])
 
 # ---------------------------------------------------------------------------
 # server -> client RPCs
@@ -111,9 +115,14 @@ func cl_msg(text: String) -> void:
 		view.on_msg(text)
 
 @rpc("authority", "call_remote", "reliable")
-func cl_gameover(winner: int) -> void:
+func cl_gameover(winner: int, rep: Array) -> void:
 	if view:
-		view.on_gameover(winner)
+		view.on_gameover(winner, rep)
+
+@rpc("authority", "call_remote", "reliable")
+func cl_paused(on: bool) -> void:
+	if view:
+		view.on_paused(on)
 
 # ---------------------------------------------------------------------------
 # lobby
