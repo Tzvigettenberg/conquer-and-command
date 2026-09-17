@@ -72,6 +72,8 @@ func _update_cursor() -> void:
 		"beacon":
 			kind = "beacon"
 		_:
+			if view.pstate.get("beam", false):
+				kind = "sw"   # steering the beam: keep the reticle until it ends or you click
 			var hp: Puppet = view.puppets.get(hover_id) if hover_id >= 0 else null
 			var units := _own_units_selected()
 			if hp != null and not units.is_empty():
@@ -90,7 +92,7 @@ func _refresh_sig() -> void:
 		var p = view.puppets.get(id)
 		if p != null:
 			parts.append("%d:%s:%d" % [id, str(p.complete), p.level])
-	sig = ",".join(parts) + "|" + mode + "|" + str(view.pstate.get("cash", 0))
+	sig = ",".join(parts) + "|" + mode + "|" + str(view.pstate.get("cash", 0)) + "|" + str(view.pstate.get("beam", false))
 
 func hint_text() -> String:
 	match mode:
@@ -270,6 +272,11 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_mode_click(mb.position)
 					get_viewport().set_input_as_handled()
 					return
+				if view.pstate.get("beam", false):
+					# click ends beam steering; the beam keeps burning where it is
+					view.send({"t": "sw_stop"})
+					get_viewport().set_input_as_handled()
+					return
 				drag_start = mb.position
 			else:
 				if mode == "place" and place_press.x >= 0:
@@ -402,7 +409,7 @@ func _process(dt: float) -> void:
 
 func _refresh_sig_if_needed() -> void:
 	var cash := str(view.pstate.get("cash", 0))
-	if not sig.ends_with("|" + mode + "|" + cash):
+	if not sig.ends_with("|" + mode + "|" + cash + "|" + str(view.pstate.get("beam", false))):
 		_refresh_sig()
 
 func _update_hover() -> void:
@@ -472,7 +479,7 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
 			return
-		if target.team == view.my_index and not target.is_building and target.def.has("cargo") and not selected.has(target.id):
+		if target.team == view.my_index and target.def.has("cargo") and not selected.has(target.id) and (not target.is_building or target.complete):
 			# load infantry (and vehicles into a Chinook)
 			var riders := _filter_ids(ids, func(p: Puppet) -> bool:
 				return p.id != target.id and not p.is_building and p.cat != "air" and (p.cat == "inf" or target.def.get("cargo_veh", false)))
@@ -804,7 +811,10 @@ func guard() -> void:
 				view.fx.floating_text(p.cur_pos, "GUARD", Color(0.4, 0.9, 1.0))
 
 func unload() -> void:
-	var ids := _filter_ids(_own_units_selected(), func(p: Puppet) -> bool: return p.def.has("cargo"))
+	var ids := []
+	for p in selected_puppets():
+		if p.team == view.my_index and p.def.has("cargo"):
+			ids.append(p.id)
 	if not ids.is_empty():
 		view.send({"t": "unload", "ids": ids})
 		Audio.I.ui("ui_click", -6.0)

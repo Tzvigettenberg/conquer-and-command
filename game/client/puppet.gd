@@ -64,6 +64,7 @@ var extras_key := ""              # which upgrade / plan add-ons are shown
 var extras_node: Node3D = null
 var rotors: Array[Node3D] = []
 var gear_nodes: Array = []
+var contrails: Array = []
 var burners: Array = []
 var missiles: Array = []
 var wheels: Array[Node3D] = []
@@ -158,7 +159,7 @@ func _build_visual(mine: bool) -> void:
 		if type == "supply_dock":
 			_build_crates()
 	else:
-		team_ring = Visuals.disc(radius * 0.9, Color(Data.TEAM_COLORS[team], 0.55) if team >= 0 else Color(0.5, 0.5, 0.5, 0.5))
+		team_ring = Visuals.disc(maxf(radius * 0.9, 0.8), Color(Data.TEAM_COLORS[team], 0.6) if team >= 0 else Color(0.5, 0.5, 0.5, 0.5))
 		add_child(team_ring)
 	sel_ring = Visuals.ring(radius * (1.15 if not is_building else 0.75), Color(0.3, 1.0, 0.3) if mine else Color(1.0, 0.9, 0.3))
 	sel_ring.visible = false
@@ -359,6 +360,29 @@ func _build_scaffold() -> void:
 	site_label.no_depth_test = true
 	site_label.position = Vector3(0, h + 2.4, 0)
 	scaffold.add_child(site_label)
+
+## Garrison: soldiers visibly manning the sandbags of a Firebase.
+var garrison_key := ""
+var garrison_node: Node3D = null
+func set_garrison(types: Array) -> void:
+	var key := ",".join(types)
+	if key == garrison_key:
+		return
+	garrison_key = key
+	if garrison_node != null:
+		garrison_node.queue_free()
+		garrison_node = null
+	if types.is_empty():
+		return
+	garrison_node = Node3D.new()
+	add_child(garrison_node)
+	for i in range(types.size()):
+		var m := Units.make(types[i], team)
+		var ang := i * TAU / 4.0 + PI * 0.25
+		m.position = Vector3(sin(ang) * 2.1, 0.5, cos(ang) * 2.1)
+		m.rotation.y = ang
+		m.scale = Vector3.ONE * 0.9
+		garrison_node.add_child(m)
 
 func flash_cargo() -> void:
 	var l := Label3D.new()
@@ -651,16 +675,20 @@ func _process_unit(dt: float, now: float) -> void:
 				view.leave_track(cur_pos, cur_yaw, radius * 0.7, def.get("crusher", false))
 	if cat == "air" and team_ring:
 		team_ring.position.y = -cur_pos.y + 0.03
-	# contrails from fast fixed-wing aircraft
-	if cat == "air" and def.get("jet", false) and airborne and speed > 12.0:
-		trail_t += dt
-		if trail_t > 0.12:
-			trail_t = 0.0
+	# wingtip contrail emitters on jets, on only when fast and airborne
+	if cat == "air" and def.get("jet", false):
+		if contrails.is_empty():
 			var view := get_parent()
-			if view != null and view.has_method("contrail"):
-				var right := Vector3(cos(cur_yaw), 0, -sin(cur_yaw))
-				var half := float(def.get("length", 9.0)) * 0.42
-				view.contrail(cur_pos + right * half, cur_pos - right * half)
+			if view != null and view.has_method("contrail") and view.get("fx") != null:
+				var half := float(def.get("length", 9.0)) * 0.4
+				for sx in [-1.0, 1.0]:
+					var e: CPUParticles3D = view.fx.particles("contrail", Vector3(sx * half, 0.9, -float(def.get("length", 9.0)) * 0.1), 1.0, false)
+					e.emitting = false
+					model.add_child(e)
+					contrails.append(e)
+		var on := airborne and speed > 12.0
+		for e in contrails:
+			e.emitting = on
 
 func is_stale(now: float) -> bool:
 	return not is_building and now - last_update > 0.7

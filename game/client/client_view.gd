@@ -87,6 +87,17 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 			add_child(mdl)
 			i += 1
 		camera.jump_to(start + Vector2(0, 40))
+	if args.has("fxdemo"):
+		# debug: explosions and missiles near the base every second
+		var fxt := Timer.new()
+		fxt.wait_time = 1.0
+		fxt.autostart = true
+		fxt.timeout.connect(func() -> void:
+			var c := Vector3(start.x + randf_range(-20, 20), 0, start.y + 20 + randf_range(-10, 10))
+			fx.explosion(c, [1.0, 1.6, 3.0][randi() % 3])
+			fx.shot(Vector3(start.x - 30, 2, start.y + 10), c + Vector3(6, 0, 0), "md_missile")
+			fx.shot(Vector3(start.x + 30, 2, start.y - 10), c + Vector3(-6, 0, 0), "tomahawk"))
+		add_child(fxt)
 	if args.has("select"):
 		get_tree().create_timer(3.0).timeout.connect(func() -> void:
 			var p := _own(str(args["select"]))
@@ -102,7 +113,7 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 func _screenshots(dir: String) -> void:
 	var n := 0
 	while is_inside_tree():
-		await get_tree().create_timer(8.0).timeout
+		await get_tree().create_timer(float(args.get("shot_every", 8.0))).timeout
 		if not is_inside_tree():
 			return
 		await RenderingServer.frame_post_draw
@@ -263,6 +274,8 @@ func on_events(evs: Array) -> void:
 					Audio.I.sfx("metal_hit", tp.cur_pos, -8.0, 0.1, 0.2)
 					if k == "load":
 						tp.flash_cargo()
+			"supply_drop":
+				fx.supply_drop(Vector3(d[0], 0, d[1]), int(ev[1][2]) if false else _owner_of(int(d[2])))
 			"produced":
 				var fac: Puppet = puppets.get(int(d[0]))
 				if fac != null:
@@ -308,6 +321,7 @@ func on_events(evs: Array) -> void:
 					Audio.I.sfx("chime", b.cur_pos, -6.0, 0.0, 0.2)
 
 func _process(_dt: float) -> void:
+	_update_links(_dt)
 	if camera != null and camera.cam != null:
 		Audio.I.listener_pos = camera.listener.global_position if camera.listener != null else camera.cam.global_position
 
@@ -342,10 +356,46 @@ func _push_extras(st: Dictionary) -> void:
 				keys.append(k)
 		if p.type == "strategy_center" and p.team < plans.size() and str(plans[p.team]) != "":
 			keys.append("plan_" + str(plans[p.team]))
-		if p.type == "particle_cannon" and sw_ready(p.team):
+		if p.type == "particle_cannon" and (p.team == my_index and sw_remaining(p.id) <= 0.0 or p.team != my_index and sw_ready(p.team)):
 			keys.append("sw_ready")
 		keys.sort()
 		p.set_extras(keys)
+		if p.is_building and p.def.has("cargo"):
+			p.set_garrison(st.get("cargo", {}).get(p.id, []))
+
+## Patriot data-links: cyan lines between batteries close enough to share targets.
+var link_nodes: Array = []
+var link_t := 0.0
+func _update_links(dt: float) -> void:
+	link_t -= dt
+	if link_t > 0.0:
+		return
+	link_t = 1.0
+	for n in link_nodes:
+		n.queue_free()
+	link_nodes.clear()
+	var pats: Array = []
+	for pu in puppets.values():
+		var p: Puppet = pu
+		if p.type == "patriot" and p.complete and not p.ghost and p.team >= 0:
+			pats.append(p)
+	for i in range(pats.size()):
+		for j in range(i + 1, pats.size()):
+			var a: Puppet = pats[i]
+			var b: Puppet = pats[j]
+			if a.team != b.team:
+				continue
+			if a.cur_pos.distance_to(b.cur_pos) > World.PATRIOT_LINK:
+				continue
+			var hot := (a.flags & 2) != 0 or (b.flags & 2) != 0
+			var col := Color(0.4, 0.9, 1.0, 0.9 if hot else 0.45)
+			var beam := fx._beam_mesh(a.cur_pos + Vector3(0, 2.6, 0), b.cur_pos + Vector3(0, 2.6, 0), col, 0.12 if hot else 0.07)
+			add_child(beam)
+			link_nodes.append(beam)
+
+func _owner_of(id: int) -> int:
+	var p: Puppet = puppets.get(id)
+	return p.team if p != null else -1
 
 func send_chat(text: String, allies: bool) -> void:
 	if session.world != null:
@@ -446,11 +496,11 @@ func has_upgrade(uid: String, bid := -1) -> bool:
 ## Is this upgrade being researched (anywhere, or - for per-building upgrades like
 ## control rods - at this particular building)?
 func is_researching(uid: String, bid := -1) -> bool:
-	var research: Dictionary = pstate.get("research", {})
+	var rq: Dictionary = pstate.get("research_q", {})
 	if bid >= 0 and Data.UPGRADES[uid].get("per_building", false):
-		return research.has(bid) and research[bid][0] == uid
-	for b in research:
-		if research[b][0] == uid:
+		return rq.has(bid) and rq[bid].has(uid)
+	for b in rq:
+		if rq[b].has(uid):
 			return true
 	return false
 
@@ -472,6 +522,8 @@ func building_prereq_text(type: String) -> String:
 				ok = true
 		if not ok:
 			return "Needs %s" % Data.BUILDINGS[d["prereq_any"][0]]["name"]
+	if d.has("limit") and count_own(type) >= int(d["limit"]):
+		return "Max %d" % int(d["limit"])
 	return ""
 
 func unit_prereq_text(type: String) -> String:
@@ -489,6 +541,11 @@ func unit_prereq_text(type: String) -> String:
 func sw_ready(owner: int) -> bool:
 	var sw: Dictionary = pstate.get("sw", {})
 	return sw.has(owner) and float(sw[owner]) <= 0.0
+
+## This particular cannon's charge (each one is its own weapon).
+func sw_remaining(bid: int) -> float:
+	var swb: Dictionary = pstate.get("sw_bld", {})
+	return float(swb.get(bid, 0.0))
 
 func placement_ok(type: String, pos: Vector2, yaw := 0.0) -> bool:
 	var d: Dictionary = Data.BUILDINGS[type]

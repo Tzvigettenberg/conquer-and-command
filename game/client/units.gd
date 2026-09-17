@@ -353,6 +353,49 @@ static func _jet(root: Node3D, tc: Color, l: float, kind: String) -> void:
 		box(gear, Vector3(0.07, 0.7, 0.07), gp, METAL)
 		cyl(gear, 0.16, 0.16, 0.12, gp - Vector3(0, 0.35, 0), RUBBER, Vector3(0, 0, PI * 0.5), 8)
 
+## Cargo plane for the supply drop flyover (not a playable unit).
+static func cargo_plane(team: int) -> Node3D:
+	var root := Node3D.new()
+	var tc := _tc(team)
+	var l := 12.0
+	var body := Color(0.5, 0.52, 0.5)
+	var w := 1.6
+	box(root, Vector3(w, w * 1.1, l * 0.62), Vector3(0, 1.2, 0), body)
+	prism(root, Vector3(w, w * 0.9, l * 0.18), Vector3(0, 1.1, l * 0.4), body.darkened(0.15), Vector3(-PI * 0.5, 0, 0))
+	box(root, Vector3(w * 0.9, 0.5, l * 0.12), Vector3(0, 1.85, l * 0.3), GLASS)
+	box(root, Vector3(w * 0.5, w * 0.9, l * 0.2), Vector3(0, 1.4, -l * 0.4), body)       # tail cone
+	box(root, Vector3(0.08, 2.4, l * 0.14), Vector3(0, 2.8, -l * 0.42), tc)              # fin
+	box(root, Vector3(l * 0.32, 0.06, l * 0.1), Vector3(0, 3.9, -l * 0.42), body)         # T-tail
+	box(root, Vector3(l * 0.95, 0.1, l * 0.14), Vector3(0, 2.0, l * 0.02), body)          # high wing
+	for i in range(4):
+		var x := (-1.5 + i) * l * 0.2
+		var eng := cyl(root, 0.3, 0.3, 1.6, Vector3(x, 1.7, l * 0.06), DARK, Vector3(PI * 0.5, 0, 0), 8)
+		eng.name = "Engine%d" % i
+		var prop := Node3D.new()
+		prop.name = "Propeller%d" % i
+		prop.position = Vector3(x, 1.7, l * 0.13)
+		root.add_child(prop)
+		for k in range(3):
+			var b := box(prop, Vector3(0.08, 1.4, 0.06), Vector3.ZERO, DARK)
+			b.rotation.z = k * PI / 3.0
+	return root
+
+## Supply crate under a parachute.
+static func supply_crate() -> Node3D:
+	var root := Node3D.new()
+	box(root, Vector3(1.4, 1.2, 1.4), Vector3(0, 0.6, 0), Color(0.78, 0.62, 0.3))
+	box(root, Vector3(1.5, 0.15, 0.3), Vector3(0, 0.6, 0), Color(0.25, 0.25, 0.28))
+	var chute := Node3D.new()
+	chute.name = "Chute"
+	root.add_child(chute)
+	var canopy := Buildings.sphere(chute, 2.2, Vector3(0, 4.6, 0), Color(0.95, 0.95, 0.9))
+	canopy.scale = Vector3(1.0, 0.55, 1.0)
+	for i in range(4):
+		var ang := i * PI * 0.5 + PI * 0.25
+		var line := box(chute, Vector3(0.03, 3.6, 0.03), Vector3(sin(ang) * 0.9, 2.5, cos(ang) * 0.9), Color(0.85, 0.85, 0.85))
+		line.rotation = Vector3(-cos(ang) * 0.3, 0, sin(ang) * 0.3)
+	return root
+
 # ---------------------------------------------------------------------------
 # Infantry: simple blocky soldier with swinging limbs
 # ---------------------------------------------------------------------------
@@ -364,9 +407,10 @@ static func _soldier(root: Node3D, tc: Color, type: String) -> void:
 		uni = Color(0.15, 0.15, 0.17)
 	var s := 1.0
 	box(root, Vector3(0.5 * s, 0.6 * s, 0.3 * s), Vector3(0, 1.15 * s, 0), uni)          # torso
-	box(root, Vector3(0.52 * s, 0.2 * s, 0.32 * s), Vector3(0, 1.0 * s, 0), tc)           # belt / team band
+	box(root, Vector3(0.54 * s, 0.34 * s, 0.34 * s), Vector3(0, 1.28 * s, 0), tc)         # team-colour vest so they read at a glance
+	box(root, Vector3(0.52 * s, 0.12 * s, 0.32 * s), Vector3(0, 0.98 * s, 0), DARK)      # belt
 	Buildings.sphere(root, 0.17 * s, Vector3(0, 1.62 * s, 0), SKIN)                       # head
-	box(root, Vector3(0.4 * s, 0.14 * s, 0.4 * s), Vector3(0, 1.74 * s, 0), uni.darkened(0.2))   # helmet
+	box(root, Vector3(0.42 * s, 0.16 * s, 0.42 * s), Vector3(0, 1.75 * s, 0), tc.darkened(0.25))   # helmet in team colour
 	for sx in [-1.0, 1.0]:
 		var leg := Node3D.new()
 		leg.name = "LegL" if sx < 0 else "LegR"

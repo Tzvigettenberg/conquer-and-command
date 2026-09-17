@@ -31,11 +31,7 @@ func _process(dt: float) -> void:
 				n.position = p
 				if look.length() > 0.01:
 					n.look_at(p + look, Vector3.UP)
-				if it.get("style", "") == "missile" or it.get("style", "") == "cruise":
-					it["puff_t"] = float(it.get("puff_t", 0.0)) + dt
-					if it["puff_t"] > 0.035:
-						it["puff_t"] = 0.0
-						_puff(p, 0.28 if it["style"] == "missile" else 0.5, Color(0.85, 0.85, 0.85, 0.55), 0.9)
+
 			"flash":
 				n.scale = Vector3.ONE * (1.0 + a * 1.5)
 				_fade(n, 1.0 - a)
@@ -80,8 +76,18 @@ func _process(dt: float) -> void:
 				var f: Vector3 = it["from"]
 				var to: Vector3 = it["to"]
 				n.position = f.lerp(to, a)
+				for pr in it.get("props", []):
+					(pr as Node3D).rotate_z(dt * 30.0)
 			"para":
-				n.position.y = lerpf(it["from"].y, 0.0, a)
+				if it.has("to"):
+					var f2: Vector3 = it["from"]
+					var t2: Vector3 = it["to"]
+					n.position = Vector3(f2.x, lerpf(f2.y, t2.y, a), f2.z) + Vector3(sin(it["t"] * 1.5) * 0.6, 0, cos(it["t"] * 1.2) * 0.6)
+					n.rotation.z = sin(it["t"] * 1.5) * 0.15
+				else:
+					n.position.y = lerpf(it["from"].y, 0.0, a)
+			"particles":
+				pass
 			"beacon":
 				var pulse := 0.7 + 0.3 * sin(it["t"] * 6.0)
 				n.scale = Vector3(pulse, 1.0, pulse)
@@ -102,7 +108,7 @@ func _process(dt: float) -> void:
 				n.rotate_object_local(Vector3.FORWARD, dt * 1.5)
 				n.rotation.x = lerpf(n.rotation.x, -0.9, dt * 1.2)
 				if fmod(it["t"], 0.08) < dt:
-					_puff(n.position, 0.9, Color(0.1, 0.1, 0.1, 0.6), 1.4)
+					burst("smoke", n.position, 0.7)
 				if n.position.y <= 0.3:
 					explosion(Vector3(n.position.x, 0, n.position.z), 2.2)
 					Audio.I.sfx("explosion_medium", n.position, 2.0)
@@ -117,7 +123,7 @@ func _process(dt: float) -> void:
 				n.rotate_y(dt * 9.0)
 				n.rotation.z = lerpf(n.rotation.z, 0.5, dt)
 				if fmod(it["t"], 0.08) < dt:
-					_puff(n.position, 0.9, Color(0.1, 0.1, 0.1, 0.6), 1.4)
+					burst("smoke", n.position, 0.7)
 				if n.position.y <= 0.3:
 					explosion(Vector3(n.position.x, 0, n.position.z), 2.0)
 					Audio.I.sfx("explosion_medium", n.position, 2.0)
@@ -150,7 +156,167 @@ func _fade(n: Node3D, alpha: float) -> void:
 		var c: Color = n.material_override.albedo_color
 		n.material_override.albedo_color = Color(c.r, c.g, c.b, alpha)
 
+# ---------------------------------------------------------------------------
+# Particle helpers (CPUParticles3D, unshaded billboard-ish spheres with colour ramps)
+# ---------------------------------------------------------------------------
+static var _pmats: Dictionary = {}
+static func _pmat(add: bool) -> StandardMaterial3D:
+	var key := "add" if add else "mix"
+	if _pmats.has(key):
+		return _pmats[key]
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.vertex_color_use_as_albedo = true
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD if add else BaseMaterial3D.BLEND_MODE_MIX
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_pmats[key] = m
+	return m
+
+static var _pmesh: SphereMesh = null
+static func _psphere() -> SphereMesh:
+	if _pmesh == null:
+		_pmesh = SphereMesh.new()
+		_pmesh.radius = 0.5
+		_pmesh.height = 1.0
+		_pmesh.radial_segments = 6
+		_pmesh.rings = 3
+	return _pmesh
+
+static func _ramp(cols: Array) -> Gradient:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array()
+	g.colors = PackedColorArray()
+	for i in range(cols.size()):
+		g.add_point(float(i) / maxf(cols.size() - 1, 1), cols[i])
+	g.remove_point(0)
+	g.remove_point(g.get_point_count() - 1)
+	return g
+
+## One-shot or continuous emitter. kind: fire | smoke | sparks | trail | dust | contrail
+func particles(kind: String, pos: Vector3, size := 1.0, one_shot := true) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.position = pos
+	p.mesh = _psphere()
+	p.one_shot = one_shot
+	p.local_coords = false
+	match kind:
+		"fire":
+			p.amount = int(14 + 6 * size)
+			p.lifetime = 0.65 + size * 0.15
+			p.explosiveness = 0.9
+			p.direction = Vector3.UP
+			p.spread = 75.0
+			p.initial_velocity_min = 1.5 + 1.0 * size
+			p.initial_velocity_max = 3.5 + 2.0 * size
+			p.gravity = Vector3(0, 3.0, 0)
+			p.damping_min = 1.0
+			p.damping_max = 2.5
+			p.scale_amount_min = 0.7 + 0.35 * size
+			p.scale_amount_max = 1.3 + 0.6 * size
+			p.scale_amount_curve = _curve([0.8, 1.0, 0.3])
+			p.color_ramp = _ramp([Color(1.0, 0.9, 0.35, 1.0), Color(1.0, 0.35, 0.05, 1.0), Color(0.3, 0.05, 0.02, 0.0)])
+			p.material_override = _pmat(false)
+		"smoke":
+			p.amount = int(6 + 4 * size)
+			p.lifetime = 1.4 + size * 0.4
+			p.explosiveness = 0.85
+			p.direction = Vector3.UP
+			p.spread = 40.0
+			p.initial_velocity_min = 1.0 + 0.8 * size
+			p.initial_velocity_max = 2.0 + 1.6 * size
+			p.gravity = Vector3(0.6, 1.2, 0)
+			p.damping_min = 1.0
+			p.damping_max = 2.0
+			p.scale_amount_min = 0.5 + 0.35 * size
+			p.scale_amount_max = 0.9 + 0.5 * size
+			p.scale_amount_curve = _curve([0.4, 1.0, 1.3])
+			p.color_ramp = _ramp([Color(0.28, 0.25, 0.22, 0.6), Color(0.22, 0.22, 0.22, 0.4), Color(0.3, 0.3, 0.3, 0.0)])
+			p.material_override = _pmat(false)
+		"sparks":
+			p.amount = int(12 + 14 * size)
+			p.lifetime = 0.7 + size * 0.15
+			p.explosiveness = 1.0
+			p.direction = Vector3.UP
+			p.spread = 80.0
+			p.initial_velocity_min = 8.0 * size
+			p.initial_velocity_max = 18.0 * size
+			p.gravity = Vector3(0, -22.0, 0)
+			p.scale_amount_min = 0.12
+			p.scale_amount_max = 0.22
+			p.color_ramp = _ramp([Color(1.0, 0.95, 0.6, 1.0), Color(1.0, 0.6, 0.2, 1.0), Color(0.6, 0.2, 0.05, 0.0)])
+			p.material_override = _pmat(true)
+		"dust":
+			p.amount = int(10 + 5 * size)
+			p.lifetime = 1.2 + size * 0.25
+			p.explosiveness = 0.9
+			p.direction = Vector3.UP
+			p.spread = 88.0
+			p.initial_velocity_min = 3.0 + 2.0 * size
+			p.initial_velocity_max = 5.0 + 3.0 * size
+			p.gravity = Vector3(0, -1.5, 0)
+			p.damping_min = 3.0
+			p.damping_max = 5.0
+			p.scale_amount_min = 0.5 + 0.3 * size
+			p.scale_amount_max = 0.9 + 0.5 * size
+			p.scale_amount_curve = _curve([0.5, 1.0, 1.2])
+			p.color_ramp = _ramp([Color(0.55, 0.48, 0.36, 0.6), Color(0.5, 0.45, 0.35, 0.3), Color(0.5, 0.45, 0.35, 0.0)])
+			p.material_override = _pmat(false)
+		"trail":
+			# continuous rocket-motor smoke; attach to the projectile
+			p.amount = 40
+			p.lifetime = 1.1
+			p.explosiveness = 0.0
+			p.direction = Vector3(0, 0, -1)
+			p.spread = 8.0
+			p.initial_velocity_min = 0.5
+			p.initial_velocity_max = 1.5
+			p.gravity = Vector3(0, 0.5, 0)
+			p.scale_amount_min = 0.35 * size
+			p.scale_amount_max = 0.6 * size
+			p.scale_amount_curve = _curve([0.4, 1.0, 1.5])
+			p.color_ramp = _ramp([Color(1.0, 0.85, 0.6, 0.9), Color(0.85, 0.85, 0.85, 0.5), Color(0.8, 0.8, 0.8, 0.0)])
+			p.material_override = _pmat(false)
+		"contrail":
+			p.amount = 30
+			p.lifetime = 1.4
+			p.explosiveness = 0.0
+			p.direction = Vector3(0, 0, -1)
+			p.spread = 3.0
+			p.initial_velocity_min = 0.2
+			p.initial_velocity_max = 0.6
+			p.gravity = Vector3.ZERO
+			p.scale_amount_min = 0.25
+			p.scale_amount_max = 0.4
+			p.scale_amount_curve = _curve([0.5, 1.0, 1.6])
+			p.color_ramp = _ramp([Color(1, 1, 1, 0.35), Color(1, 1, 1, 0.18), Color(1, 1, 1, 0.0)])
+			p.material_override = _pmat(false)
+	p.emitting = true
+	return p
+
+static func _curve(vals: Array) -> Curve:
+	var c := Curve.new()
+	for i in range(vals.size()):
+		c.add_point(Vector2(float(i) / maxf(vals.size() - 1, 1), vals[i]))
+	return c
+
+## Fire-and-forget burst: node frees itself after lifetime.
+func burst(kind: String, pos: Vector3, size := 1.0) -> void:
+	var p := particles(kind, pos, size, true)
+	add_child(p)
+	_add(p, "particles", p.lifetime + 0.3)
+
 func _on_finish(it: Dictionary) -> void:
+	# a projectile's trail emitter lingers and fades after the missile is gone
+	if it["kind"] == "proj" and it.has("trail"):
+		var tr: CPUParticles3D = it["trail"]
+		if is_instance_valid(tr):
+			var gp := tr.global_position
+			tr.get_parent().remove_child(tr)
+			add_child(tr)
+			tr.global_position = gp
+			tr.emitting = false
+			_add(tr, "particles", tr.lifetime + 0.2)
 	if it["kind"] == "proj" and it.get("impact", false):
 		impact(it["to"], it["style"])
 	elif it["kind"] == "crash_jet" or it["kind"] == "crash_heli":
@@ -169,7 +335,7 @@ func _puff(pos: Vector3, size: float, color: Color, life: float, grow := 2.0) ->
 	_add(sm, "puff", life, {"grow": grow, "alpha": color.a})
 
 ## Wingtip vapour trails: a short thin segment per wingtip that fades and widens.
-## Wingtip contrails: thin, faint, short-lived.
+## Wingtip contrails: thin, faint, short-lived (fallback; jets carry their own emitters).
 func contrail(a: Vector3, b: Vector3) -> void:
 	for p in [a, b]:
 		var sm := Visuals.sphere(0.12, Color(1, 1, 1, 0.16))
@@ -252,21 +418,28 @@ func shot(from: Vector3, to: Vector3, wid: String) -> void:
 			var holder := Node3D.new()
 			holder.add_child(pm)
 			pm.material_override = _own_mat(Color(0.9, 0.9, 0.9) if style != "shell" else Color(0.3, 0.3, 0.3))
+			var extra := {"from": from, "to": to, "style": style, "arc": arc, "impact": false}
 			if style == "missile" or style == "cruise":
 				var flame := MeshInstance3D.new()
 				var s := SphereMesh.new()
-				s.radius = 0.18
-				s.height = 0.36
+				s.radius = 0.16 if style == "missile" else 0.3
+				s.height = s.radius * 2.0
 				flame.mesh = s
-				flame.material_override = _own_mat(Color(1.0, 0.6, 0.2))
-				flame.position.z = -0.5
+				flame.material_override = _own_mat(Color(1.0, 0.7, 0.25))
+				(flame.material_override as StandardMaterial3D).emission_enabled = true
+				(flame.material_override as StandardMaterial3D).emission = Color(1.0, 0.6, 0.2)
+				flame.position.z = -0.45
 				holder.add_child(flame)
 				var light := OmniLight3D.new()
 				light.light_color = Color(1.0, 0.7, 0.3)
 				light.light_energy = 1.5
 				light.omni_range = 6.0
 				holder.add_child(light)
-			_add(holder, "proj", life, {"from": from, "to": to, "style": style, "arc": arc, "impact": false})
+				var trail := particles("trail", Vector3(0, 0, -0.6), 1.0 if style == "missile" else 1.8, false)
+				trail.local_coords = false
+				holder.add_child(trail)
+				extra["trail"] = trail
+			_add(holder, "proj", life, extra)
 
 func _beam_mesh(from: Vector3, to: Vector3, color: Color, width: float) -> Node3D:
 	var n := Node3D.new()
@@ -315,47 +488,69 @@ func impact(pos: Vector3, style: String) -> void:
 
 ## Explosion: bright core flash, a couple of fireballs, shockwave ring, debris
 ## chunks that arc out, dark smoke that lingers. size 1 = a tank shell, 4 = a bomb.
+## Explosion: white-hot flash, fire burst, sparks, dark smoke, dust ring on the
+## ground, shockwave and debris chunks. size 1 = a tank shell, 4 = a bomb, 9 = FAB.
 func explosion(pos: Vector3, size: float) -> void:
-	var core := Visuals.sphere(1.0, Color(1.0, 0.95, 0.7, 1.0))
-	core.material_override = _own_mat(Color(1.0, 0.95, 0.7, 1.0))
+	var core := Visuals.sphere(1.0, Color(1.0, 0.97, 0.8, 1.0))
+	core.material_override = _own_mat(Color(1.0, 0.97, 0.8, 1.0))
 	core.position = pos + Vector3(0, size * 0.5, 0)
 	var light := OmniLight3D.new()
 	light.light_color = Color(1.0, 0.65, 0.3)
-	light.omni_range = 10.0 * size
-	light.light_energy = 8.0
+	light.omni_range = 12.0 * size
+	light.light_energy = 10.0
 	core.add_child(light)
-	_add(core, "boom", 0.3 + size * 0.06, {"size": size * 0.8, "light": light})
-	var nballs := 2 + int(size)
-	for i in range(nballs):
-		var ball := Visuals.sphere(1.0, Color(1.0, 0.5, 0.12, 0.95))
-		ball.material_override = _own_mat(Color(1.0, 0.45 + randf() * 0.2, 0.1, 0.95))
-		ball.position = pos + Vector3(randf_range(-0.6, 0.6) * size, size * (0.4 + randf() * 0.6), randf_range(-0.6, 0.6) * size)
-		_add(ball, "boom", 0.45 + size * 0.12 + randf() * 0.15, {"size": size * (0.7 + randf() * 0.5)})
-	var ring := Visuals.disc(1.0, Color(1.0, 0.85, 0.5, 0.75))
-	ring.material_override = _own_mat(Color(1.0, 0.85, 0.5, 0.75))
+	_add(core, "boom", 0.18 + size * 0.04, {"size": size * 0.6, "light": light})
+	burst("fire", pos + Vector3(0, size * 0.3, 0), size)
+	burst("sparks", pos + Vector3(0, size * 0.3, 0), size)
+	burst("smoke", pos + Vector3(0, size * 0.6, 0), size)
+	if pos.y < 1.5:
+		burst("dust", pos + Vector3(0, 0.3, 0), size)
+	var ring := Visuals.disc(1.0, Color(1.0, 0.85, 0.5, 0.5))
+	ring.material_override = _own_mat(Color(1.0, 0.85, 0.5, 0.5))
 	ring.position = pos + Vector3(0, 0.15, 0)
-	_add(ring, "ring", 0.45 + size * 0.08, {"size": size * 1.3})
-	# debris
-	var nd := 3 + int(size * 3.0)
+	_add(ring, "ring", 0.35 + size * 0.06, {"size": size * 1.2})
+	var nd := 2 + int(size * 3.0)
 	for i in range(mini(nd, 18)):
 		var chunk := Visuals.box(Vector3(0.25, 0.25, 0.25) * (0.6 + randf() * size * 0.4), Color(0.12, 0.1, 0.09))
 		chunk.position = pos + Vector3(0, 0.5, 0)
 		var v := Vector3(randf_range(-1, 1), randf_range(1.2, 2.4), randf_range(-1, 1)) * (4.0 + size * 3.0)
 		_add(chunk, "debris", 0.9 + randf() * 0.7, {"vel": v, "spin": Vector3(randf(), randf(), randf()) * 8.0})
-	for i in range(2 + int(size)):
-		var sm := Visuals.sphere(1.0, Color(0.15, 0.15, 0.15, 0.5))
-		sm.material_override = _own_mat(Color(0.18, 0.17, 0.16, 0.55))
-		sm.position = pos + Vector3(randf_range(-1, 1) * size, size * 0.8 + i * 0.6 * size, randf_range(-1, 1) * size)
-		_add(sm, "smoke", 1.8 + size * 0.5, {"size": size})
 	if size >= 3.0:
-		# big one: scorch mark and a dust wall
-		var scorch := Visuals.disc(size * 2.2, Color(0.06, 0.04, 0.03, 0.7))
+		var scorch := Visuals.disc(size * 0.9, Color(0.08, 0.06, 0.04, 0.45))
 		scorch.position = pos + Vector3(0, 0.05, 0)
-		_add(scorch, "track", 60.0)
-		var dust := Visuals.ring(1.0, Color(0.6, 0.5, 0.35, 0.6), size * 0.8)
-		dust.material_override = _own_mat(Color(0.6, 0.5, 0.35, 0.6))
+		_add(scorch, "track", 40.0)
+		var dust := Visuals.ring(1.0, Color(0.6, 0.5, 0.35, 0.5), size * 0.8)
+		dust.material_override = _own_mat(Color(0.6, 0.5, 0.35, 0.5))
 		dust.position = pos + Vector3(0, 0.6, 0)
-		_add(dust, "ring", 1.2, {"size": size * 3.0})
+		_add(dust, "ring", 1.0, {"size": size * 1.6})
+		# a second, slower column of smoke for the big ones
+		burst("smoke", pos + Vector3(0, size, 0), size * 1.5)
+
+## Supply drop: a cargo plane crosses over the drop zone and a crate parachutes
+## down onto it. The sim credits the cash when the crate lands (6 s).
+func supply_drop(pos: Vector3, team: int) -> void:
+	var plane := Units.cargo_plane(team)
+	var dir := Vector3(cos(randf() * TAU), 0, 0).normalized()
+	if dir.length() < 0.1:
+		dir = Vector3(1, 0, 0)
+	var from := pos - dir * 190.0 + Vector3(0, 38, 0)
+	var to := pos + dir * 190.0 + Vector3(0, 38, 0)
+	plane.position = from
+	plane.rotation.y = atan2(dir.x, dir.z)
+	_add(plane, "jet", 7.2, {"from": from, "to": to, "props": plane.find_children("Propeller*", "Node3D", false, false)})
+	_later(3.3, func() -> void:
+		var crate := Units.supply_crate()
+		crate.position = pos + Vector3(0, 36, 0)
+		_add(crate, "para", 2.7, {"from": crate.position, "to": pos + Vector3(0, 0.2, 0)})
+		Audio.I.sfx("plane_pass", pos + Vector3(0, 30, 0), 2.0, 0.0, 0.5))
+	_later(6.0, func() -> void:
+		var crate2 := Units.supply_crate()
+		var ch := crate2.find_child("Chute", false, false)
+		if ch != null:
+			ch.visible = false
+		crate2.position = pos + Vector3(0, 0.2, 0)
+		_add(crate2, "track", 12.0)
+		burst("dust", pos, 0.6))
 
 ## Ground target marker for an incoming strike (ring + rotating ticks + countdown pulse).
 func strike_marker(pos: Vector3, seconds: float, col: Color) -> void:

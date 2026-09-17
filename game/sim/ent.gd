@@ -154,4 +154,6 @@ var last_target_owner := -1    # owner of whatever we shot at last (shooters rev
 var taxi := 0                  # jets: 0 parked in hangar, 1 taxiing to the runway
 var cargo: Array[int] = []     # transports: ids of the units inside
 var inside_id := -1            # riding in this transport (-1 = not)
+var linked_until := -1.0       # patriot: designated by a linked battery until this time
+var pad_user := -1             # supply center: the chinook currently on the pad
 var orphan_t := 0.0

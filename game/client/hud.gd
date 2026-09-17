@@ -26,6 +26,7 @@ var grid_why: Array[Label] = []
 var side_buttons: Array[Button] = []
 var queue_slots: Array[TextureProgressBar] = []
 var research_slot: TextureProgressBar
+var research_slots: Array[TextureProgressBar] = []
 var queue_label: Label
 var chat_edit: LineEdit
 var chat_allies := false
@@ -271,21 +272,24 @@ func _build() -> void:
 	var sep := Control.new()
 	sep.custom_minimum_size = Vector2(10, 0)
 	queue_box.add_child(sep)
-	research_slot = TextureProgressBar.new()
-	research_slot.custom_minimum_size = Vector2(QUEUE_PX, QUEUE_PX)
-	research_slot.fill_mode = TextureProgressBar.FILL_BOTTOM_TO_TOP
-	research_slot.min_value = 0.0
-	research_slot.max_value = 1.0
-	research_slot.tint_under = Color(0.35, 0.4, 0.35)
-	research_slot.nine_patch_stretch = true
-	research_slot.visible = false
-	research_slot.tooltip_text = "Researching - click to cancel"
-	research_slot.gui_input.connect(func(ev: InputEvent) -> void:
-		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
-			var sel: Array = ctl.selected_puppets()
-			if sel.size() == 1:
-				ctl.cancel_upgrade(sel[0].id))
-	queue_box.add_child(research_slot)
+	for i in range(3):
+		var rs := TextureProgressBar.new()
+		rs.custom_minimum_size = Vector2(QUEUE_PX, QUEUE_PX)
+		rs.fill_mode = TextureProgressBar.FILL_BOTTOM_TO_TOP
+		rs.min_value = 0.0
+		rs.max_value = 1.0
+		rs.tint_under = Color(0.35, 0.4, 0.35)
+		rs.nine_patch_stretch = true
+		rs.visible = false
+		rs.tooltip_text = "Research queue - click to cancel the last one"
+		rs.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+				var sel: Array = ctl.selected_puppets()
+				if sel.size() == 1:
+					ctl.cancel_upgrade(sel[0].id))
+		queue_box.add_child(rs)
+		research_slots.append(rs)
+	research_slot = research_slots[0]
 	queue_label = Label.new()
 	queue_label.add_theme_font_size_override("font_size", 12)
 	queue_label.modulate = Color(0.75, 0.75, 0.75)
@@ -691,10 +695,11 @@ func refresh_selection() -> void:
 			var done: bool = view.has_upgrade(uid, single.id)
 			var researching: bool = view.is_researching(uid, single.id)
 			var lbl := "$%d" % ud["cost"]
+			var rq0: Array = view.pstate.get("research_q", {}).get(single.id, [])
 			if done:
 				lbl = "DONE"
 			elif researching:
-				lbl = "researching"
+				lbl = "researching" if (not rq0.is_empty() and rq0[0] == uid) else "queued"
 			actions.append({"label": "%s\n%s" % [ud["name"], lbl], "icon": uid, "tip": "%s\n%s" % [ud["name"], ud["desc"]],
 				"cb": func() -> void: ctl.upgrade(single.id, uid), "enabled": not done and not researching and view.can_afford(ud["cost"]), "cost": 0 if (done or researching) else int(ud["cost"])})
 		if d.get("plans", false):
@@ -707,10 +712,12 @@ func refresh_selection() -> void:
 				actions.append({"label": "%s\n%s" % [pd["name"], status], "icon": pk, "tip": "%s\n%s\nSwitching takes %ds; only one plan is active." % [pd["name"], pd["desc"], int(Data.PLAN_SWITCH)],
 					"cb": func() -> void: ctl.set_plan(single.id, pk), "enabled": pb[0] != pk})
 		if d.has("superweapon"):
-			var ready: bool = view.sw_ready(single.team)
+			var ready: bool = view.sw_remaining(single.id) <= 0.0
 			actions.append({"label": "FIRE\nParticle Cannon", "tip": "Select a target for the beam. Steer it with the mouse while it fires.", "cb": func() -> void: ctl.sw_mode(single.id), "enabled": ready})
 		if d.has("produces"):
 			actions.append({"label": "Set rally", "tip": "Click where new units should gather", "cb": func() -> void: ctl.rally_mode(single.id), "enabled": true})
+		if d.has("cargo") and not view.pstate.get("cargo", {}).get(single.id, []).is_empty():
+			actions.append({"label": "Unload (U)", "tip": "Send the garrison out", "cb": func() -> void: ctl.unload(), "enabled": true})
 		actions.append({"label": "Sell\n+$%d" % int(d["cost"] * Data.REFUND), "tip": "Sell this structure for half its cost", "cb": func() -> void: ctl.sell(single.id), "enabled": true})
 	elif single != null and single.is_building and not single.complete:
 		actions.append({"label": "Cancel\n+$%d" % int(single.def["cost"] * (1.0 - single.aux / 100.0)), "tip": "Cancel construction (refund unspent cost)", "cb": func() -> void: ctl.sell(single.id), "enabled": true})
@@ -808,17 +815,22 @@ func _update_queue() -> void:
 			tp.tooltip_text = "Empty queue slot"
 		else:
 			tp.visible = false
+	var rq: Array = view.pstate.get("research_q", {}).get(bid, []) if show else []
+	for i in range(research_slots.size()):
+		var rs := research_slots[i]
+		if i < rq.size():
+			rs.visible = true
+			var icon := view.icons.get_icon(rq[i])
+			rs.texture_under = icon
+			rs.texture_progress = icon
+			rs.value = float(research[bid][1]) if i == 0 and research.has(bid) else 0.0
+		else:
+			rs.visible = false
 	if show and research.has(bid):
 		var r: Array = research[bid]
-		research_slot.visible = true
-		var icon := view.icons.get_icon(r[0])
-		research_slot.texture_under = icon
-		research_slot.texture_progress = icon
-		research_slot.value = float(r[1])
-		queue_label.text = "%s %d%%" % [Data.UPGRADES[r[0]]["name"], int(float(r[1]) * 100.0)]
+		queue_label.text = "%s %d%%%s" % [Data.UPGRADES[r[0]]["name"], int(float(r[1]) * 100.0), ("  +%d queued" % (rq.size() - 1)) if rq.size() > 1 else ""]
 		queue_label.visible = true
 	else:
-		research_slot.visible = false
 		queue_label.visible = false
 
 var _slot_tex: ImageTexture = null
@@ -937,7 +949,7 @@ func _update_powers(st: Dictionary) -> void:
 			powers_box.add_child(b)
 			sw_buttons[p.id] = b
 		var b: Button = sw_buttons[p.id]
-		var rem := float(sw.get(view.my_index, 0.0))
+		var rem := view.sw_remaining(p.id)
 		if rem > 0.0:
 			b.text = "Particle Cannon  %d:%02d" % [int(rem) / 60, int(rem) % 60]
 			b.disabled = true

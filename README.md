@@ -55,6 +55,18 @@ Everyone starts at rank 1 with one promotion point (as in Generals).
 `audio/music` — 14 Kevin MacLeod tracks (menu, game, victory, defeat), CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
 
+## What's in (M6.1)
+- Transports (Generals rules): Humvee carries 5 infantry who fire from inside; Chinook has 8 slots (infantry 1, vehicles 3) and lands to load; Firebase garrisons 4 infantry who fire from the sandbags (you see them). Right-click the transport with units selected to load, U / "Unload" to let them out.
+- Linked Patriots: batteries within 40 m share targets (cyan data-link lines); a designated battery gets +20% reach. Structures give up on targets that stay out of range.
+- No invisible attackers: anything shooting at you or attacking your stuff stays visible until it breaks off.
+- Economy: Chinooks are slower, land to load (one box per 1.3 s) and unload (4.5 s), and only one uses a Supply Center pad at a time - the rest hold off to the side.
+- Particle Cannon: each cannon has its own charge and button; the reticle cursor stays while you steer the beam, click to lock the beam in place.
+- Supply Drop Zone: a cargo plane flies over and parachutes the crate; the cash lands when the crate does.
+- Placing a structure moves your own units out of the footprint instead of refusing; enemies still block.
+- Strategy Center max 1 (plans don't stack). Upgrades queue at a building (up to 3 shown, "queued" on the button).
+- Props: our own rocks, trees, cacti, dunes and ruined houses sized exactly to the cells they block (the Synty dunes were unscaled and never blocked anything).
+- FX: particle smoke trails on missiles, fireball + sparks + smoke + dust explosions, contrail emitters on jets, smaller aircraft (Raptor 6.5 m), jets with gear that retracts, afterburners and missiles that disappear as ammo is spent, Comanche chin gun and rocket pods; infantry in team-colour vests and helmets; greyed-out buttons with the cash shortfall in red.
+
 ## What's in (M6)
 - Our own low-poly unit models for everything (tanks, Humvee, Avenger, Tomahawk, Ambulance, Dozer, Comanche, Chinook, Raptor, Stealth Fighter, Aurora, infantry with walking limbs) — no Synty needed; wrecks are charred copies.
 - Airfield remake: four hangars, taxiway, runway lights, helipad and tower. Jets roll out of the hangar, taxi to the runway, take off, and taxi back in after landing. Helicopters lift off from the helipad.

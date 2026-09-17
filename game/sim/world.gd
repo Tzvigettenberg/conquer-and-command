@@ -14,7 +14,8 @@ const CAPTURE_TIME := 20.0
 const GHOST_TIMEOUT_TICKS := 20
 const GUARD_RADIUS := 36.0
 const ASSIST_RADIUS := 45.0      # idle units this close to an attacked friend join the fight
-const SCRAMBLE_RADIUS := 130.0   # parked aircraft launch when something this close to their airfield is hit
+const SCRAMBLE_RADIUS := 130.0
+const PATRIOT_LINK := 40.0       # Patriots this close share targets (Zero Hour RequestAssistRange 175 x 0.2 m)   # parked aircraft launch when something this close to their airfield is hit
 const ORPHAN_DRAIN := 0.035      # fraction of max hp lost per second by jets with no airfield
 const TURRET_RATE := 150.0       # deg/s turret traverse
 const RETALIATE_LEASH := 40.0
@@ -758,6 +759,8 @@ func _range(e: Ent, wd: Dictionary) -> float:
 	var r := float(wd["range"])
 	if _plan_of(e) == "search":
 		r *= 1.2
+	if e.type == "patriot" and time < e.linked_until:
+		r *= 1.2
 	return r
 
 func _recompute_plans() -> void:
@@ -833,11 +836,18 @@ func _do_attack(e: Ent, dt: float) -> void:
 				return
 		if e.is_building and not e.powered and wd.get("needs_power", false):
 			return
+		if e.is_building:
+			e.timer = 0.0
 		if e.cds[wi] <= 0.0 and (int(wd.get("clip", 0)) == 0 or e.clip[wi] > 0):
 			_fire(e, wi, t)
 		return
-	# out of range: chase
+	# out of range: chase (structures wait a moment, then look for something else)
 	if e.is_building or not e.can_move():
+		e.timer += dt
+		if e.timer > 2.5:
+			e.timer = 0.0
+			e.state = "idle"
+			e.target_id = -1
 		return
 	# leash: units that engaged on their own don't wander far from their post
 	var leash := RETALIATE_LEASH
@@ -922,11 +932,29 @@ func _do_attack_ground(e: Ent, dt: float) -> void:
 func _was_auto(e: Ent) -> bool:
 	return e.queue.is_empty() and e.guard_pos != Vector2.ZERO and not e.def.get("gatherer", false)
 
+## Linked Patriot batteries: when one fires, idle Patriots within PATRIOT_LINK lock
+## on to the same target (and get a little extra reach from the designation).
+func _patriot_assist(e: Ent, t: Ent) -> void:
+	for o: Ent in query(e.pos, PATRIOT_LINK):
+		if o == e or not o.alive or o.type != "patriot" or not o.complete or not allied(o.owner, e.owner) or o.owner < 0:
+			continue
+		if o.state == "attack" or not o.powered:
+			continue
+		if _pick_weapon(o, t) < 0:
+			continue
+		if edge_dist(o.pos, t) <= _range(o, Data.WEAPONS["patriot"]) * 1.2:
+			o.state = "attack"
+			o.target_id = t.id
+			o.timer = 0.0
+			o.linked_until = time + 4.0
+
 func _fire(e: Ent, wi: int, t: Ent) -> void:
 	var wid: String = e.weapon_ids()[wi]
 	var wd: Dictionary = Data.WEAPONS[wid]
 	var dmg := _consume_shot(e, wi)
 	e.last_target_owner = t.owner
+	if e.type == "patriot":
+		_patriot_assist(e, t)
 	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, t.pos.x, t.pos.y, t.alt, t.id], "o": e.owner})
 	var spd := float(wd.get("speed", 0.0))
 	if spd <= 0.0:
@@ -1517,9 +1545,12 @@ func _do_gather(e: Ent, dt: float) -> void:
 		if d > dock.radius + 2.0:
 			_move_toward(e, dock.pos + (e.pos - dock.pos).normalized() * (dock.radius + 1.0), dt)
 			return
-		e.alt = move_toward(e.alt, 3.0, 8.0 * dt)
+		# land beside the crates, then load one box at a time
+		e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
+		if e.alt > 0.9:
+			return
 		e.timer += dt
-		if e.timer >= 1.2:
+		if e.timer >= 1.3:
 			e.timer = 0.0
 			if dock.boxes > 0:
 				dock.boxes -= 1
@@ -1533,19 +1564,34 @@ func _do_gather(e: Ent, dt: float) -> void:
 			if c == null:
 				return
 			e.center_id = c.id
+		# one Chinook on the pad at a time: the others hold off to the side
+		var user: Ent = ents.get(c.pad_user)
+		if user == null or not user.alive or user.state != "gather" or user.carry == 0 or user.pos.distance_to(c.pos) > 8.0:
+			c.pad_user = -1
+		if c.pad_user >= 0 and c.pad_user != e.id:
+			var hold := c.pos + Vector2(sin(float(e.id)), cos(float(e.id))) * 11.0
+			if e.pos.distance_to(hold) > 2.0:
+				_move_toward(e, hold, dt)
+			e.alt = move_toward(e.alt, 10.0, 6.0 * dt)
+			return
 		var d := e.pos.distance_to(c.pos)
 		if d > 3.0:
 			_move_toward(e, c.pos, dt)
 			return
-		e.alt = move_toward(e.alt, 4.0, 8.0 * dt)
+		c.pad_user = e.id
+		# land on the H and unload
+		e.alt = move_toward(e.alt, 0.5, 5.0 * dt)
+		if e.alt > 0.9:
+			return
 		e.timer += dt
-		if e.timer >= 3.0:
+		if e.timer >= 4.5:
 			e.timer = 0.0
 			var val := float(e.carry * Data.BOX_VALUE) * float(players[e.owner]["income_mult"])
 			players[e.owner]["cash"] += val
 			players[e.owner]["stats"]["cash_earned"] += int(val)
 			events.append({"k": "cash", "p": c.pos, "d": [int(val), c.id], "o": e.owner, "only": e.owner})
 			e.carry = 0
+			c.pad_user = -1
 			var dock: Ent = ents.get(e.dock_id)
 			if dock == null or not dock.alive or dock.boxes <= 0:
 				dock = _nearest_dock(e)
@@ -1695,9 +1741,14 @@ func _tick_building(e: Ent, dt: float) -> void:
 		if e.income_t >= float(e.def["income"]["every"]):
 			e.income_t = 0.0
 			var amt := float(e.def["income"]["amount"]) * float(pl["income_mult"])
-			pl["cash"] += amt
-			pl["stats"]["cash_earned"] += int(amt)
-			events.append({"k": "cash", "p": e.pos, "d": [int(amt), e.id], "o": e.owner, "only": e.owner})
+			if e.type == "supply_drop_zone":
+				# a cargo plane flies over and drops the crate; the money lands when it does
+				strikes.append({"k": "supply_cash", "p": e.pos, "t": time + 6.0, "owner": e.owner, "amt": amt, "bid": e.id})
+				events.append({"k": "supply_drop", "p": e.pos, "d": [e.pos.x, e.pos.y, e.id], "o": e.owner, "all": true})
+			else:
+				pl["cash"] += amt
+				pl["stats"]["cash_earned"] += int(amt)
+				events.append({"k": "cash", "p": e.pos, "d": [int(amt), e.id], "o": e.owner, "only": e.owner})
 	if e.plan_t > 0.0:
 		e.plan_t -= dt
 		if e.plan_t <= 0.0:
@@ -1813,6 +1864,14 @@ func _tick_strikes() -> void:
 						shots.append({"t": time + 1.1 + k * 0.25, "wid": "a10_missile", "tid": -1, "pos": p + side + dir * (k * 4.0), "dmg": 150.0, "aid": -1, "owner": s["owner"]})
 			"fab":
 				shots.append({"t": time, "wid": "fab", "tid": -1, "pos": p, "dmg": 600.0, "aid": -1, "owner": s["owner"]})
+			"supply_cash":
+				var own: int = s["owner"]
+				var zone: Ent = ents.get(int(s["bid"]))
+				if zone != null and zone.alive and zone.owner == own:
+					var amt: float = s["amt"]
+					players[own]["cash"] += amt
+					players[own]["stats"]["cash_earned"] += int(amt)
+					events.append({"k": "cash", "p": p, "d": [int(amt), zone.id], "o": own, "only": own})
 			"paradrop":
 				for i in range(4):
 					var c := grid.nearest_free(grid.cell_of(p + Vector2(randf_range(-4, 4), randf_range(-4, 4))))
@@ -1829,7 +1888,7 @@ func _tick_beams(dt: float) -> void:
 		if time >= b["until"]:
 			continue
 		var steer: Vector2 = players[b["owner"]]["sw_steer"]
-		if steer.x >= 0.0:
+		if steer.x >= 0.0 and b.get("steer", true):
 			b["p"] = (b["p"] as Vector2).move_toward(steer, 7.0 * dt)
 		b["next"] -= dt
 		if b["next"] <= 0.0:
@@ -2044,6 +2103,12 @@ func _send_snapshots() -> void:
 func events_seen_by_bot(_p: int) -> void:
 	pass
 
+func _steering_beam(p: int) -> bool:
+	for b in beams:
+		if b["owner"] == p and b.get("steer", true):
+			return true
+	return false
+
 func _plans_array() -> Array:
 	var out := []
 	for pl in players:
@@ -2064,9 +2129,11 @@ func _teams_array() -> Array:
 
 func _send_pstates() -> void:
 	var sw := {}
+	var sw_bld := {}
 	for e: Ent in ents.values():
 		if e.alive and e.is_building and e.def.has("superweapon") and e.complete and e.owner >= 0:
 			var remaining := 0.0 if e.sw_ready else float(e.def["superweapon"]) - e.sw_t
+			sw_bld[e.id] = remaining
 			if not sw.has(e.owner) or remaining < sw[e.owner]:
 				sw[e.owner] = remaining
 	var docks := {}
@@ -2081,8 +2148,8 @@ func _send_pstates() -> void:
 			"cash": int(pl["cash"]), "pp": pl["pp"], "pu": pl["pu"], "low": pl["low"], "rank": pl["rank"], "xp": int(pl["xp"]),
 			"next": Data.RANK_XP[pl["rank"]] if pl["rank"] < 5 else -1, "points": pl["points"], "powers": pl["powers"].duplicate(),
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
-			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": beams.size() > 0 and beams[0]["owner"] == p,
-			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {}, "cargo": {},
+			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": _steering_beam(p), "sw_bld": sw_bld,
+			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
 		}
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
@@ -2097,6 +2164,10 @@ func _send_pstates() -> void:
 					st["queues"][e.id] = q
 				if not e.research.is_empty():
 					st["research"][e.id] = [e.research[0]["id"], e.research[0]["t"] / e.research[0]["total"]]
+					var rq := []
+					for r in e.research:
+						rq.append(r["id"])
+					st["research_q"][e.id] = rq
 				if e.has_rally:
 					st["rally"][e.id] = [e.rally.x, e.rally.y]
 				if not e.upg_done.is_empty():
@@ -2235,6 +2306,10 @@ func cmd(p: int, c: Dictionary) -> void:
 			_cmd_superweapon(p, c)
 		"sw_steer":
 			players[p]["sw_steer"] = Vector2(float(c["x"]), float(c["y"]))
+		"sw_stop":
+			for b in beams:
+				if b["owner"] == p:
+					b["steer"] = false
 		"cheat_cash":
 			if solo or debug:
 				players[p]["cash"] += 10000.0
@@ -2405,6 +2480,7 @@ func _cmd_build(p: int, c: Dictionary) -> void:
 		return
 	pl["cash"] -= float(d["cost"])
 	var site := spawn(type, p, pos, false, yaw)
+	_clear_footprint(site)
 	site.builder_id = dz.id
 	dz.queue.clear()
 	dz.resume = {}
@@ -2423,13 +2499,34 @@ func placement_ok(p: int, type: String, pos: Vector2, yaw := 0.0) -> bool:
 		return false
 	if not grid.footprint_free(pos, fp, 1, yaw):
 		return false
-	# units standing in the footprint (other than air) block placement
+	# only ENEMY units standing in the footprint block placement; our own get moved out
 	for o: Ent in query(pos, r + 1.0):
-		if o.is_building or o.is_air():
+		if o.is_building or o.is_air() or o.owner < 0 or allied(o.owner, p):
 			continue
 		if PathGrid.rect_dist(o.pos, pos, fp, yaw) < o.radius:
 			return false
 	return true
+
+## Friendly units standing where a structure goes step out of the footprint.
+func _clear_footprint(site: Ent) -> void:
+	var fp: Vector2i = site.def["fp"]
+	var r := Vector2(fp).length() + 2.0
+	for o: Ent in query(site.pos, r):
+		if o.is_building or o.is_air() or not o.can_move():
+			continue
+		if PathGrid.rect_dist(o.pos, site.pos, fp, site.yaw) < o.radius + 0.5:
+			var away := (o.pos - site.pos)
+			if away.length() < 0.1:
+				away = Vector2(1, 0)
+			var goal := site.pos + away.normalized() * (r + o.radius)
+			var c := grid.nearest_free(grid.cell_of(goal))
+			if o.state == "idle" or o.state == "guard":
+				var was_guard := o.state == "guard"
+				var gp := o.guard_pos
+				var gr := o.guard_radius
+				_order_move(o, grid.center_of(c))
+				if was_guard:
+					o.resume = {"state": "guard", "goal": gp, "r": gr}
 
 func _cmd_produce(p: int, c: Dictionary) -> void:
 	var b: Ent = ents.get(int(c.get("id", -1)))
@@ -2582,7 +2679,7 @@ func _cmd_superweapon(p: int, c: Dictionary) -> void:
 	b.sw_ready = false
 	b.sw_t = 0.0
 	players[p]["sw_steer"] = Vector2(-1, -1)
-	beams.append({"owner": p, "p": pos, "until": time + 10.0, "next": 0.0, "bid": b.id})
+	beams.append({"owner": p, "p": pos, "until": time + 10.0, "next": 0.0, "bid": b.id, "steer": true})
 	for o in range(players.size()):
 		session.s_msg(players[o]["peer"], "Particle Cannon fired" if o == p else "Warning: enemy Particle Cannon fired!")
 
