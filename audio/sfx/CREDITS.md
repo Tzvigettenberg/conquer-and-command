@@ -13,6 +13,7 @@
 - `footsteps.ogg` — "Footsteps Gravel Running-Stop" by KikeVilaplana — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/436525/
 - `gau8.ogg` — "Navy MK 15 Phalanx CIWS Anti-Air Fast Burst" by qubodup — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/163119/
 - `grunt.ogg` — "Voice_AdultMale_PainGrunts_04.wav" by MrFossy — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/547200/
+- `humvee_rev.ogg` — "Scifi_EngineFail_LAURENPOND.wav" by LaurenPonder — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/635642/
 - `jet_flyby.ogg` — "Jet.ogg" by egomassive — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/536809/
 - `jet_loop.ogg` — "Jet Engine" by m_cel — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/534856/
 - `metal_hit.ogg` — "hit - metallic - trailer - metal fender 02.wav" by Anthousai — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/406559/
@@ -28,6 +29,8 @@
 - `superweapon_charge.ogg` — "laser-charge.wav" by StavSounds — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/701702/
 - `superweapon_fire.ogg` — " Laser gun Cannon shot.mp3 " by soundmatch24 — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/194312/
 - `tank_engine.ogg` — "engine4_loop.wav" by ReadeOnly — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/186934/
+- `tank_rev.ogg` — "Driving Tank Engine.flac" by qubodup — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/187676/
+- `truck_rev.ogg` — "engine_rev_jump.wav" by RichieMcMullen — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/386801/
 - `ui_click.ogg` — "SFX UI Button Click" by suntemple — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/253168/
 - `ui_error.ogg` — "Multimedia SFX - Error 01.wav" by 8bitmyketison — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/699923/
 - `ui_hover.ogg` — "Soft UI Button Click" by Jummit — http://creativecommons.org/publicdomain/zero/1.0/ — https://freesound.org/s/528561/

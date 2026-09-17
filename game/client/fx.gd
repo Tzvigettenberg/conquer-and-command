@@ -343,12 +343,14 @@ func contrail(a: Vector3, b: Vector3) -> void:
 		sm.position = p
 		_add(sm, "puff", 0.9, {"grow": 1.6, "alpha": 0.16})
 
-## Point-defence laser flash.
+## Point-defence laser: red beam with a bright core, flash at the missile.
 func laser(from: Vector3, to: Vector3) -> void:
-	var b := _beam_mesh(from, to, Color(0.5, 1.0, 0.9, 0.9), 0.15)
-	_add(b, "beam", 0.15)
-	var p := Visuals.sphere(0.5, Color(0.6, 1.0, 1.0, 0.9))
-	p.material_override = _own_mat(Color(0.6, 1.0, 1.0, 0.9))
+	var b := _beam_mesh(from, to, Color(1.0, 0.15, 0.1, 0.8), 0.22)
+	_add(b, "beam", 0.18)
+	var core := _beam_mesh(from, to, Color(1.0, 0.8, 0.7, 1.0), 0.07)
+	_add(core, "beam", 0.18)
+	var p := Visuals.sphere(0.5, Color(1.0, 0.5, 0.4, 0.9))
+	p.material_override = _own_mat(Color(1.0, 0.5, 0.4, 0.9))
 	p.position = to
 	_add(p, "flash", 0.2)
 
@@ -384,7 +386,20 @@ func _add(node: Node3D, kind: String, life: float, extra := {}) -> Dictionary:
 	return it
 
 # ---------------------------------------------------------------------------
-func shot(from: Vector3, to: Vector3, wid: String) -> void:
+## Remove a projectile that was shot down; returns its current position (or (-9999,..) if unknown).
+func kill_projectile(sid: int) -> Vector3:
+	if sid < 0:
+		return Vector3(-9999, 0, 0)
+	for it in items:
+		if it["kind"] == "proj" and int(it.get("sid", -1)) == sid:
+			var n: Node3D = it["node"]
+			var p := n.position
+			it["life"] = 0.001   # ends next frame without the impact effect
+			it["impact"] = false
+			return p
+	return Vector3(-9999, 0, 0)
+
+func shot(from: Vector3, to: Vector3, wid: String, sid := -1) -> void:
 	var wd: Dictionary = Data.WEAPONS.get(wid, {})
 	var style: String = wd.get("style", "bullet")
 	var spd := float(wd.get("speed", 0.0))
@@ -400,8 +415,10 @@ func shot(from: Vector3, to: Vector3, wid: String) -> void:
 			tr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			_add(tr, "proj", clampf(d / 160.0, 0.1, 0.35), {"from": from, "to": to, "style": style, "impact": true})
 		"beam":
-			var b := _beam_mesh(from, to, Color(0.4, 0.9, 1.0, 0.9), 0.12)
+			var b := _beam_mesh(from, to, Color(1.0, 0.2, 0.12, 0.85), 0.18)
 			_add(b, "beam", 0.12)
+			var core := _beam_mesh(from, to, Color(1.0, 0.85, 0.75, 1.0), 0.06)
+			_add(core, "beam", 0.12)
 		"shell", "missile", "cruise", "bomb":
 			var life := d / maxf(spd, 1.0)
 			var arc := 0.0
@@ -418,7 +435,7 @@ func shot(from: Vector3, to: Vector3, wid: String) -> void:
 			var holder := Node3D.new()
 			holder.add_child(pm)
 			pm.material_override = _own_mat(Color(0.9, 0.9, 0.9) if style != "shell" else Color(0.3, 0.3, 0.3))
-			var extra := {"from": from, "to": to, "style": style, "arc": arc, "impact": false}
+			var extra := {"from": from, "to": to, "style": style, "arc": arc, "impact": false, "sid": sid}
 			if style == "missile" or style == "cruise":
 				var flame := MeshInstance3D.new()
 				var s := SphereMesh.new()

@@ -239,7 +239,7 @@ func on_events(evs: Array) -> void:
 						from = a.cur_pos + Vector3(0, -0.5, 0)
 				else:
 					continue
-				fx.shot(from, Vector3(d[2], float(d[4]) + 0.8, d[3]), str(d[1]))
+				fx.shot(from, Vector3(d[2], float(d[4]) + 0.8, d[3]), str(d[1]), int(d[6]) if d.size() > 6 else -1)
 				Audio.I.weapon(str(d[1]), from)
 			"hit":
 				var wd: Dictionary = Data.WEAPONS.get(str(d[0]), {})
@@ -250,11 +250,17 @@ func on_events(evs: Array) -> void:
 					fx.impact(Vector3(d[1], float(d[3]), d[2]), wd.get("style", "shell"))
 					Audio.I.impact(wd.get("style", "shell"), Vector3(d[1], float(d[3]), d[2]))
 			"pd":
-				# point-defence laser zaps an incoming missile
+				# point-defence laser burns an incoming missile out of the air
 				var dp: Puppet = puppets.get(int(d[0]))
+				var hit_at := Vector3(d[1], float(d[3]), d[2])
+				var sid := int(d[4]) if d.size() > 4 else -1
+				var live := fx.kill_projectile(sid)
+				if live.x > -9000.0:
+					hit_at = live
 				if dp != null:
-					fx.laser(dp.cur_pos + Vector3(0, 2.2, 0), Vector3(d[1], float(d[3]), d[2]))
+					fx.laser(dp.cur_pos + Vector3(0, 2.2, 0), hit_at)
 					Audio.I.sfx("laser_zap", dp.cur_pos, -4.0, 0.1, 0.1)
+				fx.explosion(hit_at, 0.6)
 			"die":
 				pass   # despawn carries the visual death
 			"cash":

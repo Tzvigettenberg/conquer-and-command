@@ -236,5 +236,26 @@
   "author": "KikeVilaplana",
   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
   "url": "https://freesound.org/s/436525/"
+ },
+ "tank_rev": {
+  "id": 187676,
+  "title": "Driving Tank Engine.flac",
+  "author": "qubodup",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/187676/"
+ },
+ "truck_rev": {
+  "id": 386801,
+  "title": "engine_rev_jump.wav",
+  "author": "RichieMcMullen",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/386801/"
+ },
+ "humvee_rev": {
+  "id": 386801,
+  "title": "engine_rev_jump.wav",
+  "author": "RichieMcMullen",
+  "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+  "url": "https://freesound.org/s/386801/"
  }
 }

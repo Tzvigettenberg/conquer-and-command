@@ -516,6 +516,16 @@ func _voice_for(ids: Array, kind: String) -> void:
 	var p: Puppet = view.puppets.get(ids[rng_pick(ids.size())])
 	if p != null:
 		Audio.I.voice(p.type, kind)
+		if kind == "move" or kind == "attack":
+			# engines rev on the order
+			var n := 0
+			for id in ids:
+				var q: Puppet = view.puppets.get(id)
+				if q != null and q.cat == "veh":
+					Audio.I.engine_ack(q.type, q.cur_pos)
+					n += 1
+					if n >= 2:
+						break
 
 func rng_pick(n: int) -> int:
 	return randi() % maxi(n, 1)

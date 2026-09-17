@@ -191,6 +191,19 @@ func weapon(wid: String, pos: Vector3) -> void:
 			vol = 6.0
 	sfx(name, pos, vol, 0.1, 0.06 if name != "machinegun" else 0.15)
 
+## Engine rev when a vehicle is sent somewhere.
+func engine_ack(unit_type: String, pos: Vector3) -> void:
+	var d := Data.def(unit_type)
+	if d.get("cat", "") != "veh":
+		return
+	var name := "truck_rev"
+	match unit_type:
+		"crusader", "paladin", "avenger":
+			name = "tank_rev"
+		"humvee", "ambulance":
+			name = "humvee_rev"
+	sfx(name, pos, -4.0, 0.08, 0.4)
+
 func impact(style: String, pos: Vector3) -> void:
 	var name: String = IMPACT_SFX.get(style, "")
 	if name == "":

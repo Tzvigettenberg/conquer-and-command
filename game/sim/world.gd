@@ -34,6 +34,7 @@ var shots: Array = []              # scheduled projectile impacts
 var events: Array = []             # pending FX events for this snapshot
 var strikes: Array = []            # delayed general's powers
 var beams: Array = []              # active particle cannon beams
+var next_sid := 1                  # shot ids (client matches projectiles for mid-air intercepts)
 var spatial: Dictionary = {}
 var known: Array = []              # per player: id -> last tick included
 var pending_despawn: Array = []    # per player: id -> pos (ghost buildings)
@@ -955,24 +956,28 @@ func _fire(e: Ent, wi: int, t: Ent) -> void:
 	e.last_target_owner = t.owner
 	if e.type == "patriot":
 		_patriot_assist(e, t)
-	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, t.pos.x, t.pos.y, t.alt, t.id], "o": e.owner})
+	var sid := next_sid
+	next_sid += 1
+	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, t.pos.x, t.pos.y, t.alt, t.id, sid], "o": e.owner})
 	var spd := float(wd.get("speed", 0.0))
 	if spd <= 0.0:
 		_apply_hit(e, wid, t, t.pos, dmg)
 	else:
 		var d := e.pos.distance_to(t.pos)
-		shots.append({"t": time + d / spd, "wid": wid, "tid": t.id, "pos": t.pos, "dmg": dmg, "aid": e.id, "owner": e.owner})
+		shots.append({"t": time + d / spd, "t0": time, "from": e.pos, "wid": wid, "tid": t.id, "pos": t.pos, "dmg": dmg, "aid": e.id, "owner": e.owner, "sid": sid})
 
 func _fire_at_pos(e: Ent, wi: int, pos: Vector2) -> void:
 	var wid: String = e.weapon_ids()[wi]
 	var wd: Dictionary = Data.WEAPONS[wid]
 	var dmg := _consume_shot(e, wi)
-	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, pos.x, pos.y, 0.0, -1], "o": e.owner})
+	var sid := next_sid
+	next_sid += 1
+	events.append({"k": "shot", "p": e.pos, "d": [e.id, wid, pos.x, pos.y, 0.0, -1, sid], "o": e.owner})
 	var spd := float(wd.get("speed", 0.0))
 	if spd <= 0.0:
 		_apply_hit(e, wid, null, pos, dmg)
 	else:
-		shots.append({"t": time + e.pos.distance_to(pos) / spd, "wid": wid, "tid": -1, "pos": pos, "dmg": dmg, "aid": e.id, "owner": e.owner})
+		shots.append({"t": time + e.pos.distance_to(pos) / spd, "t0": time, "from": e.pos, "wid": wid, "tid": -1, "pos": pos, "dmg": dmg, "aid": e.id, "owner": e.owner, "sid": sid})
 
 ## Cooldown / clip bookkeeping for one shot; returns the damage it will do.
 func _consume_shot(e: Ent, wi: int) -> float:
@@ -1001,6 +1006,9 @@ func _tick_shots() -> void:
 	var keep := []
 	for s in shots:
 		if time < s["t"]:
+			# missiles in flight can be shot down mid-air once they're past a third of the way
+			if s.has("t0") and _pd_style(s) and _point_defence(s, _shot_pos(s)):
+				continue
 			keep.append(s)
 			continue
 		var a: Ent = ents.get(s["aid"])
@@ -1008,37 +1016,50 @@ func _tick_shots() -> void:
 		var pos: Vector2 = s["pos"]
 		if t != null and t.alive:
 			pos = t.pos
-		if _point_defence(s, pos):
-			continue
 		_apply_hit(a, s["wid"], t, pos, s["dmg"], s["owner"])
 	shots = keep
+
+func _pd_style(s: Dictionary) -> bool:
+	var style := str(Data.WEAPONS[s["wid"]].get("style", ""))
+	return style == "missile" or style == "cruise"
+
+## Where a shot is right now (straight line from shooter to target).
+func _shot_pos(s: Dictionary) -> Vector2:
+	var t0: float = s["t0"]
+	var k := clampf((time - t0) / maxf(float(s["t"]) - t0, 0.01), 0.0, 1.0)
+	var to: Vector2 = s["pos"]
+	var tg: Ent = ents.get(s["tid"])
+	if tg != null and tg.alive:
+		to = tg.pos
+	return (s["from"] as Vector2).lerp(to, k)
 
 ## Avenger / Paladin laser point defence: an incoming missile or shell aimed near
 ## a friendly is burned out of the air. Each defender has a cooldown, so a salvo
 ## can overwhelm it (Avenger 0.35 s, Paladin 1.5 s, Generals-style).
 func _point_defence(s: Dictionary, pos: Vector2) -> bool:
-	var wd: Dictionary = Data.WEAPONS[s["wid"]]
-	var style := str(wd.get("style", ""))
-	if style != "missile" and style != "cruise" and style != "shell":
+	if not _pd_style(s):
+		return false
+	var t0: float = s.get("t0", time)
+	var k := clampf((time - t0) / maxf(float(s["t"]) - t0, 0.01), 0.0, 1.0)
+	if k < 0.3:
 		return false
 	var own := int(s["owner"])
-	for d: Ent in query(pos, 22.0):
+	for d: Ent in query(pos, 26.0):
 		if not d.alive or d.owner < 0 or allied(d.owner, own):
 			continue
 		var pd := 0.0
 		if d.type == "avenger":
-			pd = 0.35
+			pd = 0.25
 		elif d.type == "paladin":
-			pd = 1.5
+			pd = 0.8
 		else:
 			continue
 		if time < d.pd_t:
 			continue
 		d.pd_t = time + pd
-		var a: Ent = ents.get(s["aid"])
-		var from: Vector2 = a.pos if a != null else pos - Vector2(6, 6)
-		var mid := pos.lerp(from, 0.35)
-		events.append({"k": "pd", "p": d.pos, "d": [d.id, mid.x, mid.y, 4.0 + randf() * 4.0], "o": d.owner})
+		# missile altitude along its arc (shells arc high, missiles fly flat-ish)
+		var alt := 2.0 + sin(k * PI) * (2.5 if str(Data.WEAPONS[s["wid"]].get("style", "")) == "missile" else 10.0)
+		events.append({"k": "pd", "p": d.pos, "d": [d.id, pos.x, pos.y, alt, int(s.get("sid", -1))], "o": d.owner})
 		return true
 	return false
 

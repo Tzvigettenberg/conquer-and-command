@@ -32,6 +32,9 @@ MANIFEST = {
     "building_collapse":("building collapse rubble", 1.5, 8.0, False, ""),
     "metal_hit":        ("metal hit", 0.2, 2.0, False, ""),
     # vehicles
+    "tank_rev":         ("tank engine", 0.5, 8.0, False, ""),
+    "truck_rev":        ("diesel engine rev", 0.5, 8.0, False, ""),
+    "humvee_rev":       ("engine rev", 0.5, 6.0, False, ""),
     "tank_engine":      ("tank engine loop", 2.0, 15.0, True, ""),
     "truck_engine":     ("diesel truck engine loop", 2.0, 15.0, True, ""),
     "humvee_engine":    ("car engine idle loop", 2.0, 15.0, True, ""),

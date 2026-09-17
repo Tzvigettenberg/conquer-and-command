@@ -108,12 +108,9 @@ static func make_extras(type: String, keys: Array, team: int, aabb: AABB) -> Nod
 				any = true
 		"crusader", "paladin":
 			if keys.has("composite_armor"):
-				# side skirts and extra front plate
-				var w := aabb.size.x
-				var l := aabb.size.z
-				for sx in [-1.0, 1.0]:
-					Buildings.box(root, Vector3(0.18, 0.7, l * 0.75), Vector3(c.x + sx * (w * 0.5 + 0.05), aabb.position.y + 0.75, c.z), metal)
-				Buildings.box(root, Vector3(w * 0.8, 0.5, 0.2), Vector3(c.x, aabb.position.y + 0.9, c.z + l * 0.5), metal)
+				# extra plate bolted onto the glacis and a stowage rack on the turret rear - hugs the hull
+				Buildings.box(root, Vector3(aabb.size.x * 0.5, 0.14, 0.9), Vector3(c.x, aabb.position.y + 1.36, c.z + aabb.size.z * 0.28), metal)
+				Buildings.box(root, Vector3(aabb.size.x * 0.34, 0.3, 0.3), Vector3(c.x, aabb.position.y + 1.62, c.z - aabb.size.z * 0.32), Color(0.32, 0.3, 0.25))
 				any = true
 		"comanche":
 			if keys.has("rocket_pods"):
