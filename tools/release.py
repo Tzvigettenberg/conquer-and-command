@@ -111,9 +111,8 @@ def main() -> None:
             api(env, "DELETE", f"{base}/releases/assets/{asset['id']}")
     upload = rel["upload_url"].split("{")[0]
     data = zip_path.read_bytes()
-    for name in dict.fromkeys([STABLE_NAME, zip_path.name]):
-        print(f"uploading {name} ({len(data) // 1_000_000} MB)...")
-        api(env, "POST", f"{upload}?name={name}", data, "application/zip")
+    print(f"uploading {STABLE_NAME} ({len(data) // 1_000_000} MB)...")
+    api(env, "POST", f"{upload}?name={STABLE_NAME}&label={zip_path.name}", data, "application/zip")
     print("done:")
     print(f"  release  https://github.com/{repo}/releases/tag/{tag}")
     print(f"  download https://github.com/{repo}/releases/latest/download/{STABLE_NAME}")
