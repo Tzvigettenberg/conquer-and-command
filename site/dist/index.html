@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Conquer & Command: Zero Budget - a free Command & Conquer Generals: Zero Hour-style RTS for Windows. USA, China and the GLA, skirmish and multiplayer.">
+<meta name="theme-color" content="#0b0d10">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Conquer & Command: Zero Budget">
+<meta property="og:description" content="Conquer & Command: Zero Budget - a free Command & Conquer Generals: Zero Hour-style RTS for Windows. USA, China and the GLA, skirmish and multiplayer.">
+<meta property="og:url" content="https://tzvigettenberg.github.io/conquer-and-command/">
+<meta property="og:image" content="https://tzvigettenberg.github.io/conquer-and-command/img/poster.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%8E%96</text></svg>">
+<style>
+  :root { color-scheme: dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>Conquer & Command: Zero Budget</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #0b0d10;
+    --panel: #14181d;
+    --panel-2: #1b2026;
+    --edge: #3a3123;
+    --brass: #b8913f;
+    --brass-dim: #6e5a2f;
+    --amber: #ffc759;
+    --text: #e6e2d6;
+    --dim: #9a978c;
+    --usa: #4aa3ff;
+    --china: #ff5a4a;
+    --gla: #d9c34a;
+    --gutter: clamp(16px, 4vw, 40px);
+    color-scheme: dark;
+  }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: "Barlow", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+  h2 {
+    font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: clamp(28px, 4vw, 40px);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  h3 {
+    font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+  p { margin: 0; }
+  a { color: var(--amber); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+
+  /* ---------- hero ---------- */
+  .hero {
+    position: relative;
+    min-height: 620px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    isolation: isolate;
+    padding: 90px var(--gutter) 100px;
+    box-sizing: border-box;
+  }
+  .hero video, .hero .poster {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; z-index: -2;
+    filter: saturate(0.85) brightness(0.8);
+  }
+  .hero .poster { display: none; }
+  @media (max-width: 760px) {
+    .hero video { display: none; }
+    .hero .poster { display: block; }
+  }
+  .hero .shade {
+    position: absolute; inset: 0; z-index: -1;
+    background:
+      radial-gradient(ellipse at 50% 55%, rgba(5, 7, 10, 0.15) 0%, rgba(5, 7, 10, 0.72) 70%),
+      linear-gradient(to bottom, rgba(5, 7, 10, 0.55), rgba(5, 7, 10, 0.1) 30%, rgba(5, 7, 10, 0.2) 70%, var(--ground));
+  }
+  .bar {
+    position: absolute; left: 0; right: 0; height: 46px;
+    background: rgba(6, 6, 8, 0.88); z-index: 1;
+  }
+  .bar.top { top: 0; border-bottom: 2px solid var(--brass-dim); }
+  .bar.bottom { bottom: 0; border-top: 2px solid var(--brass-dim); }
+  .bar .inner {
+    max-width: 1100px; margin: 0 auto; height: 100%;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 0 var(--gutter);
+    font-family: "Barlow Condensed", sans-serif; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--dim);
+  }
+  .bar .inner nav { display: flex; gap: 22px; }
+  .bar .inner a { color: var(--dim); text-decoration: none; }
+  .bar .inner a:hover { color: var(--amber); }
+  @media (max-width: 780px) { .bar .inner nav { display: none; } .bar .inner { justify-content: center; } }
+  .bar .inner nav a.on { color: var(--amber); border-bottom: 2px solid var(--brass); }
+  /* one page at a time: the hero is the home page, every other section is its own page */
+  main > section { display: none; }
+  main > section.on { display: block; }
+  body[data-page="home"] .hero { min-height: 620px; }
+  @media (max-width: 760px) {
+    .hero { padding: 66px var(--gutter) 74px; }
+    body[data-page="home"] .hero { min-height: 0; }
+    body:not([data-page="home"]) .hero { padding: 60px var(--gutter) 28px; }
+    .bar { height: 40px; }
+    .cta { margin-top: 26px; }
+    .btn { font-size: 21px; padding: 14px 24px; width: 100%; max-width: 312px; justify-content: center; }
+    .tagline { margin-top: 20px; }
+    section { padding-block: 40px; }
+    .pager { gap: 10px 16px; font-size: 15px; padding-top: 22px; }
+    .sec-head { margin-bottom: 20px; }
+    .lede { font-size: 17px; }
+  }
+  body:not([data-page="home"]) .hero { min-height: 0; padding: 70px var(--gutter) 40px; }
+  body:not([data-page="home"]) .hero .tagline, body:not([data-page="home"]) .hero .cta, body:not([data-page="home"]) .hero .eyebrow { display: none; }
+  body:not([data-page="home"]) h1.title { font-size: clamp(28px, 5vw, 48px); }
+  body:not([data-page="home"]) .subtitle { font-size: 16px; margin-top: 8px; }
+  .pager { display: flex; flex-wrap: wrap; gap: 10px 22px; justify-content: center; padding: 26px var(--gutter) 0; font-family: "Barlow Condensed", sans-serif; font-size: 16px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .pager a { color: var(--dim); text-decoration: none; border-bottom: 1px solid transparent; }
+  .pager a:hover, .pager a.on { color: var(--amber); border-bottom-color: var(--brass); }
+  .back { margin-top: 30px; }
+  .back a { font-family: "Barlow Condensed", sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); text-decoration: none; }
+  .back a:hover { color: var(--amber); }
+
+  .hero .content { text-align: center; z-index: 1; max-width: 900px; }
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 15px;
+    letter-spacing: 0.28em; text-transform: uppercase; color: var(--brass);
+  }
+  h1.title {
+    font-family: "Black Ops One", "Impact", "Arial Black", sans-serif;
+    font-weight: 400;
+    font-size: clamp(40px, 8.5vw, 92px);
+    line-height: 0.98;
+    letter-spacing: 0.01em;
+    color: var(--amber);
+    text-shadow: 0 3px 0 #3a2a08, 0 8px 28px rgba(0, 0, 0, 0.85);
+    margin-top: 10px;
+  }
+  .subtitle {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 5px 18px;
+    border-top: 2px solid var(--brass); border-bottom: 2px solid var(--brass);
+    font-family: "Barlow Condensed", sans-serif; font-weight: 700;
+    font-size: clamp(20px, 3.2vw, 32px); letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--text);
+  }
+  .tagline { margin-top: 26px; font-size: clamp(16px, 2vw, 20px); color: #d7d3c6; max-width: 640px; margin-inline: auto; text-shadow: 0 1px 8px rgba(0,0,0,0.9); }
+
+  .cta { margin-top: 34px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .btn {
+    position: relative; display: inline-flex; align-items: center; gap: 14px;
+    padding: 16px 34px;
+    background: linear-gradient(to bottom, #f0c15a, #c8942f);
+    color: #1a1204; text-decoration: none;
+    font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 26px; letter-spacing: 0.1em; text-transform: uppercase;
+    border: 1px solid #ffe2a0; border-bottom: 3px solid #6e4e14;
+    transform: skewX(-8deg);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: transform 120ms ease, filter 120ms ease;
+  }
+  .btn > * { transform: skewX(8deg); }
+  .btn:hover { filter: brightness(1.08); transform: skewX(-8deg) translateY(-1px); }
+  .btn:active { transform: skewX(-8deg) translateY(1px); border-bottom-width: 1px; }
+  .btn svg { width: 26px; height: 26px; }
+  .meta {
+    font-family: "Barlow Condensed", sans-serif; font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--dim); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px;
+  }
+  .meta b { color: var(--text); font-weight: 600; }
+  .alt { font-size: 15px; color: var(--dim); }
+  .alt a { color: var(--dim); text-decoration-color: var(--brass-dim); }
+  .alt a:hover { color: var(--amber); }
+
+  /* ---------- sections ---------- */
+  .wrap { max-width: 1100px; margin: 0 auto; padding-inline: var(--gutter); }
+  section { padding-block: 64px; }
+  section + section { border-top: 1px solid #1f2329; }
+  .sec-head { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  .sec-head .rule { flex: 1; height: 1px; background: var(--brass-dim); }
+  .sec-head .num { font-family: "Barlow Condensed", sans-serif; color: var(--brass); letter-spacing: 0.2em; font-size: 14px; }
+  .lede { font-size: 19px; color: #cfcbbf; max-width: 70ch; }
+  .lede + .lede { margin-top: 14px; }
+
+  .factions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 820px) { .factions { grid-template-columns: 1fr; } }
+  .faction {
+    background: var(--panel); border: 1px solid #262b31; border-top: 4px solid var(--fc);
+    padding: 22px 22px 24px; display: flex; flex-direction: column; gap: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  .faction h3 { color: var(--fc); display: flex; align-items: baseline; gap: 10px; }
+  .faction h3 small { font-size: 13px; letter-spacing: 0.2em; color: var(--dim); font-weight: 500; }
+  .faction p { font-size: 15.5px; color: #cfcbbf; }
+  .faction .kit { font-size: 14px; color: var(--dim); border-top: 1px dashed #2c3139; padding-top: 10px; margin-top: auto; }
+  .faction .kit b { color: var(--text); font-weight: 600; }
+  .usa { --fc: var(--usa); } .china { --fc: var(--china); } .gla { --fc: var(--gla); }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: step; }
+  @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+  .step { background: var(--panel-2); border: 1px solid #262b31; padding: 20px 22px 22px; }
+  .step::before {
+    counter-increment: step; content: "0" counter(step);
+    display: block; font-family: "Black Ops One", "Impact", sans-serif; font-size: 30px; color: var(--brass); line-height: 1; margin-bottom: 10px;
+  }
+  .step h3 { margin-bottom: 8px; color: var(--text); }
+  .step p { font-size: 15.5px; color: #cfcbbf; }
+  code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.9em; background: #0d1014; border: 1px solid #262b31; padding: 1px 6px; color: var(--amber); }
+  .note { margin-top: 20px; font-size: 15px; color: var(--dim); max-width: 78ch; }
+
+  .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 640px) { .gallery { grid-template-columns: 1fr; } }
+  .shot { position: relative; margin: 0; border: 1px solid #262b31; background: #000; aspect-ratio: 16 / 9; max-width: 100%; overflow: hidden; }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .shot figcaption {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 12px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent);
+    font-family: "Barlow Condensed", sans-serif; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text);
+  }
+
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px 26px; }
+  .key { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid #1f2329; font-size: 15px; color: #cfcbbf; }
+  @media (max-width: 480px) { .keys { grid-template-columns: 1fr; } .key { grid-template-columns: 1fr; gap: 4px; } }
+  .key kbd {
+    font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: 0.06em;
+    color: var(--amber); background: #0d1014; border: 1px solid #2f3540; border-bottom-width: 2px; padding: 2px 7px; white-space: nowrap; justify-self: start;
+  }
+
+  .changes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 40px; }
+  @media (max-width: 760px) { .changes { grid-template-columns: 1fr; } }
+  .change { display: flex; gap: 12px; font-size: 15.5px; color: #cfcbbf; }
+  .change::before { content: ""; flex: none; width: 8px; height: 8px; margin-top: 9px; background: var(--brass); transform: rotate(45deg); }
+  .change b { color: var(--text); font-weight: 600; }
+
+  footer { border-top: 1px solid #1f2329; padding-block: 34px 60px; font-size: 14px; color: var(--dim); }
+  footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 30px; }
+  footer p { max-width: 62ch; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <img class="poster" src="img/poster.jpg" alt="" aria-hidden="true">
+  <video autoplay muted loop playsinline preload="metadata" poster="img/poster.jpg" aria-hidden="true">
+    <source src="media/shell.mp4" type="video/mp4">
+  </video>
+  <div class="shade"></div>
+  <div class="bar top"><div class="inner">
+    <span>Conquer &amp; Command · Zero Budget</span>
+    <nav><a href="#home">Home</a><a href="#factions">Factions</a><a href="#friends">Play with friends</a><a href="#shots">Screenshots</a><a href="#controls">Controls</a><a href="#changes">Latest</a></nav>
+  </div></div>
+
+  <div class="content">
+    <p class="eyebrow">A free Zero Hour-style RTS · Windows</p>
+    <h1 class="title">Conquer &amp; Command</h1>
+    <div class="subtitle">Zero Budget</div>
+    <p class="tagline">USA, China and the GLA. Base building, generals' powers, superweapons and garrisons — built from scratch for LAN and internet games with your friends.</p>
+    <div class="cta">
+      <a class="btn" id="download" href="https://github.com/tzvigettenberg/conquer-and-command/releases/latest/download/ConquerAndCommand_ZeroBudget_win64.zip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m6 11 6 6 6-6"/><path d="M4 20h16"/></svg>
+        <span>Download for Windows</span>
+      </a>
+      <div class="meta"><span>Version <b id="ver">0.3.0</b></span><span>Updated <b id="date">18 Sep 2026</b></span><span><b>80 MB</b> zip · 64-bit</span></div>
+      <p class="alt">This link always points at the newest build. <a href="https://github.com/tzvigettenberg/conquer-and-command/releases">Every release and its notes</a></p>
+    </div>
+  </div>
+
+  <div class="bar bottom"><div class="inner">
+    <span>Unzip · run ConquerAndCommand.exe · everyone on the same version</span>
+    <span>v<span id="ver2">0.3.0</span></span>
+  </div></div>
+</header>
+
+<div class="pager" id="pager">
+  <a href="#factions">Factions</a><a href="#friends">Play with friends</a><a href="#shots">Screenshots</a><a href="#controls">Controls</a><a href="#changes">What's new</a>
+</div>
+<main>
+  <section id="home" class="on">
+    <div class="wrap">
+      <p class="lede">Conquer &amp; Command is a homage to <em>Command &amp; Conquer Generals: Zero Hour</em> with a budget of exactly nothing: procedural low-poly models, an authoritative server sim at 20 Hz, generals' promotions, battle plans, superweapons, garrisonable villages and three full factions with their own bots.</p>
+      <p class="lede">Host a game with a room name (and a password if you like), your friends pick it from the open-games list, and everyone chooses a side in the lobby. Any slot can be a human, an Easy / Medium / Hard general, or left open — and anyone can step out and <strong>observe</strong> the whole map with a live scoreboard.</p>
+    </div>
+  </section>
+
+  <section id="factions">
+    <div class="wrap">
+      <div class="sec-head"><span class="num">FACTIONS</span><span class="rule"></span></div>
+      <div class="factions">
+        <article class="faction usa">
+          <h3>USA <small>Technology</small></h3>
+          <p>Expensive, precise and airborne. Rangers, Missile Defenders, Pathfinders and Colonel Burton on foot; Humvees, Crusaders, Paladins, Tomahawks and Avengers on the ground; Comanches, Raptors, Stealth Fighters and the untouchable Aurora overhead. Every vehicle can carry one escort drone.</p>
+          <p class="kit"><b>Powers</b> Spy Drone, A-10 Warthog strike, Spectre Gunship, Fuel Air Bomb · <b>Superweapon</b> Particle Cannon — steer the beam with clicks while it burns.</p>
+        </article>
+        <article class="faction china">
+          <h3>China <small>Numbers &amp; firepower</small></h3>
+          <p>Red Guards come in pairs, Hackers earn cash while idle, Black Lotus captures from a distance. Battlemasters, Gattling Tanks, Dragon flame tanks, Overlords and Nuke Cannons roll out of the War Factory; MiGs and Helixes from the Airfield. Five heavies together earn the horde bonus.</p>
+          <p class="kit"><b>Powers</b> Cash Hack, Artillery Barrage, Frenzy, Carpet Bomb · <b>Superweapon</b> Nuclear Missile, and the fallout lingers.</p>
+        </article>
+        <article class="faction gla">
+          <h3>GLA <small>No power needed</small></h3>
+          <p>Workers build and haul. Rebels, RPG Troopers, Terrorists and Jarmen Kell; Technicals, Scorpions, Quad Cannons, Rocket Buggies, Toxin Tractors, Marauders and Bomb Trucks. The Tunnel Network moves your army across the map, and Demo Traps wait for whoever follows.</p>
+          <p class="kit"><b>Powers</b> Rebel Ambush, Cash Bounty, Anthrax Bomb, Sneak Attack · <b>Superweapon</b> SCUD Storm — nine toxin warheads every four minutes.</p>
+        </article>
+      </div>
+    </div>
+    <div class="wrap back"><a href="#home">&larr; Back to the download</a></div>
+</section>
+
+  <section id="friends">
+    <div class="wrap">
+      <div class="sec-head"><span class="num">PLAY WITH FRIENDS</span><span class="rule"></span></div>
+      <div class="steps">
+        <div class="step">
+          <h3>Everyone downloads the same build</h3>
+          <p>Unzip and run <code>ConquerAndCommand.exe</code>. Windows may warn about an unknown publisher the first time — More info → Run anyway. The host refuses players on a different version, so grab the newest zip whenever there's an update.</p>
+        </div>
+        <div class="step">
+          <h3>One person hosts</h3>
+          <p>Press <strong>Host game</strong>. On the same Wi-Fi, friends just join your local IP. Over the internet, either forward <strong>UDP port 7788</strong> on your router and share your public IP, or everyone installs a free mesh VPN such as Tailscale or ZeroTier and uses that IP — no router setup at all.</p>
+        </div>
+        <div class="step">
+          <h3>Set up the lobby and go</h3>
+          <p>Pick a map (2 to 6 spawn slots), a faction per slot, teams, starting cash, superweapons on or off. Fill empty slots with AI generals or close them, or press <strong>Observe</strong> to watch. When everyone's in, <strong>Start</strong>.</p>
+        </div>
+      </div>
+      <p class="note">Playing alone? Host and press <strong>Start solo (sandbox)</strong>, or set every slot to AI and hit <strong>Watch the AIs fight</strong>. Two copies on one PC work too: host in one, join <code>127.0.0.1</code> in the other.</p>
+    </div>
+    <div class="wrap back"><a href="#home">&larr; Back to the download</a></div>
+</section>
+
+  <section id="shots">
+    <div class="wrap">
+      <div class="sec-head"><span class="num">SCREENSHOTS</span><span class="rule"></span></div>
+      <div class="gallery">
+        <figure class="shot"><img src="img/lobby.jpg" alt="The game lobby: slots for players and AI generals, map preview with spawn points, starting cash and superweapon options" loading="lazy"><figcaption>Lobby — pick slots, factions, teams and spawns</figcaption></figure>
+        <figure class="shot"><img src="img/battle.jpg" alt="Observer view of a Chinese base with a scoreboard" loading="lazy"><figcaption>Observer mode — full map, live scoreboard</figcaption></figure>
+        <figure class="shot"><img src="img/china.jpg" alt="The China roster laid out on a field" loading="lazy"><figcaption>China roster</figcaption></figure>
+        <figure class="shot"><img src="img/gla.jpg" alt="The GLA roster laid out on a field" loading="lazy"><figcaption>GLA roster</figcaption></figure>
+      </div>
+    </div>
+    <div class="wrap back"><a href="#home">&larr; Back to the download</a></div>
+</section>
+
+  <section id="controls">
+    <div class="wrap">
+      <div class="sec-head"><span class="num">CONTROLS</span><span class="rule"></span></div>
+      <p class="lede" style="margin-bottom:22px">The Generals layout, so your hands already know it.</p>
+      <div class="keys">
+        <div class="key"><kbd>Left-drag</kbd><span>Select — double-click grabs every unit of that type on screen, Shift adds</span></div>
+        <div class="key"><kbd>Right-click</kbd><span>Move, attack, repair, gather, capture, board — Shift queues</span></div>
+        <div class="key"><kbd>A + click</kbd><span>Attack-move — works on the minimap too</span></div>
+        <div class="key"><kbd>Q / W / E</kbd><span>Select all combat units / aircraft / same type on screen (tap twice for the whole map)</span></div>
+        <div class="key"><kbd>G</kbd><span>Guard an area — drag to size the circle</span></div>
+        <div class="key"><kbd>S · X</kbd><span>Stop · scatter (or force-fire with a target)</span></div>
+        <div class="key"><kbd>N · Ctrl+Up</kbd><span>Next Dozer / Worker · next builder</span></div>
+        <div class="key"><kbd>B F I C Y</kbd><span>Jump to Barracks / War Factory / Airfield / Command Center / Supply Center</span></div>
+        <div class="key"><kbd>Ctrl+1…9</kbd><span>Control groups — press twice to jump there</span></div>
+        <div class="key"><kbd>H · Space</kbd><span>Home base · last attack alert</span></div>
+        <div class="key"><kbd>[ ] · wheel</kbd><span>Rotate · zoom (middle-drag tilts, numpad 5 resets)</span></div>
+        <div class="key"><kbd>Enter</kbd><span>Chat with everyone (Backspace: allies only) · Ctrl+B drops a beacon</span></div>
+      </div>
+    </div>
+    <div class="wrap back"><a href="#home">&larr; Back to the download</a></div>
+</section>
+
+  <section id="changes">
+    <div class="wrap">
+      <div class="sec-head"><span class="num">LATEST · v<span id="ver3">0.3.0</span></span><span class="rule"></span></div>
+      <div class="changes">
+        <div class="change"><span><b>Open games list.</b> Host names a room (password optional) and friends click it to join — no IPs to send around.</span></div>
+        <div class="change"><span><b>GLA done right.</b> Angry Mob (and Arm the Mob), Palace gates the Black Market, Rocket Buggy, Bomb Truck and SCUD Launcher, the full Zero Hour upgrade set (Camouflage, Toxin Shells, Buggy Ammo, Worker Shoes, Fortified Structure, Camo Netting…) with unit lines when they finish.</span></div>
+        <div class="change"><span><b>Tunnels that work.</b> Units vanish underground, pop out of any tunnel, and every transport, tunnel and garrison shows its passengers as icons — click one to let it out.</span></div>
+        <div class="change"><span><b>Crowds untangled.</b> Work crews squeeze past each other at docks, captures and boarding; attackers fan out along the firing line; one general captures at a time.</span></div>
+        <div class="change"><span><b>Captured buildings produce.</b> Take an enemy Command Center or factory and build its faction's units and structures.</span></div>
+        <div class="change"><span><b>Look & sound.</b> Workers in loincloth and turban with a crate on their back, loaded trucks and Chinook nets, vehicle noses the right way round, and engines you can hear near the camera.</span></div>
+        <div class="change"><span><b>Humvees</b> keep the machine gun when TOW is fitted; the tunnel turret is a machine gun.</span></div>
+        <div class="change"><span><b>No more sell tricks.</b> A building being sold can't take new orders, and the buttons say so.</span></div>
+      </div>
+    </div>
+    <div class="wrap back"><a href="#home">&larr; Back to the download</a></div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>A fan-made, non-commercial project built in Godot. Not affiliated with or endorsed by Electronic Arts; <em>Command &amp; Conquer</em> is a trademark of EA.</p>
+    <p>Windows 10/11, 64-bit. No installer, nothing written outside its own folder. Settings are kept in your AppData folder.</p>
+  </div>
+</footer>
+<script>
+  (function () {
+    var pages = ["home", "factions", "friends", "shots", "controls", "changes"];
+    function show() {
+      var id = (location.hash || "#home").slice(1);
+      if (pages.indexOf(id) < 0) id = "home";
+      document.body.setAttribute("data-page", id);
+      pages.forEach(function (p) {
+        var el = document.getElementById(p);
+        if (el) el.classList.toggle("on", p === id);
+      });
+      document.querySelectorAll("nav a, .pager a").forEach(function (a) {
+        a.classList.toggle("on", a.getAttribute("href") === "#" + id);
+      });
+      var v = document.querySelector(".hero video");
+      if (v) { if (id === "home") { v.play && v.play().catch(function(){}); } else { v.pause && v.pause(); } }
+      if (id !== "home") window.scrollTo(0, 0);
+    }
+    window.addEventListener("hashchange", show);
+    show();
+  })();
+</script>
+</body>
+</html>

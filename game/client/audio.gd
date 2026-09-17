@@ -257,6 +257,21 @@ func voice(unit_type: String, kind: String, force := false) -> void:
 	voice_player.play()
 	voice_cd = now + 0.7
 
+## Upgrade finished: a unit cheers about it if a line exists (audio/voice/upgrades/<uid>_<n>.ogg), else EVA.
+var _upgrade_voiced := ""
+func upgrade_voice(uid: String) -> void:
+	var kinds: Dictionary = voice_dirs.get("upgrades", {})
+	if kinds.has(uid):
+		var path := "%supgrades/%s_%d.ogg" % [VOICE_DIR, uid, rng.randi() % int(kinds[uid])]
+		var s := _stream(path)
+		if s != null:
+			voice_player.stream = s
+			voice_player.play()
+			voice_cd = Time.get_ticks_msec() / 1000.0 + 1.5
+			_upgrade_voiced = uid
+			return
+	eva("upgrade_complete", 2.0)
+
 func eva(name: String, cooldown := 4.0) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if now < float(eva_cd.get(name, -100.0)):
@@ -317,7 +332,7 @@ func eva_for_message(text: String) -> void:
 	elif "sneak attack" in t:
 		eva("sneak_attack", 2.0)
 	elif "upgrade complete" in t:
-		eva("upgrade_complete", 2.0)
+		pass   # the "upgraded" event picks a unit line or EVA
 	elif t.ends_with(" complete"):
 		eva("construction_complete", 2.0)
 	elif t.ends_with(" ready"):

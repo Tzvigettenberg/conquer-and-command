@@ -356,10 +356,9 @@ func _on_finish(it: Dictionary) -> void:
 		if is_instance_valid(tr):
 			var gp := tr.global_position
 			tr.get_parent().remove_child(tr)
-			add_child(tr)
-			tr.global_position = gp
 			tr.emitting = false
 			_add(tr, "particles", tr.lifetime + 0.2)
+			tr.global_position = gp
 	if it["kind"] == "proj" and it.get("impact", false):
 		impact(it["to"], it["style"])
 	elif it["kind"] == "crash_jet" or it["kind"] == "crash_heli":

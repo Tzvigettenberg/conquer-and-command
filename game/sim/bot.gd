@@ -209,6 +209,15 @@ func _economy() -> void:
 	if w.players[p]["upgrades"].has("capture"):
 		for d: Ent in w.ents.values():
 			if d.alive and d.type == "oil_derrick" and d.owner != p and d.capture_by != p:
+				# somebody else is already taking it, or it just changed hands: leave it for now
+				if (d.capture_by >= 0 and d.capture_t > 0.0) or w.time < d.capture_lock_t + 20.0:
+					continue
+				var sent := false
+				for r in _own_units():
+					if r.state == "capture" and r.target_id == d.id:
+						sent = true
+				if sent:
+					continue
 				var best: Ent = null
 				for r in _own_units():
 					if r.def.get("capture", false) and not r.def.get("capture_free", false) and (r.state == "idle" or r.state == "guard"):

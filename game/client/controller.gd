@@ -661,13 +661,30 @@ func scatter() -> void:
 	var ids := _own_units_selected()
 	if ids.is_empty():
 		return
+	# everyone runs outward from the middle of the group (plus a random twist so lines don't form)
+	var c := Vector3.ZERO
+	var n := 0
+	for id in ids:
+		var p: Puppet = view.puppets.get(id)
+		if p != null and p.cat != "air":
+			c += p.cur_pos
+			n += 1
+	if n == 0:
+		return
+	c /= float(n)
 	for id in ids:
 		var p: Puppet = view.puppets.get(id)
 		if p == null or p.cat == "air":
 			continue
-		var ang := randf() * TAU
-		var d := randf_range(6.0, 12.0)
-		view.send({"t": "move", "ids": [id], "x": p.cur_pos.x + cos(ang) * d, "y": p.cur_pos.z + sin(ang) * d, "q": false})
+		var out := Vector2(p.cur_pos.x - c.x, p.cur_pos.z - c.z)
+		var ang := (out.angle() if out.length() > 0.5 else randf() * TAU) + randf_range(-0.7, 0.7)
+		var d := randf_range(8.0, 14.0)
+		var goal := Vector2(p.cur_pos.x + cos(ang) * d, p.cur_pos.z + sin(ang) * d)
+		var ms := float(view.map["size"])
+		goal.x = clampf(goal.x, 2.0, ms - 2.0)
+		goal.y = clampf(goal.y, 2.0, ms - 2.0)
+		view.send({"t": "move", "ids": [id], "x": goal.x, "y": goal.y, "q": false})
+	view.fx.floating_text(c, "SCATTER", Color(1.0, 0.85, 0.4))
 	_voice_for(ids, "move")
 
 func _jump_home() -> void:
@@ -908,6 +925,10 @@ func select_next_dozer() -> void:
 
 func unload_building(bid: int) -> void:
 	view.send({"t": "unload", "ids": [bid]})
+
+## Let one passenger out of a transport / tunnel / garrison (the cargo icons in the info panel).
+func unload_one(cid: int, uid: int) -> void:
+	view.send({"t": "unload", "ids": [cid], "uid": uid})
 
 func buy_drone(vid: int, kind: String) -> void:
 	view.send({"t": "drone", "id": vid, "kind": kind})

@@ -25,6 +25,8 @@ var grid_actions: Array = []
 var grid_why: Array[Label] = []
 var side_buttons: Array[Button] = []
 var queue_slots: Array[TextureProgressBar] = []
+var cargo_box: HBoxContainer
+var cargo_slots: Array[TextureRect] = []
 var research_slot: TextureProgressBar
 var research_slots: Array[TextureProgressBar] = []
 var queue_label: Label
@@ -307,6 +309,22 @@ func _build() -> void:
 		queue_box.add_child(rs)
 		research_slots.append(rs)
 	research_slot = research_slots[0]
+	# passengers / garrison of the selected transport, tunnel or building: one icon each, click to let it out
+	cargo_box = HBoxContainer.new()
+	cargo_box.add_theme_constant_override("separation", 3)
+	cargo_box.visible = false
+	iv.add_child(cargo_box)
+	for i in range(10):
+		var cs := TextureRect.new()
+		cs.custom_minimum_size = Vector2(QUEUE_PX, QUEUE_PX)
+		cs.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		cs.stretch_mode = TextureRect.STRETCH_SCALE
+		cs.visible = false
+		cs.gui_input.connect(func(ev: InputEvent) -> void:
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+				_unload_slot(i))
+		cargo_box.add_child(cs)
+		cargo_slots.append(cs)
 	queue_label = Label.new()
 	queue_label.add_theme_font_size_override("font_size", 12)
 	queue_label.modulate = Color(0.75, 0.75, 0.75)
@@ -816,18 +834,29 @@ func refresh_selection() -> void:
 			actions.append({"label": "Set rally", "tip": "Click where new units should gather", "cb": func() -> void: ctl.rally_mode(single.id), "enabled": true})
 		if d.has("cargo") and not view.pstate.get("cargo", {}).get(single.id, []).is_empty():
 			actions.append({"label": "Unload (U)", "tip": "Send the garrison out", "cb": func() -> void: ctl.unload(), "enabled": true})
-		actions.append({"label": "Sell\n+$%d" % int(d["cost"] * Data.REFUND), "tip": "Sell this structure for half its cost", "cb": func() -> void: ctl.sell(single.id), "enabled": true})
+		if single.aux2 == 255:
+			actions.append({"label": "SELLING", "tip": "The sale is going through", "cb": func() -> void: pass, "enabled": false})
+		else:
+			actions.append({"label": "Sell\n+$%d" % int(d["cost"] * Data.REFUND), "tip": "Sell this structure for half its cost", "cb": func() -> void: ctl.sell(single.id), "enabled": true})
 	elif single != null and single.is_building and not single.complete:
-		actions.append({"label": "Cancel\n+$%d" % int(single.def["cost"] * (1.0 - single.aux / 100.0)), "tip": "Cancel construction (refund unspent cost)", "cb": func() -> void: ctl.sell(single.id), "enabled": true})
+		if single.aux2 == 255:
+			actions.append({"label": "CANCELLED", "tip": "Refunding the unspent cost", "cb": func() -> void: pass, "enabled": false})
+		else:
+			actions.append({"label": "Cancel\n+$%d" % int(single.def["cost"] * (1.0 - single.aux / 100.0)), "tip": "Cancel construction (refund unspent cost)", "cb": func() -> void: ctl.sell(single.id), "enabled": true})
 	elif all_units:
 		var has_builder := false
 		for p in sel:
 			if p.def.get("builder", false):
 				has_builder = true
 		if has_builder:
+			# a captured enemy Dozer builds its own faction's structures
+			var bfac := view.my_faction
+			for p in sel:
+				if p.def.get("builder", false):
+					bfac = Data.faction_of(p.type)
 			for bt in Data.BUILDINGS:
 				var bd: Dictionary = Data.BUILDINGS[bt]
-				if bd.get("neutral", false) or Data.faction_of(bt) != view.my_faction:
+				if bd.get("neutral", false) or Data.faction_of(bt) != bfac:
 					continue
 				var why: String = view.building_prereq_text(bt)
 				actions.append({"label": "%s\n$%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"])],
@@ -939,12 +968,49 @@ func _update_queue() -> void:
 			rs.value = float(research[bid][1]) if i == 0 and research.has(bid) else 0.0
 		else:
 			rs.visible = false
+	_update_cargo(sel)
 	if show and research.has(bid):
 		var r: Array = research[bid]
 		queue_label.text = "%s %d%%%s" % [Data.UPGRADES[r[0]]["name"], int(float(r[1]) * 100.0), ("  +%d queued" % (rq.size() - 1)) if rq.size() > 1 else ""]
 		queue_label.visible = true
 	else:
 		queue_label.visible = false
+
+func _update_cargo(sel: Array) -> void:
+	var types: Array = []
+	var ids: Array = []
+	var cap := 0
+	if sel.size() == 1 and sel[0].def.has("cargo"):
+		var p: Puppet = sel[0]
+		var mine: bool = p.team == view.my_index or (p.def.get("garrison", false) and int(view.pstate.get("garrison", {}).get(p.id, -2)) == view.my_index)
+		if mine or view.observer:
+			types = view.pstate.get("cargo", {}).get(p.id, [])
+			ids = view.pstate.get("cargo_ids", {}).get(p.id, [])
+			cap = int(p.def["cargo"])
+	cargo_box.visible = not types.is_empty()
+	for i in range(cargo_slots.size()):
+		var cs: TextureRect = cargo_slots[i]
+		if i < types.size():
+			cs.visible = true
+			cs.texture = view.icons.get_icon(types[i])
+			cs.tooltip_text = "%s inside  (click to let it out)" % Data.UNITS[types[i]]["name"]
+			cs.set_meta("uid", ids[i] if i < ids.size() else -1)
+		elif i < cap and not types.is_empty():
+			cs.visible = true
+			cs.texture = _empty_slot_tex()
+			cs.tooltip_text = "Empty slot"
+			cs.set_meta("uid", -1)
+		else:
+			cs.visible = false
+
+func _unload_slot(i: int) -> void:
+	var sel: Array = ctl.selected_puppets()
+	if sel.size() != 1 or i >= cargo_slots.size():
+		return
+	var uid := int(cargo_slots[i].get_meta("uid", -1))
+	if uid >= 0:
+		ctl.unload_one(sel[0].id, uid)
+		Audio.I.ui("ui_click", -8.0)
 
 var _slot_tex: ImageTexture = null
 func _empty_slot_tex() -> ImageTexture:

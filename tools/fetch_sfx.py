@@ -111,11 +111,32 @@ def pick(name, query, lo, hi, extra):
     return [r for _, r in out]
 
 
+def active_fraction(path):
+    """Share of 0.25 s blocks that carry real signal (loops must be steady, not a fade-in with a bang)."""
+    raw = subprocess.check_output(["ffmpeg", "-loglevel", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", "22050", "-"])
+    import array
+    x = array.array("h", raw)
+    blk = 22050 // 4
+    n = max(1, len(x) // blk)
+    act = 0
+    for i in range(n):
+        seg = x[i * blk:(i + 1) * blk]
+        if not seg:
+            continue
+        rms = (sum(v * v for v in seg) / len(seg)) ** 0.5
+        if rms > 300:   # about -40 dBFS
+            act += 1
+    return act / n
+
+
 def convert(src, dst, loop):
     filt = "loudnorm=I=-18:TP=-1.5:LRA=11"
     if loop:
-        filt += ",afade=t=in:d=0.05,afade=t=out:d=0.05"
+        # loops: keep the steadiest 4 s (skip lead-in silence), then a tiny fade at both ends
+        filt = "silenceremove=start_periods=1:start_threshold=-45dB,atrim=0:4,loudnorm=I=-16:TP=-1.5:LRA=6,afade=t=in:d=0.05,afade=t=out:st=3.95:d=0.05"
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-af", filt, "-ac", "1", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "4", dst])
+    if loop and active_fraction(dst) < 0.85:
+        raise RuntimeError("loop too patchy (%.0f%% active)" % (active_fraction(dst) * 100))
 
 
 def main():
@@ -132,7 +153,7 @@ def main():
             continue
         cands = pick(name, query, lo, hi, extra)
         r = None
-        for cand in cands[:5]:
+        for cand in cands[:8]:
             try:
                 url = cand["previews"]["preview-hq-mp3"]
                 tmp = "/tmp/fs_%s.mp3" % name

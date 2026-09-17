@@ -1,0 +1,16 @@
+# Open games list for Conquer & Command: Zero Budget.
+# Deploy:  npm install -g wrangler && wrangler login && wrangler deploy
+# It runs on Cloudflare's free plan: one Worker, one Durable Object, no database.
+name = "cc-rooms"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomRegistry"
+
+# SQLite-backed Durable Objects are the free-plan flavour (this one keeps everything in memory
+# and never writes, so there is nothing to bill and nothing to clean up).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomRegistry"]

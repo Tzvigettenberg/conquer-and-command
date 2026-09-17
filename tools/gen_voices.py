@@ -52,6 +52,24 @@ VOICES = {
     "rocket_buggy": "cjVigY5qzO86Huf0OWal",  # Eric
     "toxin_tractor": "N2lVS1w4EtoT3dr4eOWO", # Callum
     "scud_launcher": "pNInz6obpgDQGcFmaJgB", # Adam
+    "angry_mob": "VR6AewLTigWG4xSOukaG",     # Arnold
+}
+
+# Upgrade-complete lines: audio/voice/upgrades/<uid>_<n>.ogg, each spoken by the unit that cares.
+UPGRADE_LINES = {
+    "arm_the_mob": ("angry_mob", ["AK-47s for everyone! Yeaaah!", "We are armed with AK-47s now!", "We have bigger guns!"]),
+    "camouflage": ("rebel", ["We have the camouflage upgrade now!"]),
+    "toxin_shells": ("gla_tank", ["Toxin shells upgrade complete!"]),
+    "anthrax_beta": ("scud_launcher", ["General, Anthrax Beta upgrade is here."]),
+    "fortified_structure": ("worker", ["It will be much stronger.", "Building harder walls."]),
+    "worker_shoes": ("worker", ["I like my new shoes!", "These shoes fit nicely!", "Thank you for the new shoes!"]),
+    "buggy_ammo": ("rocket_buggy", ["We have more buggy ammo now!"]),
+    "ap_bullets": ("rebel", ["We have upgraded to armor piercing bullets!"]),
+    "ap_rockets": ("rpg_trooper", ["We have AP rockets now!"]),
+    "junk_repair": ("gla_tank", ["The junk repair upgrade has been installed!"]),
+    "scorpion_rocket": ("gla_tank", ["Scorpion rocket installed, sir!"]),
+    "camo_netting": ("rpg_trooper", ["Our defenses will be hidden from the enemy.", "The new camo netting has arrived."]),
+    "tow": ("humvee", ["Hey, check out our new TOW missiles!"]),
 }
 
 UNIT_LINES = {
@@ -222,12 +240,19 @@ UNIT_LINES.update({
     },
     # ---------------- GLA ----------------
     "worker": {
-        "ready": ["Worker ready."],
-        "select": ["Yes?", "What do you need?", "I will do it.", "Worker here."],
-        "move": ["Going.", "Okay.", "On my way.", "Walking."],
-        "build": ["Building it.", "I will build.", "Give me a moment.", "It will stand."],
-        "repair": ["Fixing it.", "Repairing."],
-        "gather": ["Getting supplies.", "To the crates.", "Carrying."],
+        # the put-upon GLA labourer of Zero Hour
+        "ready": ["I will work."],
+        "select": ["Yes?", "What do you want with me?", "Do not hurt me.", "I will obey.", "I'm just a peasant.", "I'm hungry!", "Ow! Okay, okay, I will work!"],
+        "move": ["I do what I'm told.", "I will go.", "Can I have some shoes?", "You change your mind often.", "Does it have to be so far?"],
+        "build": ["If that is what you want.", "This is hard work!", "This hammer is heavy!", "Are there not better tools?", "I will try to hurry."],
+        "repair": ["I should repair that.", "It already needs repairs?", "I guess I should help out."],
+        "gather": ["That's a lot of supplies!", "I will carry as much as I can.", "My hands have splinters!", "Okay, here I go."],
+    },
+    "angry_mob": {
+        "ready": ["The mob has gathered!"],
+        "select": ["We are the people!", "Death to the invaders!", "The mob is ready!", "Together we are strong!"],
+        "move": ["To the streets!", "Follow us!", "Everyone, this way!", "Keep together!"],
+        "attack": ["Get them!", "Burn it down!", "Tear it apart!", "Charge!"],
     },
     "rebel": {
         "ready": ["Rebel ready."],
@@ -383,6 +408,18 @@ def main():
                     convert(tmp, dst, True)
                     total += len(line)
                     print(cls, kind, i, line)
+    d = os.path.join(ROOT, "upgrades")
+    os.makedirs(d, exist_ok=True)
+    for uid, (cls, lines) in UPGRADE_LINES.items():
+        for i, line in enumerate(lines):
+            dst = os.path.join(d, "%s_%d.ogg" % (uid, i))
+            if os.path.exists(dst):
+                continue
+            tmp = "/tmp/voice.mp3"
+            if tts(VOICES[cls], line, tmp):
+                convert(tmp, dst, True)
+                total += len(line)
+                print("upgrade", uid, i, line)
     d = os.path.join(ROOT, "eva")
     os.makedirs(d, exist_ok=True)
     for name, line in EVA_LINES.items():

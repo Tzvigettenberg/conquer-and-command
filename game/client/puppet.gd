@@ -51,7 +51,8 @@ var trail_t := 0.0
 
 var model: Node3D
 var turret: Node3D = null
-var limbs: Dictionary = {}
+var limbs: Dictionary = {}          # name -> Array of Node3D (mobs have many)
+var cargo_nodes: Array = []
 var door_t := 0.0
 var scaffold: Node3D = null
 var site_label: Label3D = null
@@ -133,9 +134,10 @@ func _build_visual(mine: bool) -> void:
 		for n in model.find_children("Light*", "MeshInstance3D", true, false):
 			door_lights.append(n)
 	for nm in ["LegL", "LegR", "ArmL", "ArmR"]:
-		var limb := model.find_child(nm, true, false)
-		if limb != null:
-			limbs[nm] = limb
+		var found := model.find_children(nm, "Node3D", true, false)
+		if not found.is_empty():
+			limbs[nm] = found   # a mob has several of each
+	cargo_nodes = model.find_children("Cargo*", "Node3D", true, false)
 	for n in model.find_children("*", "Node3D", true, false):
 		var nm: String = n.name
 		if "Rotor" in nm or "Blade" in nm or "Propeller" in nm:
@@ -198,7 +200,7 @@ func _setup_loop() -> void:
 		return
 	loop = Audio.I.make_loop(name, -6.0)
 	if loop != null:
-		loop_base_db = -6.0 if cat != "inf" else -9.0
+		loop_base_db = -10.0 if cat == "veh" else (-8.0 if cat == "air" else -9.0)
 		add_child(loop)
 
 ## Supply dock: a grid of crate stacks that empties as boxes are hauled away.
@@ -359,6 +361,11 @@ func _process(dt: float) -> void:
 					hook.scale = Vector3(1, 1.0 / len, 1)
 					hook.position = Vector3(0, -0.5, 0)
 					hook.visible = (flags & 32) != 0
+	if not cargo_nodes.is_empty():
+		# loaded vs empty: crates on the truck bed / the worker's back / the net under a Chinook
+		var carrying := (flags & 32) != 0 and not (rope != null and rope.visible)
+		for i in range(cargo_nodes.size()):
+			(cargo_nodes[i] as Node3D).visible = carrying and i < maxi(aux, 1)
 	sel_ring.visible = selected or hovered
 	if sel_ring.visible:
 		# selected: solid bright ring; only hovered / boxed: a lighter pulse so the two never look alike
@@ -690,14 +697,16 @@ func _process_unit(dt: float, now: float) -> void:
 		# blocky soldier: swing legs and arms while walking
 		if moving or speed > 0.3:
 			walk_t += dt * 9.0
-			var a := sin(walk_t) * 0.7
-			limbs["LegL"].rotation.x = a
-			limbs["LegR"].rotation.x = -a
-			limbs["ArmL"].rotation.x = -a * 0.6
-			limbs["ArmR"].rotation.x = a * 0.6
+			var sw := {"LegL": 1.0, "LegR": -1.0, "ArmL": -0.6, "ArmR": 0.6}
+			for k in limbs:
+				var arr: Array = limbs[k]
+				for j in range(arr.size()):
+					# crowd members step out of phase with each other
+					(arr[j] as Node3D).rotation.x = sin(walk_t + j * 1.3) * 0.7 * float(sw[k])
 		else:
 			for k in limbs:
-				limbs[k].rotation.x = lerpf(limbs[k].rotation.x, 0.0, 0.2)
+				for n in limbs[k]:
+					(n as Node3D).rotation.x = lerpf((n as Node3D).rotation.x, 0.0, 0.2)
 	# rotors always spin on helicopters; on jets only while airborne
 	var airborne := cat == "air" and cur_pos.y > 0.3
 	for r in rotors:

@@ -565,14 +565,17 @@ static func make(type: String, team: int) -> Node3D:
 			turret.name = "Turret"
 			turret.position = Vector3(1.2, 0.8, -1.0)
 			root.add_child(turret)
-			cyl(turret, 0.12, 0.14, 1.4, Vector3(0, 0.7, 0), METAL, 8)
-			var tubes := Node3D.new()
-			tubes.position = Vector3(0, 1.5, 0)
-			tubes.rotation.x = -0.4
-			turret.add_child(tubes)
-			for k in range(2):
-				cyl(tubes, 0.14, 0.14, 1.6, Vector3(-0.2 + k * 0.4, 0, 0.3), METAL_DARK, 8).rotation.x = PI * 0.5
-				box(tubes, Vector3(0.18, 0.18, 0.1), Vector3(-0.2 + k * 0.4, 0, 1.12), tc)
+			# heavy machine gun on a post: receiver, barrel, ammo box and a gun shield
+			cyl(turret, 0.12, 0.14, 1.2, Vector3(0, 0.6, 0), METAL, 8)
+			var gun := Node3D.new()
+			gun.position = Vector3(0, 1.25, 0)
+			gun.rotation.x = -0.15
+			turret.add_child(gun)
+			box(gun, Vector3(0.28, 0.24, 0.7), Vector3(0, 0, 0.1), METAL_DARK)                         # receiver
+			cyl(gun, 0.05, 0.05, 1.1, Vector3(0, 0.02, 0.9), METAL_DARK, 8).rotation.x = PI * 0.5      # barrel
+			cyl(gun, 0.09, 0.09, 0.35, Vector3(0, 0.02, 0.5), METAL, 8).rotation.x = PI * 0.5           # cooling jacket
+			box(gun, Vector3(0.22, 0.2, 0.3), Vector3(-0.3, 0.0, 0.0), Color(0.35, 0.4, 0.3))          # ammo box
+			box(gun, Vector3(0.9, 0.5, 0.05), Vector3(0, 0.15, 0.45), tc.darkened(0.3))                # gun shield in team colour
 			root.set_meta("turret", turret)
 			anim(root, turret, "sweep", 0.35)
 		"stinger_site":

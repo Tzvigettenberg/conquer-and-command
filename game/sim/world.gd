@@ -379,10 +379,13 @@ func count_type(p: int, type: String, include_queued := true) -> int:
 					n += 1
 	return n
 
-func prereqs_met(p: int, type: String) -> String:
+## via: the structure or builder doing the work - a captured enemy factory may build its own
+## faction's things (the general's own tech tree / promotions still apply).
+func prereqs_met(p: int, type: String, via: Ent = null) -> String:
 	var d := Data.def(type)
 	var pl: Dictionary = players[p]
-	if Data.faction_of(type) != "" and Data.faction_of(type) != pl["faction"]:
+	var fac := Data.faction_of(type)
+	if fac != "" and fac != pl["faction"] and (via == null or Data.faction_of(via.type) != fac):
 		return "Not available to %s" % Data.FACTIONS[pl["faction"]]["name"]
 	for r in d.get("prereq", []):
 		if not has_building(p, r):
@@ -481,7 +484,7 @@ func _tick_unit(e: Ent, dt: float) -> void:
 		if e.clip[i] <= 0 and e.reload_t[i] > 0.0:
 			e.reload_t[i] -= dt
 			if e.reload_t[i] <= 0.0:
-				e.clip[i] = int(Data.WEAPONS[e.weapon_ids()[i]].get("clip", 0))
+				e.clip[i] = _clip_size(e, i)
 	if e.inside_id >= 0:
 		# riding: follow the transport, fire out of it if it has fire ports
 		var car: Ent = ents.get(e.inside_id)
@@ -662,6 +665,8 @@ func _move_toward(e: Ent, wp: Vector2, dt: float, final := false) -> bool:
 	e.yaw = wrapf(e.yaw + clampf(diff, -turn, turn), -PI, PI)
 	var facing := absf(wrapf(want - e.yaw, -PI, PI))
 	var spd := e.speed
+	if e.type == "worker" and e.owner >= 0 and players[e.owner]["upgrades"].has("worker_shoes"):
+		spd *= 1.2
 	if e.is_air():
 		if facing > 1.2:
 			spd *= 0.5
@@ -690,16 +695,29 @@ func _move_toward(e: Ent, wp: Vector2, dt: float, final := false) -> bool:
 			_crush(e)
 	return e.pos.distance_to(wp) <= arrive_d
 
+## Two units working the same job on the same thing (capturing a building, loading crates
+## at a dock, boarding a transport, building or repairing): they may crowd through each other.
+func _same_job(a: Ent, b: Ent) -> bool:
+	if a.state != b.state or a.owner != b.owner:
+		return false
+	if a.state == "gather":
+		return true
+	return a.state in ["capture", "board", "build", "repair"] and a.target_id == b.target_id and a.target_id >= 0
+
 func _separate(e: Ent, dt: float) -> void:
 	var push := Vector2.ZERO
 	var moving := e.state != "idle" and e.state != "guard"
 	for o: Ent in query(e.pos, e.radius + 2.5):
-		if o == e or o.is_building or o.is_air():
+		if o == e or o.is_building or o.is_air() or o.inside_id >= 0:
 			continue
 		var d := e.pos - o.pos
 		var dist := d.length()
 		var min_d := e.radius + o.radius
 		if dist < min_d and dist > 0.001:
+			if _same_job(e, o):
+				# a work crew squeezes together instead of shoving each other off the job
+				push += d / dist * (min_d - dist) * 0.15
+				continue
 			push += d / dist * (min_d - dist)
 			# a parked friend in the way steps aside instead of blocking the mover
 			if moving and allied(o.owner, e.owner) and (o.state == "idle" or o.state == "guard") and not o.is_building and o.can_move():
@@ -710,7 +728,29 @@ func _separate(e: Ent, dt: float) -> void:
 		elif dist <= 0.001:
 			push += Vector2(randf() - 0.5, randf() - 0.5)
 	if push != Vector2.ZERO:
-		var np := e.pos + push.limit_length(3.0 * dt + 0.3)
+		var np := e.pos + push.limit_length(maxf(e.speed, 3.0) * dt)
+		if not grid.is_solid_pos(np):
+			e.pos = np
+
+## Standing and shooting: slide sideways (keeping the range to the target) out of any
+## friend we are stacked on, so a group fans out along the firing line instead of clumping.
+func _separate_lateral(e: Ent, t: Ent, dt: float) -> void:
+	var to_t := (t.pos - e.pos)
+	if to_t.length_squared() < 0.01:
+		return
+	var tangent := Vector2(-to_t.y, to_t.x).normalized()
+	var push := 0.0
+	for o: Ent in query(e.pos, e.radius + 2.0):
+		if o == e or o.is_building or o.is_air() or o.inside_id >= 0 or not allied(o.owner, e.owner):
+			continue
+		var d := e.pos - o.pos
+		var dist := d.length()
+		var min_d := e.radius + o.radius + 0.3
+		if dist < min_d:
+			var side := d.dot(tangent) if dist > 0.001 else (1.0 if (e.id % 2 == 0) else -1.0)
+			push += (1.0 if side >= 0.0 else -1.0) * (min_d - dist)
+	if absf(push) > 0.001:
+		var np := e.pos + tangent * clampf(push, -1.0, 1.0) * minf(e.speed, 3.0) * dt
 		if not grid.is_solid_pos(np):
 			e.pos = np
 
@@ -745,7 +785,7 @@ func _crush(e: Ent) -> void:
 		if o == e or allied(o.owner, e.owner) or o.owner < 0 or not o.def.get("crushable", false):
 			continue
 		if o.pos.distance_to(e.pos) < e.radius * 0.9:
-			_damage(o, 10000.0, "CRUSH", e)
+			_damage(o, 80.0 if o.def.get("mob", false) else 10000.0, "CRUSH", e)
 
 func _follow_path(e: Ent, dt: float) -> bool:
 	if e.path.is_empty():
@@ -879,6 +919,8 @@ func _weapon_available(e: Ent, wid: String) -> bool:
 	var wd: Dictionary = Data.WEAPONS[wid]
 	if wd.has("upgrade") and e.owner >= 0 and not players[e.owner]["upgrades"].has(wd["upgrade"]):
 		return false
+	if wd.has("until_upgrade") and e.owner >= 0 and players[e.owner]["upgrades"].has(wd["until_upgrade"]):
+		return false   # replaced by the upgraded weapon
 	if wd.has("plan") and (e.plan != wd["plan"] or e.plan_t > 0.0):
 		return false
 	return true
@@ -929,7 +971,12 @@ func _pick_weapon(e: Ent, t: Ent) -> int:
 	return best
 
 func _is_stealthed(e: Ent) -> bool:
-	if not e.stealth:
+	var st := e.stealth
+	if not st and e.is_building and e.upg_done.has("camo_netting"):
+		st = true   # GLA camo netting: hidden until the site fires
+	if not st and e.type == "rebel" and e.owner >= 0 and players[e.owner]["upgrades"].has("camouflage"):
+		st = e.pos == e.last_pos and e.state in ["idle", "guard"] and e.inside_id < 0
+	if not st:
 		return false
 	if time < e.revealed_until:
 		return false
@@ -983,8 +1030,22 @@ func _do_attack(e: Ent, dt: float) -> void:
 			return
 		if e.is_building:
 			e.timer = 0.0
+		elif e.can_move() and not e.is_air() and d < rng - 1.5:
+			_separate_lateral(e, t, dt)
 		if e.cds[wi] <= 0.0 and (int(wd.get("clip", 0)) == 0 or e.clip[wi] > 0):
 			_fire(e, wi, t)
+		# secondary weapons that fire alongside the main one (Humvee gun + TOW)
+		var ws := e.weapon_ids()
+		for j in range(ws.size()):
+			if j == wi:
+				continue
+			var wd2: Dictionary = Data.WEAPONS[ws[j]]
+			if not wd2.get("also", false) or not _weapon_available(e, ws[j]) or e.cds[j] > 0.0:
+				continue
+			if (t.is_air() and t.alt > 0.5 and not wd2["aa"]) or (not (t.is_air() and t.alt > 0.5) and not wd2["ag"]):
+				continue
+			if d <= _range(e, wd2) and (int(wd2.get("clip", 0)) == 0 or e.clip[j] > 0):
+				_fire(e, j, t)
 		return
 	# out of range: chase (structures wait a moment, then look for something else)
 	if e.is_building or not e.can_move():
@@ -1131,6 +1192,13 @@ func _fire_at_pos(e: Ent, wi: int, pos: Vector2) -> void:
 		shots.append({"t": time + e.pos.distance_to(pos) / spd, "t0": time, "from": e.pos, "wid": wid, "tid": -1, "pos": pos, "dmg": dmg, "aid": e.id, "owner": e.owner, "sid": sid})
 
 ## Cooldown / clip bookkeeping for one shot; returns the damage it will do.
+## Rounds per clip (GLA Buggy Ammo doubles the Rocket Buggy's volley).
+func _clip_size(e: Ent, wi: int) -> int:
+	var n := int(Data.WEAPONS[e.weapon_ids()[wi]].get("clip", 0))
+	if e.type == "rocket_buggy" and e.owner >= 0 and players[e.owner]["upgrades"].has("buggy_ammo"):
+		n *= 2
+	return n
+
 func _consume_shot(e: Ent, wi: int) -> float:
 	var wid: String = e.weapon_ids()[wi]
 	var wd: Dictionary = Data.WEAPONS[wid]
@@ -1142,7 +1210,7 @@ func _consume_shot(e: Ent, wi: int) -> float:
 			if rl > 0.0:
 				e.reload_t[wi] = rl
 	e.last_fire_t = time
-	if e.stealth:
+	if e.stealth or e.upg_done.has("camo_netting") or e.type == "rebel":
 		e.revealed_until = time + 2.0
 	var dmg: float = wd["dmg"] * e.vet_dmg() * _dmg_mult(e, wd)
 	return dmg
@@ -1259,6 +1327,10 @@ func _apply_hit(attacker: Ent, wid: String, target: Ent, pos: Vector2, dmg: floa
 	var radius := float(wd.get("radius", 0.0))
 	var radius2 := float(wd.get("radius2", 0.0))
 	var dtype: String = wd["type"]
+	if own >= 0 and (wid == "scorpion_gun" or wid == "marauder_gun") and players[own]["upgrades"].has("toxin_shells"):
+		var tdps := 10.0 * (1.25 if players[own]["upgrades"].has("anthrax_beta") else 1.0)
+		zones.append({"kind": "toxin", "p": pos, "r": 3.0, "dps": tdps, "until": time + 5.0, "owner": own})
+		events.append({"k": "zone", "p": pos, "d": ["toxin", pos.x, pos.y, 3.0, 5.0], "o": own, "all": true})
 	if wd.has("zone"):
 		var z: Dictionary = wd["zone"]
 		var dps := float(z["dps"])
@@ -1292,6 +1364,9 @@ func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 	if _supersonic(t):
 		return   # Aurora on its bombing run: nothing can touch it until the bomb is gone
 	var mult := Data.armor_mult(t.def.get("armor", ""), dtype)
+	if t.is_building and t.owner >= 0 and players[t.owner]["upgrades"].has("fortified_structure"):
+		mult *= 0.75
+	t.attacked_t = time
 	if t.owner < 0 and t.def.get("neutral", false) and not t.def.get("capturable", false) and not t.def.get("garrison", false):
 		return
 	if t.def.get("garrison", false) and dtype in ["FLAME", "RADIATION"] and not t.cargo.is_empty():
@@ -1683,7 +1758,7 @@ func _can_board(u: Ent, t: Ent) -> bool:
 		return false
 	if t.is_building and not t.complete:
 		return false
-	if u.is_building or u.is_air() or (u.def.get("builder", false) and u.cat() != "inf" and not t.def.get("cargo_veh", false)):
+	if u.is_building or u.is_air() or u.def.get("no_board", false) or (u.def.get("builder", false) and u.cat() != "inf" and not t.def.get("cargo_veh", false)):
 		return false
 	if u.cat() == "veh" and not t.def.get("cargo_veh", false):
 		return false
@@ -1733,12 +1808,12 @@ func _do_board(e: Ent, dt: float) -> void:
 	_follow_path(e, dt)
 
 ## Transport: land (if flying) and let everyone out around it.
-func _do_unload(e: Ent, dt: float) -> void:
+func _do_unload(e: Ent, dt: float, only := -1) -> void:
 	if e.is_air():
 		e.alt = move_toward(e.alt, 0.5, 6.0 * dt)
 		if e.alt > 1.0:
 			return
-	if e.cargo.is_empty():
+	if _cargo_ids(e).is_empty():
 		# came down for a pickup: wait a few seconds then lift off
 		e.timer -= dt
 		if e.timer <= 0.0:
@@ -1748,7 +1823,7 @@ func _do_unload(e: Ent, dt: float) -> void:
 	var ids: Array = _cargo_ids(e).duplicate()
 	for id in ids:
 		var u: Ent = ents.get(id)
-		if u == null or not u.alive:
+		if u == null or not u.alive or (only >= 0 and u.id != only):
 			continue
 		var exit := e.pos
 		if e.is_building:
@@ -1763,8 +1838,11 @@ func _do_unload(e: Ent, dt: float) -> void:
 		u.guard_pos = u.pos
 		u.last_pos = u.pos
 		out.append(u.id)
-	e.cargo.clear()
-	e.state = "idle"
+		e.cargo.erase(u.id)
+	if only < 0:
+		e.cargo.clear()
+	if only < 0 or _cargo_ids(e).is_empty() or not e.is_building:
+		e.state = "idle"
 	events.append({"k": "unload", "p": e.pos, "d": [e.id], "o": e.owner})
 
 ## Passenger in a Humvee: shoots whatever the Humvee is fighting, or anything in reach.
@@ -1922,7 +2000,9 @@ func _approach_building(e: Ent, b: Ent, dt: float, reach := 4.2) -> bool:
 	e.repath_t -= dt
 	if e.path.is_empty() or e.repath_t <= 0.0:
 		e.repath_t = 2.0
-		_set_path(e, grid.center_of(grid.approach_cell(e.pos, b.cells)))
+		# each unit aims at a slightly different side of the building so a crew spreads around it
+		var spread := e.pos + Vector2.from_angle(float(e.id) * 2.399) * 3.5
+		_set_path(e, grid.center_of(grid.approach_cell(spread, b.cells)))
 	if _follow_path(e, dt) and d < reach + 4.0:
 		# at the end of the path but still a step short: close the last metre directly
 		_move_toward(e, b.pos, dt)
@@ -1985,9 +2065,15 @@ func _do_capture(e: Ent, dt: float) -> void:
 		return
 	if not _approach_building(e, b, dt, float(e.def.get("capture_reach", 4.2))):
 		return
+	if time < b.capture_lock_t:
+		return   # just changed hands: nobody starts a new capture for a few seconds
 	if b.capture_by != e.owner:
+		if b.capture_by >= 0 and b.capture_t > 0.0 and tick - b.capture_tick <= 20:
+			return   # another general got here first - wait until they stop or finish
 		b.capture_by = e.owner
 		b.capture_t = 0.0
+	if b.capture_tick == tick:
+		return   # several capturers don't stack: the building only fills once per tick
 	b.capture_t += dt
 	b.capture_tick = tick
 	if debug and tick % 40 == 0:
@@ -1997,6 +2083,11 @@ func _do_capture(e: Ent, dt: float) -> void:
 		b.owner = e.owner
 		b.capture_by = -1
 		b.capture_t = 0.0
+		b.capture_lock_t = time + 3.0
+		# everyone else who was trying to take it gives up
+		for o: Ent in ents.values():
+			if o != e and o.alive and o.state == "capture" and o.target_id == b.id and o.owner != e.owner:
+				_next_order(o)
 		b.prod.clear()
 		b.research.clear()
 		b.has_rally = false
@@ -2095,7 +2186,7 @@ func _tick_building(e: Ent, dt: float) -> void:
 			if e.clip[i] <= 0 and e.reload_t[i] > 0.0:
 				e.reload_t[i] -= dt
 				if e.reload_t[i] <= 0.0:
-					e.clip[i] = int(Data.WEAPONS[e.weapon_ids()[i]].get("clip", 0))
+					e.clip[i] = _clip_size(e, i)
 		if e.state == "attack":
 			_do_attack(e, dt)
 		else:
@@ -2158,6 +2249,7 @@ func _finish_upgrade(b: Ent, uid: String) -> void:
 					o.max_hp = float(o.def["hp"]) * 1.25 * Data.VET_HP[o.level]
 					o.hp = o.max_hp * f
 	session.s_msg(players[b.owner]["peer"], "%s upgrade complete" % ud["name"])
+	events.append({"k": "upgraded", "p": b.pos, "d": [uid], "o": b.owner, "only": b.owner})
 
 func _tick_heal(dt: float) -> void:
 	for h: Ent in ents.values():
@@ -2175,10 +2267,16 @@ func _tick_heal(dt: float) -> void:
 			if o.is_jet() and o.flight != "parked":
 				continue
 			o.hp = minf(o.max_hp, o.hp + rate * dt)
-	# heroic units self-heal; GLA Junk Repair patches vehicles anywhere
+	# heroic units self-heal; GLA Junk Repair patches vehicles anywhere; mobs grow back; tunnels heal their occupants
 	for o: Ent in ents.values():
 		if not o.alive or o.is_building:
 			continue
+		if o.def.has("regen") and time - o.attacked_t > 4.0:
+			o.hp = minf(o.max_hp, o.hp + float(o.def["regen"]) * dt)
+		if o.inside_id >= 0:
+			var car: Ent = ents.get(o.inside_id)
+			if car != null and car.def.get("tunnel", false):
+				o.hp = minf(o.max_hp, o.hp + 10.0 * dt)
 		if o.level >= 3:
 			o.hp = minf(o.max_hp, o.hp + o.max_hp * 0.02 * dt)
 		elif o.owner >= 0 and o.cat() == "veh" and players[o.owner]["upgrades"].has("junk_repair"):
@@ -2525,6 +2623,8 @@ func _snapshot_to(peer: int, p: int, kn: Dictionary) -> void:
 		if e.is_building and not e.complete:
 			var bd: Ent = ents.get(e.builder_id)
 			aux2 = 1 if (bd != null and bd.alive and bd.state == "build" and bd.target_id == e.id) else 0
+			if e.sold:
+				aux2 = 255
 		elif e.is_building:
 			aux2 = e.capture_by + 1 if e.capture_by >= 0 and e.capture_t > 0.0 else 0
 			if e.sold:
@@ -2618,18 +2718,21 @@ func _send_pstates() -> void:
 			"next": Data.RANK_XP[pl["rank"]] if pl["rank"] < 5 else -1, "points": pl["points"], "powers": pl["powers"].duplicate(),
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": _steering_beam(p), "sw_bld": sw_bld,
-			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
+			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {}, "cargo": {}, "cargo_ids": {}, "research_q": {},
 			"faction": pl["faction"], "factions": _factions_array(), "drones": {}, "intel": {}, "garrison": {},
 		}
 		for e: Ent in ents.values():
 			if e.alive and e.is_building and e.def.get("garrison", false) and not e.cargo.is_empty():
 				# everyone can see who is holed up where (like the flag on a garrisoned building)
 				var types := []
+				var ids := []
 				for cid in e.cargo:
 					var cu: Ent = ents.get(cid)
 					if cu != null and cu.alive:
 						types.append(cu.type)
+						ids.append(cu.id)
 				st["cargo"][e.id] = types
+				st["cargo_ids"][e.id] = ids
 				st["garrison"][e.id] = _garrison_owner(e)
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
@@ -2666,11 +2769,14 @@ func _send_pstates() -> void:
 			var cids: Array = _cargo_ids(e) if e.def.has("cargo") else []
 			if not cids.is_empty():
 				var types := []
+				var ids := []
 				for cid in cids:
 					var cu: Ent = ents.get(cid)
 					if cu != null and cu.alive:
 						types.append(cu.type)
+						ids.append(cu.id)
 				st["cargo"][e.id] = types
+				st["cargo_ids"][e.id] = ids
 			if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
 				st["guard"][e.id] = [e.guard_pos.x, e.guard_pos.y, e.guard_radius]
 		session.s_pstate(pl["peer"], st)
@@ -2681,7 +2787,7 @@ func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> D
 		"observer": true, "cash": 0, "pp": 0, "pu": 0, "low": false, "rank": 1, "xp": 0, "next": -1, "points": 0, "powers": {},
 		"cds": {}, "upgrades": [], "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 		"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": false, "sw_bld": sw_bld,
-		"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": false, "plan_bld": {}, "air_load": {}, "cargo": {}, "research_q": {},
+		"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": false, "plan_bld": {}, "air_load": {}, "cargo": {}, "cargo_ids": {}, "research_q": {},
 		"board": [], "faction": "", "factions": _factions_array(), "drones": {}, "intel": {}, "garrison": {},
 	}
 	var units := []
@@ -2720,11 +2826,14 @@ func _observer_state(sw: Dictionary, sw_bld: Dictionary, docks: Dictionary) -> D
 		var cids: Array = _cargo_ids(e) if e.def.has("cargo") else []
 		if not cids.is_empty():
 			var types := []
+			var ids := []
 			for cid in cids:
 				var cu: Ent = ents.get(cid)
 				if cu != null and cu.alive:
 					types.append(cu.type)
+					ids.append(cu.id)
 			st["cargo"][e.id] = types
+			st["cargo_ids"][e.id] = ids
 			if e.def.get("garrison", false):
 				st["garrison"][e.id] = _garrison_owner(e)
 		if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
@@ -2826,10 +2935,11 @@ func cmd(p: int, c: Dictionary) -> void:
 			for id in c.get("ids", []):
 				var e: Ent = ents.get(int(id))
 				if e != null and e.alive and (e.owner == p or (e.def.get("garrison", false) and _garrison_owner(e) == p)) and e.def.has("cargo") and not _cargo_ids(e).is_empty():
-					if e.is_building:
-						# garrisons / tunnels let everyone out on the spot
+					var only := int(c.get("uid", -1))
+					if e.is_building or (only >= 0 and not e.is_air()):
+						# garrisons / tunnels (and one passenger of a ground transport) get out on the spot
 						var st := e.state
-						_do_unload(e, 0.0)
+						_do_unload(e, 0.0, only)
 						e.state = st
 						continue
 					e.queue.clear()
@@ -3036,9 +3146,9 @@ func _cmd_build(p: int, c: Dictionary) -> void:
 	if not Data.BUILDINGS.has(type) or Data.BUILDINGS[type].get("neutral", false):
 		return
 	var d: Dictionary = Data.BUILDINGS[type]
-	if Data.faction_of(type) != players[p]["faction"]:
-		return
-	var why := prereqs_met(p, type)
+	if Data.faction_of(type) != Data.faction_of(dz.type):
+		return   # a captured Dozer builds its own faction's structures, a Worker builds GLA ones
+	var why := prereqs_met(p, type, dz)
 	if why != "":
 		session.s_msg(players[p]["peer"], why)
 		return
@@ -3104,13 +3214,13 @@ func _clear_footprint(site: Ent) -> void:
 func _cmd_produce(p: int, c: Dictionary) -> void:
 	var b: Ent = ents.get(int(c.get("id", -1)))
 	var type: String = c.get("type", "")
-	if b == null or not b.alive or b.owner != p or not b.complete or not Data.UNITS.has(type):
+	if b == null or not b.alive or b.owner != p or not b.complete or b.sold or not Data.UNITS.has(type):
 		return
 	if not b.def.get("produces", []).has(type):
 		return
 	var pl: Dictionary = players[p]
 	var d: Dictionary = Data.UNITS[type]
-	var why := prereqs_met(p, type)
+	var why := prereqs_met(p, type, b)
 	if why != "":
 		session.s_msg(pl["peer"], why)
 		return
@@ -3161,7 +3271,7 @@ func _cmd_sell(p: int, c: Dictionary) -> void:
 func _cmd_upgrade(p: int, c: Dictionary) -> void:
 	var b: Ent = ents.get(int(c.get("id", -1)))
 	var uid: String = c.get("uid", "")
-	if b == null or not b.alive or b.owner != p or not b.complete or not Data.UPGRADES.has(uid):
+	if b == null or not b.alive or b.owner != p or not b.complete or b.sold or not Data.UPGRADES.has(uid):
 		return
 	if not b.def.get("upgrades", []).has(uid):
 		return
@@ -3477,3 +3587,155 @@ func probe_ridge() -> void:
 				if grid.is_solid(c):
 					solid += 1
 	print("[Probe] mountain cells solid: %d / %d" % [solid, total])
+
+## --simtest=sell: try every sell / cancel spam combination and report the cash delta.
+func probe_sell() -> void:
+	bots.clear()
+	var s: Vector2 = map["starts"][players[0]["slot"]]
+	players[0]["cash"] = 10000.0
+	var dz := spawn("dozer", 0, s + Vector2(10, 0))
+	# 1. place a site, spam sell/cancel on it
+	var pos := PathGrid.snap_center(s + Vector2(0, 30), Data.BUILDINGS["barracks"]["fp"])
+	cmd(0, {"t": "build", "id": dz.id, "type": "barracks", "x": pos.x, "y": pos.y})
+	var site: Ent = null
+	for e: Ent in ents.values():
+		if e.alive and e.type == "barracks" and e.owner == 0:
+			site = e
+	print("[Probe] after placing: cash=%d (expected 9500)" % int(players[0]["cash"]))
+	for i in range(40):
+		step(TICK)
+	for i in range(6):
+		cmd(0, {"t": "sell", "id": site.id})
+		cmd(0, {"t": "cancel", "id": site.id})
+		step(TICK)
+	for i in range(40):
+		step(TICK)
+	print("[Probe] site cancelled: cash=%d alive=%s (expected <= 10000)" % [int(players[0]["cash"]), str(site.alive)])
+	# 2. complete barracks: queue units, spam sell + cancel + upgrade cancel
+	var bar := spawn("barracks", 0, pos, true)
+	grid.flush()
+	players[0]["cash"] = 10000.0
+	cmd(0, {"t": "produce", "id": bar.id, "type": "ranger"})
+	cmd(0, {"t": "produce", "id": bar.id, "type": "ranger"})
+	cmd(0, {"t": "upgrade", "id": bar.id, "uid": "capture_building"})
+	print("[Probe] queued: cash=%d" % int(players[0]["cash"]))
+	for i in range(10):
+		cmd(0, {"t": "sell", "id": bar.id})
+		cmd(0, {"t": "cancel", "id": bar.id, "i": 0})
+		cmd(0, {"t": "cancel_upgrade", "id": bar.id})
+		cmd(0, {"t": "produce", "id": bar.id, "type": "ranger"})
+		cmd(0, {"t": "cancel", "id": bar.id})
+		step(TICK)
+	for i in range(300):
+		step(TICK)
+	print("[Probe] RESULT barracks sold: cash=%d alive=%s (expected 10000 + 250 = 10250)" % [int(players[0]["cash"]), str(bar.alive)])
+
+## --simtest=gla: tunnels, contested captures, worker crowds, humvee twin weapons, mobs, camo netting.
+func probe_gla() -> void:
+	bots.clear()
+	var s: Vector2 = map["starts"][players[0]["slot"]]
+	players[0]["faction"] = "gla"
+	players[0]["cash"] = 20000.0
+	# --- tunnels ---
+	var ta := spawn("tunnel_network", 0, PathGrid.snap_center(s + Vector2(-20, 20), Data.BUILDINGS["tunnel_network"]["fp"]), true)
+	var tb := spawn("tunnel_network", 0, PathGrid.snap_center(s + Vector2(60, 60), Data.BUILDINGS["tunnel_network"]["fp"]), true)
+	grid.flush()
+	var rebels := []
+	for i in range(3):
+		rebels.append(spawn("rebel", 0, ta.pos + Vector2(6 + i * 1.5, 6)))
+	cmd(0, {"t": "load", "ids": [rebels[0].id, rebels[1].id, rebels[2].id], "tid": ta.id})
+	for i in range(400):
+		step(TICK)
+	print("[Probe] tunnel A cargo=%s  network=%s  rebel0 inside=%d" % [str(ta.cargo), str(_cargo_ids(ta)), rebels[0].inside_id])
+	cmd(0, {"t": "unload", "ids": [tb.id], "uid": rebels[1].id})
+	step(TICK)
+	print("[Probe] unload one at B: rebel1 inside=%d pos_near_B=%s  left in network=%d" % [rebels[1].inside_id, str(rebels[1].pos.distance_to(tb.pos) < 12.0), _cargo_ids(tb).size()])
+	cmd(0, {"t": "unload", "ids": [tb.id]})
+	step(TICK)
+	print("[Probe] RESULT tunnels: all out at B=%s network=%d" % [str(rebels[0].inside_id < 0 and rebels[2].inside_id < 0 and rebels[0].pos.distance_to(tb.pos) < 12.0), _cargo_ids(tb).size()])
+	# --- contested capture: p0 and p1 rangers on the same derrick ---
+	var derrick: Ent = null
+	for e: Ent in ents.values():
+		if e.alive and e.type == "oil_derrick" and (derrick == null or e.pos.distance_to(s) < derrick.pos.distance_to(s)):
+			derrick = e
+	players[0]["upgrades"]["capture"] = true
+	players[1]["upgrades"]["capture"] = true
+	var r0 := spawn("rebel", 0, derrick.pos + Vector2(8, 0))
+	var r0b := spawn("rebel", 0, derrick.pos + Vector2(8, 2))
+	var r1 := spawn("rebel", 1, derrick.pos + Vector2(-8, 0))
+	cmd(0, {"t": "capture", "ids": [r0.id, r0b.id], "tid": derrick.id})
+	cmd(1, {"t": "capture", "ids": [r1.id], "tid": derrick.id})
+	var done_at := -1
+	for i in range(1200):
+		step(TICK)
+		if derrick.owner >= 0 and done_at < 0:
+			done_at = i
+			print("[Probe] derrick captured by p%d at tick %d (%.1fs); r1 state=%s" % [derrick.owner, i, i * TICK, r1.state])
+	print("[Probe] RESULT capture: owner=%d done_at=%d r1=%s r0=%s" % [derrick.owner, done_at, r1.state, r0.state])
+	# --- worker crowd: 6 workers on one dock deliver to a stash ---
+	var dock := _nearest_dock(r0)
+	var stash := spawn("supply_stash", 0, PathGrid.snap_center(dock.pos + Vector2(24, 0), Data.BUILDINGS["supply_stash"]["fp"]), true)
+	grid.flush()
+	var workers := []
+	for i in range(6):
+		var wk := spawn("worker", 0, stash.pos + Vector2(-8, -6 + i * 2))
+		workers.append(wk)
+		cmd(0, {"t": "gather", "ids": [wk.id], "tid": dock.id})
+	var cash0: float = players[0]["cash"]
+	var boxes0 := dock.boxes
+	for i in range(1200):
+		step(TICK)
+	var states := []
+	for wk in workers:
+		states.append(wk.state)
+	print("[Probe] RESULT workers: earned $%d in 60s (%d boxes taken), states=%s" % [int(players[0]["cash"] - cash0), boxes0 - dock.boxes, str(states)])
+	# --- humvee: gun only before TOW, gun + TOW after ---
+	var hv := spawn("humvee", 0, s + Vector2(30, -30))
+	var tgt := spawn("supply_truck", 1, s + Vector2(30, -50))
+	tgt.hp = 100000.0
+	tgt.max_hp = 100000.0
+	cmd(0, {"t": "attack", "ids": [hv.id], "tid": tgt.id})
+	var shots := {"humvee_gun": 0, "humvee_tow": 0}
+	for i in range(200):
+		step(TICK)
+		for ev in events:
+			if ev["k"] == "shot" and ev["d"][0] == hv.id:
+				shots[ev["d"][1]] = shots.get(ev["d"][1], 0) + 1
+		events.clear()
+	print("[Probe] humvee without TOW: %s" % str(shots))
+	players[0]["upgrades"]["tow"] = true
+	shots = {"humvee_gun": 0, "humvee_tow": 0}
+	for i in range(200):
+		step(TICK)
+		for ev in events:
+			if ev["k"] == "shot" and ev["d"][0] == hv.id:
+				shots[ev["d"][1]] = shots.get(ev["d"][1], 0) + 1
+		events.clear()
+	print("[Probe] RESULT humvee with TOW: %s" % str(shots))
+	# --- angry mob + arm the mob ---
+	var mob := spawn("angry_mob", 0, s + Vector2(-30, -30))
+	var tgt2 := spawn("rebel", 1, s + Vector2(-30, -45))
+	tgt2.hp = 100000.0
+	tgt2.max_hp = 100000.0
+	cmd(0, {"t": "attack", "ids": [mob.id], "tid": tgt2.id})
+	var used := {}
+	for i in range(160):
+		step(TICK)
+		for ev in events:
+			if ev["k"] == "shot" and ev["d"][0] == mob.id:
+				used[ev["d"][1]] = used.get(ev["d"][1], 0) + 1
+		events.clear()
+	players[0]["upgrades"]["arm_the_mob"] = true
+	for i in range(160):
+		step(TICK)
+		for ev in events:
+			if ev["k"] == "shot" and ev["d"][0] == mob.id:
+				used[ev["d"][1]] = used.get(ev["d"][1], 0) + 1
+		events.clear()
+	print("[Probe] RESULT mob weapons: %s  can board tunnel=%s" % [str(used), str(_can_board(mob, tb))])
+	# --- camo netting + camouflage ---
+	tb.upg_done["camo_netting"] = true
+	players[0]["upgrades"]["camouflage"] = true
+	step(TICK)
+	step(TICK)
+	print("[Probe] RESULT stealth: tunnel=%s idle rebel=%s (state=%s moved=%s revealed=%.1f now=%.1f)" % [str(_is_stealthed(tb)), str(_is_stealthed(rebels[0])), rebels[0].state, str(rebels[0].pos != rebels[0].last_pos), rebels[0].revealed_until, time])

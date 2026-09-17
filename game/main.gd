@@ -3,10 +3,11 @@ extends Node3D
 ## Entry point: main menu, host/join lobby, then hands over to Session + ClientView.
 
 const PORT := 7788
-const GAME_VERSION := "0.2.0"
+const GAME_VERSION := "0.3.0"
 const GAME_TITLE := "CONQUER & COMMAND"
 const GAME_SUBTITLE := "ZERO BUDGET"
 const MAX_PLAYERS := 6
+const NO_LIST_TEXT := "The open-games list is not switched on in this build - send your friends your IP and they join below."
 
 static var I: Main = null
 
@@ -33,6 +34,16 @@ const PREVIEW_PX := 240
 var lobby_opts := {"map": "desert2", "cash": 10000, "superweapons": true, "slots": [], "observers": []}
 var menu_box: VBoxContainer
 var menu_scene: Node3D = null
+var rooms: RoomList
+var room_name_edit: LineEdit
+var room_pw_edit: LineEdit
+var room_public: CheckButton
+var room_rows: VBoxContainer
+var room_hint: Label
+var pw_box: VBoxContainer
+var pw_edit: LineEdit
+var pw_room_id := ""
+var room_refresh_t := 0.0
 var args: Dictionary = {}
 var lobby_players: Array = []      # server: [{peer, name}]
 var in_lobby := false
@@ -49,6 +60,15 @@ func _ready() -> void:
 	audio.name = "Audio"
 	add_child(audio)
 	_parse_args()
+	rooms = RoomList.new()
+	rooms.name = "RoomList"
+	add_child(rooms)
+	rooms.rooms_changed.connect(_on_rooms_changed)
+	rooms.rooms_failed.connect(func(msg: String) -> void:
+		if room_rows.get_child_count() == 0:
+			room_hint.text = NO_LIST_TEXT if msg == "off" else "Can't reach the room list (%s). Join by IP below, or try Refresh." % msg)
+	rooms.announced.connect(func(ok: bool, msg: String) -> void: _set_status(("Hosting on port %d. " % port) + msg) if ok else _set_status(msg))
+	rooms.joined.connect(_on_room_joined)
 	if args.has("port"):
 		port = int(args["port"])
 	Settings.apply()
@@ -69,7 +89,7 @@ func _ready() -> void:
 	if args.has("host"):
 		_host()
 		if args.has("screenshot") and not args.has("autostart"):
-			get_tree().create_timer(4.0).timeout.connect(func() -> void:
+			get_tree().create_timer(float(args.get("shot_delay", 4.0))).timeout.connect(func() -> void:
 				await RenderingServer.frame_post_draw
 				get_viewport().get_texture().get_image().save_png("%s/lobby.png" % str(args["screenshot"]))
 				print("[Shot] lobby saved")
@@ -78,6 +98,14 @@ func _ready() -> void:
 	elif args.has("join"):
 		ip_edit.text = args["join"]
 		_join()
+	elif args.has("screenshot"):
+		# main menu shot (room list included) for the README / site
+		get_tree().create_timer(5.0).timeout.connect(func() -> void:
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png("%s/menu.png" % str(args["screenshot"]))
+			print("[Shot] menu saved")
+			if args.has("exit_after"):
+				get_tree().quit())
 
 func _parse_args() -> void:
 	var all := OS.get_cmdline_args() + OS.get_cmdline_user_args()
@@ -161,29 +189,96 @@ func _build_menu() -> void:
 	name_edit.text = my_name
 	name_edit.placeholder_text = "Your name"
 	menu_box.add_child(name_edit)
-	menu_box.add_child(MenuTheme.section("Multiplayer"))
-	menu_box.add_child(_label("Host address (for Join)"))
-	ip_edit = LineEdit.new()
-	ip_edit.text = "127.0.0.1"
-	ip_edit.placeholder_text = "IP or hostname"
-	menu_box.add_child(ip_edit)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	menu_box.add_child(h)
+	# ---- host a room ----
+	menu_box.add_child(MenuTheme.section("Host a game"))
+	var hg := GridContainer.new()
+	hg.columns = 2
+	hg.add_theme_constant_override("h_separation", 12)
+	hg.add_theme_constant_override("v_separation", 6)
+	menu_box.add_child(hg)
+	hg.add_child(_label("Room name"))
+	room_name_edit = LineEdit.new()
+	room_name_edit.placeholder_text = "%s's game" % my_name
+	room_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hg.add_child(room_name_edit)
+	hg.add_child(_label("Password"))
+	room_pw_edit = LineEdit.new()
+	room_pw_edit.placeholder_text = "optional - friends only"
+	room_pw_edit.secret = true
+	room_pw_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hg.add_child(room_pw_edit)
+	hg.add_child(_label("Show in the list"))
+	room_public = CheckButton.new()
+	room_public.button_pressed = true
+	room_public.tooltip_text = "Off: nobody sees the room; friends join by IP as before."
+	if not rooms.enabled():
+		room_public.button_pressed = false
+		room_public.disabled = true
+		room_public.tooltip_text = "This build has no room list - friends join by IP."
+	hg.add_child(room_public)
 	var host_btn := Button.new()
 	host_btn.text = "HOST GAME"
 	host_btn.custom_minimum_size = Vector2(0, 44)
-	host_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	host_btn.pressed.connect(_host)
-	h.add_child(host_btn)
+	menu_box.add_child(host_btn)
+	# ---- join ----
+	var jh := HBoxContainer.new()
+	jh.add_theme_constant_override("separation", 8)
+	var js := MenuTheme.section("Open games")
+	js.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	jh.add_child(js)
+	var refresh_btn := Button.new()
+	refresh_btn.text = "Refresh"
+	refresh_btn.pressed.connect(func() -> void: rooms.refresh())
+	jh.add_child(refresh_btn)
+	menu_box.add_child(jh)
+	room_rows = VBoxContainer.new()
+	room_rows.add_theme_constant_override("separation", 4)
+	menu_box.add_child(room_rows)
+	room_hint = Label.new()
+	room_hint.text = "Looking for games..." if rooms.enabled() else NO_LIST_TEXT
+	room_hint.add_theme_font_size_override("font_size", 12)
+	room_hint.add_theme_color_override("font_color", MenuTheme.TEXT_DIM)
+	room_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	menu_box.add_child(room_hint)
+	pw_box = VBoxContainer.new()
+	pw_box.visible = false
+	pw_box.add_theme_constant_override("separation", 6)
+	menu_box.add_child(pw_box)
+	var pwl := _label("This room needs a password")
+	pw_box.add_child(pwl)
+	var pwh := HBoxContainer.new()
+	pwh.add_theme_constant_override("separation", 8)
+	pw_box.add_child(pwh)
+	pw_edit = LineEdit.new()
+	pw_edit.secret = true
+	pw_edit.placeholder_text = "Password"
+	pw_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pw_edit.text_submitted.connect(func(_t: String) -> void: _join_room(pw_room_id, pw_edit.text))
+	pwh.add_child(pw_edit)
+	var pwj := Button.new()
+	pwj.text = "Join"
+	pwj.pressed.connect(func() -> void: _join_room(pw_room_id, pw_edit.text))
+	pwh.add_child(pwj)
+	var pwc := Button.new()
+	pwc.text = "Cancel"
+	pwc.pressed.connect(func() -> void: pw_box.visible = false)
+	pwh.add_child(pwc)
+	var ih := HBoxContainer.new()
+	ih.add_theme_constant_override("separation", 8)
+	menu_box.add_child(ih)
+	ip_edit = LineEdit.new()
+	ip_edit.text = ""
+	ip_edit.placeholder_text = "...or join by IP / hostname"
+	ip_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ip_edit.text_submitted.connect(func(_t: String) -> void: _join())
+	ih.add_child(ip_edit)
 	var join_btn := Button.new()
-	join_btn.text = "JOIN GAME"
-	join_btn.custom_minimum_size = Vector2(0, 44)
-	join_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	join_btn.text = "JOIN BY IP"
 	join_btn.pressed.connect(_join)
-	h.add_child(join_btn)
+	ih.add_child(join_btn)
 	var help := Label.new()
-	help.text = "Host: share your IP (port %d must be reachable - forward it or use the same LAN / a VPN).\nJoin: enter the host's IP and click Join." % PORT
+	help.text = "Hosting needs UDP port %d reachable: forward it on your router, or everyone uses a mesh VPN (Tailscale / ZeroTier) and you host from that IP. Same Wi-Fi: it just works." % PORT
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.modulate = Color(0.6, 0.6, 0.6)
 	help.add_theme_font_size_override("font_size", 12)
@@ -328,9 +423,65 @@ func _host() -> void:
 	_apply_opts_ui()
 	_show_lobby(true)
 	_set_status("Hosting on port %d. Waiting for players... (or start with AI opponents)" % port)
+	if room_public.button_pressed and rooms.enabled() and not args.has("autostart") and DisplayServer.get_name() != "headless":
+		var rn := room_name_edit.text.strip_edges()
+		if rn == "":
+			rn = "%s's game" % my_name
+		rooms.announce(rn, room_pw_edit.text, MapGen.MAPS[lobby_opts["map"]]["players"], port)
 	_refresh_lobby()
 	if args.has("autostart") and (args.has("solo") or args.has("bot") or args.has("ai")):
 		_start_game.call_deferred()
+
+## Room list: rebuild the rows.
+func _on_rooms_changed(list: Array) -> void:
+	for c in room_rows.get_children():
+		c.queue_free()
+	if list.is_empty():
+		room_hint.text = "No open games right now. Host one, or join a friend by IP below."
+	else:
+		room_hint.text = "%d open game%s - click one to join." % [list.size(), "" if list.size() == 1 else "s"]
+	for r in list:
+		var b := Button.new()
+		var lock := "  [locked]" if bool(r.get("has_password", false)) else ""
+		var state := "  · in progress" if bool(r.get("started", false)) else ""
+		b.text = "%s    %d / %d players%s%s" % [str(r["name"]), int(r["players"]), int(r["max_players"]), lock, state]
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.disabled = bool(r.get("started", false))
+		var rid := str(r["id"])
+		var pw := bool(r.get("has_password", false))
+		var rname := str(r["name"])
+		b.pressed.connect(func() -> void:
+			if pw:
+				pw_room_id = rid
+				pw_edit.text = ""
+				pw_box.visible = true
+				(pw_box.get_child(0) as Label).text = "Password for \"%s\"" % rname
+				pw_edit.grab_focus()
+			else:
+				_join_room(rid, ""))
+		room_rows.add_child(b)
+
+func _join_room(id: String, password: String) -> void:
+	pw_box.visible = false
+	_set_status("Asking for the room address...")
+	rooms.join(id, password)
+
+func _on_room_joined(ok: bool, ip: String, jport: int, message: String) -> void:
+	if not ok:
+		_set_status(message)
+		return
+	ip_edit.text = ip
+	port = jport
+	_join()
+
+func _process(dt: float) -> void:
+	# keep the open-games list fresh while the menu is up
+	if menu != null and menu.visible and menu_box != null and menu_box.visible and not in_lobby and not game_started and rooms.enabled():
+		room_refresh_t -= dt
+		if room_refresh_t <= 0.0:
+			room_refresh_t = 6.0
+			if DisplayServer.get_name() != "headless" and not args.has("autostart"):
+				rooms.refresh()
 
 func _join() -> void:
 	my_name = name_edit.text.strip_edges()
@@ -338,7 +489,7 @@ func _join() -> void:
 		my_name = "Guest"
 	var ip := ip_edit.text.strip_edges()
 	if ip == "":
-		_set_status("Enter the host's IP address first.")
+		_set_status("Pick an open game above, or enter the host's IP address first.")
 		return
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_client(ip, port)
@@ -350,6 +501,7 @@ func _join() -> void:
 	_set_status("Connecting to %s..." % ip)
 
 func _leave() -> void:
+	rooms.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	lobby_players.clear()
 	_show_lobby(false)
@@ -596,6 +748,8 @@ func _apply_opts_ui() -> void:
 	opt_sw.button_pressed = bool(lobby_opts["superweapons"])
 
 func _refresh_lobby() -> void:
+	if multiplayer.is_server():
+		rooms.set_players(lobby_players.size(), game_started)
 	for c in lobby_rows.get_children():
 		lobby_rows.remove_child(c)
 		c.queue_free()
@@ -899,6 +1053,7 @@ func _start_game() -> void:
 	for ob in lobby_opts.get("observers", []):
 		observers.append(int(ob["peer"]))
 	game_started = true
+	rooms.set_players(lobby_players.size(), true)
 	var w := World.new()
 	w.debug = args.has("debug") or args.has("simdebug")
 	session.world = w
@@ -910,6 +1065,8 @@ func _start_game() -> void:
 			w.probe_garrison()
 		elif str(args["simtest"]) == "content":
 			w.probe_content()
+		elif w.has_method("probe_" + str(args["simtest"])):
+			w.call("probe_" + str(args["simtest"]))
 		else:
 			w.probe_ridge()
 		get_tree().quit()
@@ -936,6 +1093,7 @@ func return_to_menu() -> void:
 		session.view = null
 	session.world = null
 	game_started = false
+	rooms.close()
 	Audio.I.stop_all()
 	Audio.I.play_music("menu")
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -946,3 +1104,7 @@ func return_to_menu() -> void:
 	in_lobby = false
 	_show_menu_scene(true)
 	_set_status("")
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and rooms != null:
+		rooms.close()   # best effort: take the room off the list when the window closes

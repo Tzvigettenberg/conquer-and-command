@@ -65,7 +65,7 @@ Mechanics: **horde bonus** (5+ Red Guards / Tank Hunters / Battlemasters togethe
 upgrades Chain Guns, Black Napalm, Uranium Shells, Subliminal Messaging; powers Cash Hack, Artillery Barrage, Frenzy, Nuke Cannon,
 Carpet Bomb (rank 5).
 
-**GLA** - guerrillas that **need no power at all**. Workers build *and* haul supplies ($150 a trip), Barracks (Rebels, RPG Troopers,
+**GLA** - guerrillas that **need no power at all**. Workers build *and* haul supplies ($75 a trip), Barracks (Rebels, RPG Troopers,
 Terrorists who run in and explode, Jarmen Kell), Supply Stash, Arms Dealer (Technical with 5 fire ports, Scorpion, Quad Cannon,
 Rocket Buggy, Toxin Tractor, Marauder, SCUD Launcher, Bomb Truck), Palace (garrison 5, unlocks SCUDs), Black Market (steady income
 plus Junk Repair and Anthrax Beta), **Tunnel Network** (walk units in at one tunnel, unload them from any other - 10 shared slots,
@@ -93,6 +93,32 @@ becomes an observer automatically (*Play* takes them back into a slot). Observer
 `audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
 `audio/music` — 14 Kevin MacLeod tracks (menu, game, victory, defeat), CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M9) - v0.3.0
+- **Open games list**: Host names a room (password optional, "show in the list" toggle); the menu lists live rooms of the same
+  version and joins with a click (password prompt for locked rooms). Client in `game/room_list.gd`, server in
+  `tools/room-api/` - one Cloudflare Worker with **no database**: a room exists only while its host heartbeats (every 10 s,
+  dropped after 45 s), the host's address is read from the request and only handed back by `/join` after the password check.
+  `RoomList.SERVICE` empty = the feature is off and the menu says so. Hosting still needs UDP 7788 reachable (port forward /
+  mesh VPN); LAN just works.
+- **GLA tech tree (Zero Hour)**: Palace gates Black Market, Angry Mob, Jarmen Kell, Rocket Buggy, Bomb Truck, SCUD
+  Launcher (+ SCUD promotion) and SCUD Storm; Demo Trap needs the Arms Dealer. Upgrades: Arm the Mob, Camouflage, Toxin
+  Shells, Anthrax Beta, Fortified Structure (Palace); AP Bullets/Rockets, Buggy Ammo, Junk Repair, Worker Shoes (Black
+  Market); Camo Netting per tunnel / stinger site. Finishing an upgrade plays a unit line (`audio/voice/upgrades`).
+- **Angry Mob**: a crowd unit (pistols + molotovs, AK-47s with Arm the Mob), regrows when left alone, can't board anything.
+- **Workers**: $75 a trip, bare chest + loincloth + turban, crate on the back while carrying; Zero Hour-style lines.
+  Loaded Supply Trucks show their crates, Chinooks fly home with a cargo net.
+- **Tunnels**: units vanish underground and come out of any tunnel (or one at a time), tunnels heal occupants, machine-gun
+  turret. Every transport / tunnel / garrison lists its passengers as icons in the info panel - click one to let it out.
+- **Crowds**: work crews (gathering, capturing, boarding, building) squeeze through each other and approach a building from
+  different sides; attackers slide along the firing line so a group fans out; one general captures a building at a time,
+  3 s lockout after a capture, the losers give up (bots skip contested derricks).
+- **Captured buildings** produce their own faction's units; a captured Dozer builds its faction's structures (your
+  promotions / tech still apply).
+- Humvee keeps the machine gun alongside TOW (which is now really gated by the upgrade); vehicle noses point forward
+  (the prism was flipped); engine / rotor loops re-fetched and normalised so vehicles are audible near the camera;
+  X scatters outward from the group; sold buildings refuse new orders and the panel shows SELLING / CANCELLED.
+- Release pipeline: `tools/release.py` tags, GitHub Actions builds the Windows zip (see "Website and releases").
 
 ## What's in (M8) - "Zero Budget"
 - Renamed: **Conquer & Command: Zero Budget** (v0.2.0). Zero Hour-style front end (gunmetal panels, brass rules, amber titles, angled buttons).
@@ -197,8 +223,15 @@ Numbers come from the Zero Hour INI files (Weapon.ini / Armor.ini / Locomotor.in
 scaled to metres at 1 Generals unit = 0.2 m. See `game/data.gd`.
 
 ## Website and releases
-The landing page (background shell-map video, Download button, how-to-play-with-friends) is a claude.ai artifact;
-its Download button points at the GitHub Releases *latest* asset, so it never needs editing:
+The site lives in `site/src` (one page: home + Factions / Play with friends / Screenshots / Controls / What's new, switched
+by `#hash` so it is one file and no build step). `python3 tools/build_site.py` wraps it in a standalone document and copies
+the images and the shell-map clip into `site/dist`, which is what gets published:
+
+* **https://tzvigettenberg.github.io/conquer-and-command/** - GitHub Pages, served from the `gh-pages` branch.
+  Publish an update with `python3 tools/publish_site.py` (builds, then force-pushes `site/dist` to that branch).
+* A custom domain is one file away if we ever buy one: put it in `site/src/CNAME` and point the DNS at GitHub.
+
+Its Download button points at the GitHub Releases *latest* asset, so it never needs editing:
 ```
 https://github.com/<GITHUB_REPO>/releases/latest/download/ConquerAndCommand_ZeroBudget_win64.zip
 ```

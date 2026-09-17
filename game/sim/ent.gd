@@ -150,6 +150,7 @@ var plan_t := 0.0              # strategy center: seconds left until the plan is
 var flank := 0.0               # attack fan-out angle (radians) so groups spread around a target
 var help_t := -100.0           # last time this entity called nearby units for help
 var capture_tick := -1         # sim tick the capture progress was last advanced
+var capture_lock_t := -1.0     # buildings: no new capture may start before this sim time
 var pd_t := 0.0                # point-defence laser cooldown (avenger / paladin)
 var last_target_owner := -1    # owner of whatever we shot at last (shooters reveal themselves)
 var taxi := 0                  # jets: 0 parked in hangar, 1 taxiing to the runway

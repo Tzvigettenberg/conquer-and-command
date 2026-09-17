@@ -130,6 +130,8 @@ static func make(type: String, team: int) -> Node3D:
 		# ---- GLA ----
 		"worker", "rebel", "rpg_trooper", "terrorist", "jarmen_kell":
 			_soldier(root, tc, type)
+		"angry_mob":
+			_mob(root, tc)
 		"technical":
 			_technical(root, tc, l)
 		"scorpion":
@@ -212,7 +214,7 @@ static func _tank(root: Node3D, tc: Color, l: float, heavy: bool, body := BODY, 
 	var w := l * 0.62
 	tracks(root, l * 0.95, w * 0.26, 0.75, w * 0.4)
 	box(root, Vector3(w * 0.62, 0.55, l * 0.9), Vector3(0, 1.0, 0), body)                       # hull
-	prism(root, Vector3(w * 0.62, 0.35, l * 0.25), Vector3(0, 1.45, l * 0.35), body_dark, Vector3(-PI * 0.5, 0, 0))  # glacis
+	prism(root, Vector3(w * 0.62, 0.35, l * 0.25), Vector3(0, 1.45, l * 0.35), body_dark, Vector3(PI * 0.5, 0, 0))  # glacis
 	box(root, Vector3(w * 0.64, 0.1, l * 0.5), Vector3(0, 1.3, -0.2), body_dark)
 	if heavy:
 		for sx in [-1.0, 1.0]:
@@ -225,7 +227,7 @@ static func _tank(root: Node3D, tc: Color, l: float, heavy: bool, body := BODY, 
 	root.add_child(turret)
 	var tw := w * 0.5 if not heavy else w * 0.58
 	box(turret, Vector3(tw, 0.55, l * 0.4), Vector3(0, 0.28, 0), body)
-	prism(turret, Vector3(tw, 0.25, l * 0.2), Vector3(0, 0.65, l * 0.1), body_dark, Vector3(-PI * 0.5, 0, 0))
+	prism(turret, Vector3(tw, 0.25, l * 0.2), Vector3(0, 0.65, l * 0.1), body_dark, Vector3(PI * 0.5, 0, 0))
 	box(turret, Vector3(tw * 0.9, 0.08, l * 0.3), Vector3(0, 0.6, -0.05), tc)      # team-colour roof patch
 	cyl(turret, 0.09, 0.11, l * 0.7, Vector3(0, 0.3, l * 0.2 + l * 0.35), DARK, Vector3(PI * 0.5, 0, 0), 8)   # barrel
 	cyl(turret, 0.14, 0.14, 0.4, Vector3(0, 0.3, l * 0.2 + l * 0.66), DARK, Vector3(PI * 0.5, 0, 0), 8)      # muzzle brake
@@ -342,7 +344,7 @@ static func _supply_truck(root: Node3D, tc: Color, l: float) -> void:
 	box(root, Vector3(w * 1.0, 0.25, l * 0.55), Vector3(0, 1.1, -l * 0.15), CN_BODY)    # flatbed
 	for i in range(4):
 		var c := box(root, Vector3(w * 0.42, 0.55, l * 0.22), Vector3((-0.5 + (i % 2)) * w * 0.48, 1.5, -l * 0.02 - (i / 2) * l * 0.26), Color(0.72, 0.56, 0.3))
-		c.name = "Crate%d" % i
+		c.name = "Cargo%d" % i   # shown only while the truck is loaded
 	for sz in [-1.0, 0.0, 1.0]:
 		for sx in [-1.0, 1.0]:
 			wheel(root, 0.42, 0.3, Vector3(sx * w * 0.5, 0.42, sz * l * 0.32), "Wheel%s%d" % ["L" if sx < 0 else "R", int(sz + 1)])
@@ -393,7 +395,7 @@ static func _troop_crawler(root: Node3D, tc: Color, l: float) -> void:
 	var w := l * 0.5
 	box(root, Vector3(w, 0.5, l * 0.95), Vector3(0, 0.8, 0), CN_DARK)
 	box(root, Vector3(w * 1.02, 1.3, l * 0.7), Vector3(0, 1.65, -l * 0.08), CN_BODY)      # armoured box
-	prism(root, Vector3(w * 1.02, 0.5, l * 0.24), Vector3(0, 1.3, l * 0.4), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w * 1.02, 0.5, l * 0.24), Vector3(0, 1.3, l * 0.4), CN_DARK, Vector3(PI * 0.5, 0, 0))
 	box(root, Vector3(w * 0.9, 0.35, 0.1), Vector3(0, 1.75, l * 0.27), GLASS)
 	box(root, Vector3(w * 1.04, 0.1, l * 0.72), Vector3(0, 2.32, -l * 0.08), tc)
 	for i in range(3):
@@ -428,7 +430,7 @@ static func _overlord(root: Node3D, tc: Color, l: float) -> void:
 	var w := l * 0.66
 	tracks(root, l * 0.98, w * 0.3, 1.0, w * 0.38)
 	box(root, Vector3(w * 0.6, 0.8, l * 0.92), Vector3(0, 1.3, 0), CN_BODY)
-	prism(root, Vector3(w * 0.6, 0.45, l * 0.22), Vector3(0, 1.9, l * 0.38), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w * 0.6, 0.45, l * 0.22), Vector3(0, 1.9, l * 0.38), CN_DARK, Vector3(PI * 0.5, 0, 0))
 	for sx in [-1.0, 1.0]:
 		box(root, Vector3(w * 0.34, 0.5, l * 0.94), Vector3(sx * w * 0.38, 1.25, 0), CN_DARK)   # skirts
 		box(root, Vector3(w * 0.36, 0.08, l * 0.96), Vector3(sx * w * 0.38, 1.55, 0), CN_BODY)
@@ -438,7 +440,7 @@ static func _overlord(root: Node3D, tc: Color, l: float) -> void:
 	turret.position = Vector3(0, 1.7, -0.2)
 	root.add_child(turret)
 	box(turret, Vector3(w * 0.58, 0.75, l * 0.42), Vector3(0, 0.38, 0), CN_BODY)
-	prism(turret, Vector3(w * 0.58, 0.3, l * 0.2), Vector3(0, 0.9, l * 0.12), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	prism(turret, Vector3(w * 0.58, 0.3, l * 0.2), Vector3(0, 0.9, l * 0.12), CN_DARK, Vector3(PI * 0.5, 0, 0))
 	box(turret, Vector3(w * 0.5, 0.08, l * 0.3), Vector3(0, 0.8, -0.05), tc)
 	for sx in [-1.0, 1.0]:
 		cyl(turret, 0.1, 0.13, l * 0.65, Vector3(sx * 0.32, 0.4, l * 0.2 + l * 0.32), DARK, Vector3(PI * 0.5, 0, 0), 8)
@@ -474,7 +476,7 @@ static func _nuke_cannon(root: Node3D, tc: Color, l: float) -> void:
 static func _helix(root: Node3D, tc: Color, l: float) -> void:
 	var w := l * 0.22
 	box(root, Vector3(w, 1.5, l * 0.7), Vector3(0, 1.6, 0), CN_BODY)
-	prism(root, Vector3(w, 1.2, l * 0.16), Vector3(0, 1.5, l * 0.43), CN_DARK, Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w, 1.2, l * 0.16), Vector3(0, 1.5, l * 0.43), CN_DARK, Vector3(PI * 0.5, 0, 0))
 	box(root, Vector3(w * 0.9, 0.5, l * 0.14), Vector3(0, 2.1, l * 0.34), GLASS)
 	box(root, Vector3(w * 1.02, 0.25, l * 0.55), Vector3(0, 1.0, -0.05), tc)
 	box(root, Vector3(w * 0.4, 0.5, l * 0.3), Vector3(0, 1.6, -l * 0.5), CN_BODY)     # tail boom
@@ -534,7 +536,7 @@ static func _scorpion(root: Node3D, tc: Color, l: float) -> void:
 	var w := l * 0.6
 	tracks(root, l * 0.9, w * 0.26, 0.7, w * 0.4)
 	box(root, Vector3(w * 0.6, 0.5, l * 0.85), Vector3(0, 0.95, 0), GLA_BODY)
-	prism(root, Vector3(w * 0.6, 0.35, l * 0.28), Vector3(0, 1.38, l * 0.32), GLA_DARK, Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w * 0.6, 0.35, l * 0.28), Vector3(0, 1.38, l * 0.32), GLA_DARK, Vector3(PI * 0.5, 0, 0))
 	# spikes / junk plating
 	for i in range(3):
 		box(root, Vector3(w * 0.66, 0.06, 0.3), Vector3(0, 1.22, -l * 0.3 + i * l * 0.22), GLA_RUST)
@@ -689,7 +691,7 @@ static func _rotor(parent: Node3D, nm: String, pos: Vector3, r: float, blades: i
 static func _comanche(root: Node3D, tc: Color, l: float) -> void:
 	var w := l * 0.18
 	box(root, Vector3(w, 1.1, l * 0.5), Vector3(0, 1.4, l * 0.05), BODY)              # fuselage
-	prism(root, Vector3(w, 0.9, l * 0.2), Vector3(0, 1.4, l * 0.4), BODY_DARK, Vector3(-PI * 0.5, 0, 0))   # nose
+	prism(root, Vector3(w, 0.9, l * 0.2), Vector3(0, 1.4, l * 0.4), BODY_DARK, Vector3(PI * 0.5, 0, 0))   # nose
 	box(root, Vector3(w * 0.9, 0.5, l * 0.16), Vector3(0, 1.95, l * 0.2), GLASS)     # canopy
 	box(root, Vector3(w * 0.35, 0.4, l * 0.5), Vector3(0, 1.3, -l * 0.42), BODY)     # tail boom
 	box(root, Vector3(0.08, 0.9, l * 0.12), Vector3(0, 1.9, -l * 0.62), tc)          # fin (team colour)
@@ -717,13 +719,23 @@ static func _comanche(root: Node3D, tc: Color, l: float) -> void:
 static func _chinook(root: Node3D, tc: Color, l: float) -> void:
 	var w := l * 0.2
 	box(root, Vector3(w, 1.6, l * 0.75), Vector3(0, 1.6, 0), BODY)
-	prism(root, Vector3(w, 1.3, l * 0.14), Vector3(0, 1.5, l * 0.44), BODY_DARK, Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w, 1.3, l * 0.14), Vector3(0, 1.5, l * 0.44), BODY_DARK, Vector3(PI * 0.5, 0, 0))
 	box(root, Vector3(w * 0.9, 0.5, l * 0.12), Vector3(0, 2.1, l * 0.36), GLASS)
 	box(root, Vector3(w * 1.02, 0.25, l * 0.6), Vector3(0, 1.0, -0.05), tc)        # team stripe low
 	box(root, Vector3(w * 0.6, 0.9, l * 0.16), Vector3(0, 2.7, -l * 0.34), BODY)     # rear pylon
 	box(root, Vector3(w * 0.6, 0.5, l * 0.16), Vector3(0, 2.5, l * 0.22), BODY)      # front pylon
 	var ramp := box(root, Vector3(w * 0.9, 0.12, l * 0.16), Vector3(0, 0.9, -l * 0.42), BODY_DARK)
 	ramp.name = "Ramp"
+	# supplies slung under the belly in a cargo net while it flies home loaded
+	var net := Node3D.new()
+	net.name = "Cargo0"
+	net.position = Vector3(0, 0.1, 0)
+	root.add_child(net)
+	box(net, Vector3(1.2, 0.9, 1.2), Vector3(0, -0.5, 0), Color(0.72, 0.56, 0.3))
+	box(net, Vector3(1.3, 0.05, 1.3), Vector3(0, -0.05, 0), Color(0.3, 0.28, 0.22))
+	for sx in [-0.5, 0.5]:
+		for sz in [-0.5, 0.5]:
+			cyl(net, 0.03, 0.03, 0.9, Vector3(sx, -0.3, sz), Color(0.3, 0.28, 0.22), Vector3.ZERO, 4)
 	for sx in [-1.0, 1.0]:
 		wheel(root, 0.3, 0.25, Vector3(sx * w * 0.55, 0.35, l * 0.25), "WheelF%d" % int(sx + 1))
 		wheel(root, 0.3, 0.25, Vector3(sx * w * 0.55, 0.35, -l * 0.25), "WheelB%d" % int(sx + 1))
@@ -739,9 +751,9 @@ static func _jet(root: Node3D, tc: Color, l: float, kind: String) -> void:
 	# fuselage: main tube, spine, nose cone, canopy, intakes
 	box(root, Vector3(w, w * 0.8, l * 0.5), Vector3(0, y, l * 0.02), body)
 	box(root, Vector3(w * 0.7, w * 0.35, l * 0.42), Vector3(0, y + w * 0.5, -l * 0.08), body2)      # spine
-	prism(root, Vector3(w, w * 0.7, l * 0.3), Vector3(0, y - w * 0.05, l * 0.42), body2, Vector3(-PI * 0.5, 0, 0))   # nose
+	prism(root, Vector3(w, w * 0.7, l * 0.3), Vector3(0, y - w * 0.05, l * 0.42), body2, Vector3(PI * 0.5, 0, 0))   # nose
 	box(root, Vector3(w * 0.6, w * 0.45, l * 0.15), Vector3(0, y + w * 0.6, l * 0.16), GLASS if not dark else Color(0.28, 0.32, 0.38))  # canopy
-	prism(root, Vector3(w * 0.6, w * 0.4, l * 0.08), Vector3(0, y + w * 0.6, l * 0.27), GLASS if not dark else Color(0.28, 0.32, 0.38), Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w * 0.6, w * 0.4, l * 0.08), Vector3(0, y + w * 0.6, l * 0.27), GLASS if not dark else Color(0.28, 0.32, 0.38), Vector3(PI * 0.5, 0, 0))
 	for sx in [-1.0, 1.0]:
 		box(root, Vector3(w * 0.4, w * 0.55, l * 0.22), Vector3(sx * w * 0.65, y - w * 0.1, l * 0.08), body2)   # intakes
 		box(root, Vector3(w * 0.3, w * 0.35, 0.08), Vector3(sx * w * 0.65, y - w * 0.1, l * 0.19), DARK)
@@ -832,7 +844,7 @@ static func a10(team: int) -> Node3D:
 	var w := 1.1
 	var y := 1.05
 	box(root, Vector3(w, w * 0.9, l * 0.55), Vector3(0, y, 0), body)
-	prism(root, Vector3(w, w * 0.8, l * 0.22), Vector3(0, y - 0.05, l * 0.38), body2, Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w, w * 0.8, l * 0.22), Vector3(0, y - 0.05, l * 0.38), body2, Vector3(PI * 0.5, 0, 0))
 	box(root, Vector3(w * 0.7, w * 0.5, l * 0.16), Vector3(0, y + w * 0.6, l * 0.14), GLASS)
 	cyl(root, 0.16, 0.16, 1.8, Vector3(0, y - 0.25, l * 0.5), DARK, Vector3(PI * 0.5, 0, 0), 8).name = "Gun"
 	box(root, Vector3(l * 0.95, 0.12, l * 0.16), Vector3(0, y - 0.1, 0.2), body)          # straight wing
@@ -856,7 +868,7 @@ static func cargo_plane(team: int) -> Node3D:
 	var body := Color(0.5, 0.52, 0.5)
 	var w := 1.6
 	box(root, Vector3(w, w * 1.1, l * 0.62), Vector3(0, 1.2, 0), body)
-	prism(root, Vector3(w, w * 0.9, l * 0.18), Vector3(0, 1.1, l * 0.4), body.darkened(0.15), Vector3(-PI * 0.5, 0, 0))
+	prism(root, Vector3(w, w * 0.9, l * 0.18), Vector3(0, 1.1, l * 0.4), body.darkened(0.15), Vector3(PI * 0.5, 0, 0))
 	box(root, Vector3(w * 0.9, 0.5, l * 0.12), Vector3(0, 1.85, l * 0.3), GLASS)
 	box(root, Vector3(w * 0.5, w * 0.9, l * 0.2), Vector3(0, 1.4, -l * 0.4), body)       # tail cone
 	box(root, Vector3(0.08, 2.4, l * 0.14), Vector3(0, 2.8, -l * 0.42), tc)              # fin
@@ -907,14 +919,26 @@ static func _soldier(root: Node3D, tc: Color, type: String) -> void:
 		uni = Color(0.15, 0.15, 0.17)
 	elif type == "hacker":
 		uni = Color(0.25, 0.28, 0.35)
-	elif type == "worker":
-		uni = Color(0.55, 0.5, 0.42)
 	var s := 1.0
-	box(root, Vector3(0.5 * s, 0.6 * s, 0.3 * s), Vector3(0, 1.15 * s, 0), uni)          # torso
-	box(root, Vector3(0.54 * s, 0.34 * s, 0.34 * s), Vector3(0, 1.28 * s, 0), tc)         # team-colour vest so they read at a glance
-	box(root, Vector3(0.52 * s, 0.12 * s, 0.32 * s), Vector3(0, 0.98 * s, 0), DARK)      # belt
-	Buildings.sphere(root, 0.17 * s, Vector3(0, 1.62 * s, 0), SKIN)                       # head
-	match fac:
+	if type == "worker":
+		# GLA worker: bare chest, a team-coloured loincloth and a turban - and a crate on his back when carrying
+		uni = SKIN
+		box(root, Vector3(0.5 * s, 0.6 * s, 0.3 * s), Vector3(0, 1.15 * s, 0), SKIN)
+		box(root, Vector3(0.54 * s, 0.3 * s, 0.34 * s), Vector3(0, 0.9 * s, 0), tc)           # loincloth
+		box(root, Vector3(0.3 * s, 0.25 * s, 0.1 * s), Vector3(0, 0.72 * s, 0.14 * s), tc)   # its front flap
+		Buildings.sphere(root, 0.17 * s, Vector3(0, 1.62 * s, 0), SKIN)
+		Buildings.sphere(root, 0.22 * s, Vector3(0, 1.74 * s, 0), Color(0.92, 0.88, 0.78))    # turban
+		box(root, Vector3(0.46 * s, 0.06 * s, 0.46 * s), Vector3(0, 1.66 * s, 0), tc.darkened(0.2))
+		var crate := box(root, Vector3(0.42 * s, 0.4 * s, 0.34 * s), Vector3(0, 1.3 * s, -0.3 * s), Color(0.72, 0.56, 0.3))
+		crate.name = "Cargo0"
+	else:
+		box(root, Vector3(0.5 * s, 0.6 * s, 0.3 * s), Vector3(0, 1.15 * s, 0), uni)          # torso
+		box(root, Vector3(0.54 * s, 0.34 * s, 0.34 * s), Vector3(0, 1.28 * s, 0), tc)         # team-colour vest so they read at a glance
+		box(root, Vector3(0.52 * s, 0.12 * s, 0.32 * s), Vector3(0, 0.98 * s, 0), DARK)      # belt
+		Buildings.sphere(root, 0.17 * s, Vector3(0, 1.62 * s, 0), SKIN)                       # head
+	match fac if type != "worker" else "worker":
+		"worker":
+			pass   # turban already on
 		"china":
 			# peaked cap with a red band
 			box(root, Vector3(0.4 * s, 0.14 * s, 0.4 * s), Vector3(0, 1.76 * s, 0), tc.darkened(0.25))
@@ -961,10 +985,30 @@ static func _soldier(root: Node3D, tc: Color, type: String) -> void:
 		"black_lotus":
 			box(gun, Vector3(0.3, 0.03, 0.2), Vector3(-0.15, -0.05, 0), Color(0.2, 0.2, 0.22))
 		"worker":
-			# shovel over the shoulder
-			cyl(gun, 0.03, 0.03, 1.1, Vector3(0.1, 0.4, -0.3), Color(0.5, 0.35, 0.2), Vector3(0.6, 0, 0), 6)
-			box(gun, Vector3(0.22, 0.28, 0.03), Vector3(0.1, 0.95, -0.7), METAL)
+			# shovel in hand
+			cyl(gun, 0.03, 0.03, 1.0, Vector3(0.1, -0.1, 0.1), Color(0.5, 0.35, 0.2), Vector3(0.3, 0, 0), 6)
+			box(gun, Vector3(0.2, 0.26, 0.03), Vector3(0.1, -0.55, 0.25), METAL)
 		"terrorist":
 			box(gun, Vector3(0.12, 0.12, 0.12), Vector3(0, 0, 0), Color(0.8, 0.2, 0.1))   # the trigger
 		_:
 			box(gun, Vector3(0.06, 0.1, 0.6), Vector3(0, 0, 0.1), DARK)
+
+
+## GLA Angry Mob: a loose crowd of armed civilians moving as one unit.
+static func _mob(root: Node3D, tc: Color) -> void:
+	var spots := [Vector2(0, 0.2), Vector2(-0.9, -0.5), Vector2(0.9, -0.4), Vector2(-0.5, 0.9), Vector2(0.6, 1.0), Vector2(-1.2, 0.4), Vector2(1.2, 0.5), Vector2(0.1, -1.1)]
+	var i := 0
+	for sp in spots:
+		var m := Node3D.new()
+		m.name = "Mobber%d" % i
+		m.position = Vector3(sp.x, 0, sp.y)
+		m.rotation.y = randf_range(-0.5, 0.5)
+		m.scale = Vector3.ONE * randf_range(0.88, 1.02)
+		root.add_child(m)
+		_soldier(m, tc, "rebel")
+		# civilians: no vest, mixed clothing colours
+		var shirt: Color = [Color(0.75, 0.7, 0.6), Color(0.45, 0.5, 0.6), Color(0.6, 0.35, 0.3), Color(0.35, 0.4, 0.3)][i % 4]
+		for c in m.get_children():
+			if c is MeshInstance3D and c.position.y > 1.0 and c.position.y < 1.4 and c.mesh is BoxMesh:
+				(c as MeshInstance3D).material_override = Buildings._m(shirt if c.position.y < 1.2 else tc)
+		i += 1

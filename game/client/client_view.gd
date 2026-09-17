@@ -312,6 +312,8 @@ func on_events(evs: Array) -> void:
 						tp.flash_cargo()
 			"supply_drop":
 				fx.supply_drop(Vector3(d[0], 0, d[1]), int(ev[1][2]) if false else _owner_of(int(d[2])))
+			"upgraded":
+				Audio.I.upgrade_voice(str(d[0]))
 			"produced":
 				var fac: Puppet = puppets.get(int(d[0]))
 				if fac != null:
