@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Publish a build to GitHub Releases so the website's download link stays current.
+"""Ship a release: push the source, tag vGAME_VERSION, and let GitHub Actions build + attach
+the Windows zip (.github/workflows/release.yml). The website links to
 
-The site links to
     https://github.com/<repo>/releases/latest/download/ConquerAndCommand_ZeroBudget_win64.zip
-which GitHub always redirects to the newest release, so the link on the website never
-changes: every run of this script *is* the update.
+
+which GitHub always redirects to the newest release, so that link never changes.
 
 Setup (once), in ~/.frontline/keys.env (never committed):
-    GITHUB_REPO=tzvigettenberg/conquer-and-command
-    GITHUB_TOKEN=github_pat_...      # fine-grained token with Contents: read/write on that repo
+    GITHUB_REPO=Tzvigettenberg/conquer-and-command
+    GITHUB_TOKEN=github_pat_...      # fine-grained token, Contents: read/write on that repo
 
 Usage:
-    python3 tools/release.py                  # tag + release GAME_VERSION with build/*.zip
-    python3 tools/release.py --push           # also push the source to GitHub first
-    python3 tools/release.py --notes notes.md # release notes from a file (default: M-section of README)
-Only the standard library is used, so it runs anywhere python3 does.
+    python3 tools/release.py             # push main, push tag vX.Y.Z -> CI builds and publishes
+    python3 tools/release.py --upload    # instead: upload build/*.zip from this machine (needs a
+                                         # network that allows >10 MB request bodies)
+    python3 tools/release.py --status    # show the newest release and its assets
+Bump GAME_VERSION in game/main.gd before releasing: the host rejects clients on another version,
+and the tag must match it (the workflow checks).
+Only the standard library is used.
 """
 import argparse, json, os, re, subprocess, sys, urllib.request, urllib.error
 from pathlib import Path
@@ -43,14 +46,7 @@ def version() -> str:
     return m.group(1)
 
 
-def default_notes(ver: str) -> str:
-    readme = (ROOT / "README.md").read_text()
-    m = re.search(r"## What's in \(M[\d.]+\)[^\n]*\n(.*?)(?=\n## )", readme, re.S)
-    body = m.group(1).strip() if m else ""
-    return f"Conquer & Command: Zero Budget v{ver}\n\nWindows 64-bit. Unzip, run ConquerAndCommand.exe. Everyone needs the same version to play together.\n\n{body}"
-
-
-def api(env: dict, method: str, url: str, data=None, ctype="application/json"):
+def api(env: dict, method: str, url: str, data=None, ctype="application/json", ok404=False):
     req = urllib.request.Request(url, method=method)
     req.add_header("Authorization", f"Bearer {env['GITHUB_TOKEN']}")
     req.add_header("Accept", "application/vnd.github+json")
@@ -64,13 +60,19 @@ def api(env: dict, method: str, url: str, data=None, ctype="application/json"):
             txt = r.read().decode()
             return json.loads(txt) if txt else {}
     except urllib.error.HTTPError as e:
+        if e.code == 404 and ok404:
+            return None
         sys.exit(f"{method} {url} -> {e.code}: {e.read().decode()[:400]}")
+
+
+def git(*args: str) -> str:
+    return subprocess.check_output(["git", *args], cwd=ROOT).decode().strip()
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--push", action="store_true", help="git push the source first")
-    ap.add_argument("--notes", help="markdown file with release notes")
+    ap.add_argument("--upload", action="store_true", help="upload build/*.zip directly instead of tagging")
+    ap.add_argument("--status", action="store_true")
     ap.add_argument("--zip", help="zip to upload (default: newest build/*.zip)")
     a = ap.parse_args()
     env = load_keys()
@@ -78,44 +80,56 @@ def main() -> None:
         if not env.get(k):
             sys.exit(f"{k} missing - put it in ~/.frontline/keys.env")
     repo = env["GITHUB_REPO"]
+    base = f"https://api.github.com/repos/{repo}"
     ver = version()
     tag = f"v{ver}"
+
+    if a.status:
+        rel = api(env, "GET", f"{base}/releases/latest", ok404=True)
+        if not rel:
+            print("no release yet")
+            return
+        print(rel["tag_name"], rel["html_url"])
+        for asset in rel.get("assets", []):
+            print(f"  {asset['name']}  {asset['size'] // 1_000_000} MB  downloads: {asset['download_count']}")
+        return
+
+    remote = f"https://x-access-token:{env['GITHUB_TOKEN']}@github.com/{repo}.git"
+    if git("status", "--porcelain"):
+        sys.exit("uncommitted changes - commit first")
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+
+    if not a.upload:
+        subprocess.check_call(["git", "push", "-q", remote, f"HEAD:{branch}"], cwd=ROOT)
+        print(f"pushed {branch}")
+        if subprocess.call(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"], cwd=ROOT,
+                           stdout=subprocess.DEVNULL) != 0:
+            git("tag", "-a", tag, "-m", f"Conquer & Command: Zero Budget {tag}")
+        subprocess.check_call(["git", "push", "-q", remote, tag], cwd=ROOT)
+        print(f"pushed tag {tag} - GitHub Actions is building the Windows zip now:")
+        print(f"  https://github.com/{repo}/actions")
+        print(f"  download link once it finishes: https://github.com/{repo}/releases/latest/download/{STABLE_NAME}")
+        return
+
     zips = sorted((ROOT / "build").glob("*.zip"), key=lambda p: p.stat().st_mtime)
     zip_path = Path(a.zip) if a.zip else (zips[-1] if zips else None)
     if not zip_path or not zip_path.exists():
         sys.exit("no build zip found - export the Windows build first")
-    if ver not in zip_path.name:
-        print(f"warning: {zip_path.name} does not mention v{ver}")
-    notes = Path(a.notes).read_text() if a.notes else default_notes(ver)
-
-    if a.push:
-        remote = f"https://x-access-token:{env['GITHUB_TOKEN']}@github.com/{repo}.git"
-        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ROOT).decode().strip()
-        subprocess.check_call(["git", "push", remote, f"HEAD:{branch}"], cwd=ROOT)
-        print(f"pushed {branch}")
-
-    base = f"https://api.github.com/repos/{repo}"
-    rel = None
-    try:
-        rel = api(env, "GET", f"{base}/releases/tags/{tag}")
-    except SystemExit:
-        rel = None
-    if rel is None or "id" not in rel:
+    rel = api(env, "GET", f"{base}/releases/tags/{tag}", ok404=True)
+    if rel is None:
         rel = api(env, "POST", f"{base}/releases", {
             "tag_name": tag, "name": f"Conquer & Command: Zero Budget {tag}",
-            "body": notes, "draft": False, "prerelease": False, "generate_release_notes": False})
+            "generate_release_notes": True})
         print(f"created release {tag}")
     else:
-        print(f"release {tag} exists - replacing assets")
         for asset in rel.get("assets", []):
-            api(env, "DELETE", f"{base}/releases/assets/{asset['id']}")
+            if asset["name"] == STABLE_NAME:
+                api(env, "DELETE", f"{base}/releases/assets/{asset['id']}")
     upload = rel["upload_url"].split("{")[0]
     data = zip_path.read_bytes()
     print(f"uploading {STABLE_NAME} ({len(data) // 1_000_000} MB)...")
-    api(env, "POST", f"{upload}?name={STABLE_NAME}&label={zip_path.name}", data, "application/zip")
-    print("done:")
-    print(f"  release  https://github.com/{repo}/releases/tag/{tag}")
-    print(f"  download https://github.com/{repo}/releases/latest/download/{STABLE_NAME}")
+    api(env, "POST", f"{upload}?name={STABLE_NAME}", data, "application/zip")
+    print(f"done: https://github.com/{repo}/releases/latest/download/{STABLE_NAME}")
 
 
 if __name__ == "__main__":

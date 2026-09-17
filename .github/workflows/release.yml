@@ -1,0 +1,89 @@
+name: Release Windows build
+
+# Push a tag like v0.2.1 (tools/release.py does it) and this exports the Windows build with
+# Godot 4.7.2 and attaches it to the GitHub Release under a stable file name, so the website's
+# ".../releases/latest/download/ConquerAndCommand_ZeroBudget_win64.zip" link always serves the newest one.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches GAME_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          v=$(grep -oP 'GAME_VERSION\s*:=\s*"\K[^"]+' game/main.gd)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != GAME_VERSION v$v"; exit 1; }
+
+      - name: Cache Godot + export templates
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-stable
+
+      - name: Download Godot + export templates
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          mkdir -p ~/godot ~/.local/share/godot/export_templates
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          curl -sSL -o godot.zip $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+          curl -sSL -o templates.tpz $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          unzip -q templates.tpz -d tpl
+          mv tpl/templates ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Import project
+        run: ~/godot/godot --headless --path . --import
+
+      - name: Export Windows build
+        run: |
+          set -e
+          mkdir -p build
+          ~/godot/godot --headless --path . --export-release "Windows Desktop" build/ConquerAndCommand.exe
+          ls -la build
+          v=$(grep -oP 'GAME_VERSION\s*:=\s*"\K[^"]+' game/main.gd)
+          cat > build/README.txt <<EOF
+          Conquer & Command: Zero Budget v$v  (Windows 64-bit)
+
+          Run ConquerAndCommand.exe. If Windows SmartScreen complains: More info -> Run anyway.
+          Host game = you host on UDP port 7788 (forward it on your router, or use a mesh VPN such as Tailscale).
+          Join game = enter the host's IP. Everyone must run the same version.
+          Website: https://github.com/${GITHUB_REPOSITORY}/releases/latest
+          EOF
+          cd build && zip -q -9 ConquerAndCommand_ZeroBudget_win64.zip ConquerAndCommand.exe README.txt
+          cp ConquerAndCommand_ZeroBudget_win64.zip ConquerAndCommand_ZeroBudget_v${v}_win64.zip
+          ls -la
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Conquer & Command: Zero Budget ${{ github.ref_name }}"
+          files: |
+            build/ConquerAndCommand_ZeroBudget_win64.zip
+            build/ConquerAndCommand_ZeroBudget_v*_win64.zip
+          generate_release_notes: true
+
+      - name: Keep the build as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ConquerAndCommand_win64
+          path: build/ConquerAndCommand_ZeroBudget_win64.zip

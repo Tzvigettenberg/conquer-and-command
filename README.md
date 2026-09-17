@@ -202,13 +202,15 @@ its Download button points at the GitHub Releases *latest* asset, so it never ne
 ```
 https://github.com/<GITHUB_REPO>/releases/latest/download/ConquerAndCommand_ZeroBudget_win64.zip
 ```
-Shipping an update = export the Windows build into `build/`, then:
+Shipping an update = bump `GAME_VERSION` in `game/main.gd`, commit, then:
 ```
-python3 tools/release.py --push      # pushes source, tags vGAME_VERSION, uploads the zip (stable + versioned name)
+python3 tools/release.py             # pushes main + tag vGAME_VERSION
 ```
-It needs `GITHUB_REPO=owner/repo` and a `GITHUB_TOKEN` (fine-grained, Contents read/write) in `~/.frontline/keys.env`.
-Re-running for the same version replaces the assets. Bump `GAME_VERSION` in `game/main.gd` first - the host rejects
-mismatched clients, so every release is a new version.
+GitHub Actions (`.github/workflows/release.yml`) then exports the Windows build with Godot 4.7.2 and attaches
+`ConquerAndCommand_ZeroBudget_win64.zip` (plus a versioned copy) to the release - about 5 minutes. The script needs
+`GITHUB_REPO=owner/repo` and a `GITHUB_TOKEN` (fine-grained, Contents read/write) in `~/.frontline/keys.env`;
+`--status` lists the newest release, `--upload` pushes a locally exported `build/*.zip` instead of using CI.
+The host rejects mismatched clients, so every release is a new version.
 
 The site's background clip is the game's own shell map: `--shell_only` hides the menu panels and Godot's Movie Maker
 records it (`godot --path . --write-movie shell.avi --fixed-fps 30 --quit-after 960 -- --shell_only`, then
