@@ -174,6 +174,16 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 		return
 	e.alive = false
 	dead_list.append(e)
+	for id in e.cargo:
+		var u: Ent = ents.get(id)
+		if u != null and u.alive:
+			u.inside_id = -1
+			destroy(u, "killed", killer)
+	e.cargo.clear()
+	if e.inside_id >= 0:
+		var car: Ent = ents.get(e.inside_id)
+		if car != null:
+			car.cargo.erase(e.id)
 	if e.is_building:
 		grid.set_cells(e.cells, false)
 		if e.def.get("plans", false):
@@ -331,7 +341,7 @@ func prereqs_met(p: int, type: String) -> String:
 func _build_spatial() -> void:
 	spatial.clear()
 	for e: Ent in ents.values():
-		if not e.alive:
+		if not e.alive or e.inside_id >= 0:
 			continue
 		var c := Vector2i(int(e.pos.x / SPATIAL_CELL), int(e.pos.y / SPATIAL_CELL))
 		if not spatial.has(c):
@@ -399,6 +409,18 @@ func _tick_unit(e: Ent, dt: float) -> void:
 			e.reload_t[i] -= dt
 			if e.reload_t[i] <= 0.0:
 				e.clip[i] = int(Data.WEAPONS[e.weapon_ids()[i]].get("clip", 0))
+	if e.inside_id >= 0:
+		# riding: follow the transport, fire out of it if it has fire ports
+		var car: Ent = ents.get(e.inside_id)
+		if car == null or not car.alive:
+			e.inside_id = -1
+			return
+		e.pos = car.pos
+		e.alt = car.alt
+		e.last_pos = e.pos
+		if car.def.get("fire_ports", false) and e.has_weapons():
+			_tick_passenger(e, car, dt)
+		return
 	if e.is_jet():
 		_tick_jet(e, dt)
 		e.last_pos = e.pos
@@ -439,6 +461,10 @@ func _tick_unit(e: Ent, dt: float) -> void:
 			_do_attack_ground(e, dt)
 		"gather":
 			_do_gather(e, dt)
+		"board":
+			_do_board(e, dt)
+		"unload":
+			_do_unload(e, dt)
 		"build":
 			_do_build(e, dt)
 		"repair":
@@ -1340,6 +1366,117 @@ func _pad_index(b: Ent, e: Ent) -> int:
 			i += 1
 	return 0
 
+# ---- transports (Generals: Humvee 5 infantry with fire ports, Chinook 8 slots, vehicles take 3) ----
+func _cargo_used(t: Ent) -> int:
+	var n := 0
+	for id in t.cargo:
+		var u: Ent = ents.get(id)
+		if u != null and u.alive:
+			n += u.slot_cost()
+	return n
+
+func _can_board(u: Ent, t: Ent) -> bool:
+	if t == null or not t.alive or u == t or not t.def.has("cargo") or not allied(u.owner, t.owner):
+		return false
+	if u.is_building or u.is_air() or u.def.get("builder", false) and not t.def.get("cargo_veh", false):
+		return false
+	if u.cat() == "veh" and not t.def.get("cargo_veh", false):
+		return false
+	return _cargo_used(t) + u.slot_cost() <= int(t.def["cargo"])
+
+## Walk to the transport and climb in.
+func _do_board(e: Ent, dt: float) -> void:
+	var t: Ent = ents.get(e.target_id)
+	if not _can_board(e, t):
+		_next_order(e)
+		return
+	if t.is_air() and t.alt > 1.5:
+		# a hovering Chinook comes down to pick up
+		t.state = "unload"
+		t.timer = 4.0
+	var d := e.pos.distance_to(t.pos) - t.radius - e.radius
+	if d <= 1.2:
+		e.inside_id = t.id
+		t.cargo.append(e.id)
+		e.state = "idle"
+		e.target_id = -1
+		e.path = PackedVector2Array()
+		for p in range(players.size()):
+			if known[p].has(e.id):
+				session.s_despawn(players[p]["peer"], e.id, "loaded")
+				known[p].erase(e.id)
+		events.append({"k": "load", "p": t.pos, "d": [t.id], "o": t.owner})
+		return
+	e.repath_t -= dt
+	if e.repath_t <= 0.0 or e.path.is_empty():
+		e.repath_t = 0.6
+		var goal := t.pos
+		var gc := grid.cell_of(goal)
+		if grid.is_solid(gc):
+			gc = grid.nearest_free(gc)
+		_set_path(e, grid.center_of(gc))
+	_follow_path(e, dt)
+
+## Transport: land (if flying) and let everyone out around it.
+func _do_unload(e: Ent, dt: float) -> void:
+	if e.is_air():
+		e.alt = move_toward(e.alt, 0.5, 6.0 * dt)
+		if e.alt > 1.0:
+			return
+	if e.cargo.is_empty():
+		# came down for a pickup: wait a few seconds then lift off
+		e.timer -= dt
+		if e.timer <= 0.0:
+			e.state = "idle"
+		return
+	var out: Array[int] = []
+	for id in e.cargo:
+		var u: Ent = ents.get(id)
+		if u == null or not u.alive:
+			continue
+		var c := grid.nearest_free(grid.cell_of(e.pos + Vector2(randf_range(-3, 3), randf_range(-3, 3))))
+		u.pos = grid.center_of(c)
+		u.inside_id = -1
+		u.state = "idle"
+		u.guard_pos = u.pos
+		u.last_pos = u.pos
+		out.append(u.id)
+	e.cargo.clear()
+	e.state = "idle"
+	events.append({"k": "unload", "p": e.pos, "d": [e.id], "o": e.owner})
+
+## Passenger in a Humvee: shoots whatever the Humvee is fighting, or anything in reach.
+func _tick_passenger(e: Ent, car: Ent, dt: float) -> void:
+	var t: Ent = ents.get(car.target_id) if car.state == "attack" else null
+	if t == null or not t.alive or _pick_weapon(e, t) < 0:
+		e.acquire_t -= dt
+		if e.acquire_t > 0.0:
+			return
+		e.acquire_t = 0.5
+		t = null
+		var best := 1e18
+		for o: Ent in query(car.pos, 32.0):
+			if o == car or not o.alive or o.owner < 0 or allied(o.owner, e.owner) or (_is_stealthed(o) and not o.detected):
+				continue
+			if _pick_weapon(e, o) < 0:
+				continue
+			var d := o.pos.distance_squared_to(car.pos)
+			if d < best:
+				best = d
+				t = o
+		if t == null:
+			return
+	var wi := _pick_weapon(e, t)
+	if wi < 0:
+		return
+	var wd: Dictionary = Data.WEAPONS[e.weapon_ids()[wi]]
+	if edge_dist(car.pos, t) <= _range(e, wd) and e.cds[wi] <= 0.0 and (int(wd.get("clip", 0)) == 0 or e.clip[wi] > 0):
+		_fire(e, wi, t)
+		# the tracer comes from the vehicle on screen
+		var ev: Dictionary = events[events.size() - 1]
+		if ev["k"] == "shot":
+			ev["d"][0] = car.id
+
 # ---- gathering ----------------------------------------------------------------
 func _nearest_dock(e: Ent) -> Ent:
 	var best: Ent = null
@@ -1772,6 +1909,8 @@ func _team_fog(p: int) -> PackedByteArray:
 	return out
 
 func _visible_to(p: int, e: Ent) -> bool:
+	if e.inside_id >= 0:
+		return false
 	if allied(e.owner, p):
 		return true
 	if e.is_building:
@@ -1785,14 +1924,20 @@ func _visible_to(p: int, e: Ent) -> bool:
 					seen = true
 					break
 			if not seen:
-				if time - e.last_fire_t < 3.0 and e.last_target_owner >= 0 and allied(e.last_target_owner, p):
+				if time - e.last_fire_t < 6.0 and e.last_target_owner >= 0 and allied(e.last_target_owner, p):
 					return true
 				return false
 		return true
 	if not team_visible(p, e.pos):
-		# muzzle flash: anything that just fired at us shows up even outside our vision
-		if time - e.last_fire_t < 3.0 and e.last_target_owner >= 0 and allied(e.last_target_owner, p) and not _is_stealthed(e):
-			return true
+		# no invisible attackers: anything shooting at us (or lining up to) stays visible
+		# until it breaks off, like Generals
+		if not _is_stealthed(e):
+			if time - e.last_fire_t < 6.0 and e.last_target_owner >= 0 and allied(e.last_target_owner, p):
+				return true
+			if e.state == "attack" or e.state == "attack_ground":
+				var tg: Ent = ents.get(e.target_id)
+				if tg != null and tg.alive and allied(tg.owner, p) and e.pos.distance_to(tg.pos) < 90.0:
+					return true
 		return false
 	if e.owner >= 0 and _is_stealthed(e) and not e.detected:
 		return false
@@ -1937,7 +2082,7 @@ func _send_pstates() -> void:
 			"next": Data.RANK_XP[pl["rank"]] if pl["rank"] < 5 else -1, "points": pl["points"], "powers": pl["powers"].duplicate(),
 			"cds": {}, "upgrades": pl["upgrades"].keys(), "research": {}, "queues": {}, "rally": {}, "sw": sw, "docks": docks,
 			"tick": tick, "time": time, "upg_done": {}, "hp": {}, "xp_units": {}, "guard": {}, "teams": _teams_array(), "beam": beams.size() > 0 and beams[0]["owner"] == p,
-			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {},
+			"plans": _plans_array(), "all_upgrades": _all_upgrades(), "defeated": pl["defeated"], "plan_bld": {}, "air_load": {}, "cargo": {},
 		}
 		for pid in pl["cds"]:
 			st["cds"][pid] = maxf(0.0, pl["cds"][pid] - time)
@@ -1961,6 +2106,13 @@ func _send_pstates() -> void:
 				if e.def.get("runway", false):
 					st["air_load"][e.id] = [_airfield_load(e), int(e.def.get("pads", 4))]
 			st["hp"][e.id] = [int(e.hp), int(e.max_hp)]
+			if not e.cargo.is_empty():
+				var types := []
+				for cid in e.cargo:
+					var cu: Ent = ents.get(cid)
+					if cu != null and cu.alive:
+						types.append(cu.type)
+				st["cargo"][e.id] = types
 			if not e.is_building and e.guard_radius > 0.0 and (e.state == "guard" or (not e.resume.is_empty() and e.resume["state"] == "guard")):
 				st["guard"][e.id] = [e.guard_pos.x, e.guard_pos.y, e.guard_radius]
 		session.s_pstate(pl["peer"], st)
@@ -2028,7 +2180,7 @@ func cmd(p: int, c: Dictionary) -> void:
 			var q: bool = c.get("q", false)
 			for id in c.get("ids", []):
 				var e: Ent = ents.get(int(id))
-				if e == null or not e.alive or e.owner != p or e.is_building:
+				if e == null or not e.alive or e.owner != p or e.is_building or e.inside_id >= 0:
 					continue
 				if q and e.state != "idle":
 					e.queue.append(c)
@@ -2036,6 +2188,25 @@ func cmd(p: int, c: Dictionary) -> void:
 					e.queue.clear()
 					e.resume = {}
 					_apply_unit_cmd(e, c)
+		"load":
+			var car: Ent = ents.get(int(c.get("tid", -1)))
+			for id in c.get("ids", []):
+				var e: Ent = ents.get(int(id))
+				if e == null or not e.alive or e.owner != p or e.inside_id >= 0 or not _can_board(e, car):
+					continue
+				e.queue.clear()
+				e.resume = {}
+				e.state = "board"
+				e.target_id = car.id
+				e.path = PackedVector2Array()
+				e.repath_t = 0.0
+		"unload":
+			for id in c.get("ids", []):
+				var e: Ent = ents.get(int(id))
+				if e != null and e.alive and e.owner == p and e.def.has("cargo") and not e.cargo.is_empty():
+					e.queue.clear()
+					e.state = "unload"
+					e.path = PackedVector2Array()
 		"build":
 			_cmd_build(p, c)
 		"produce":
@@ -2157,7 +2328,7 @@ func _apply_unit_cmd(e: Ent, c: Dictionary) -> void:
 			else:
 				e.guard_pos = e.pos
 		"gather":
-			if e.def.get("gatherer", 0) <= 0:
+			if e.def.get("gatherer", 0) <= 0 or not e.cargo.is_empty():
 				return
 			var dock: Ent = ents.get(int(c.get("tid", -1)))
 			e.state = "gather"

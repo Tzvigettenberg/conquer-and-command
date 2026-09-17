@@ -257,6 +257,69 @@ static func _tree(root: Node3D, yaw: float, rel: String) -> void:
 		c.rotation.y = i * 0.6
 		root.add_child(c)
 
+## Small ground decoration (no blocking): a low sand mound, a flat rock or a bush clump.
+static func _deco(root: Node3D, yaw: float, rel: String) -> void:
+	root.rotation.y = yaw
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(yaw * 1000.0)
+	if "Dunes" in rel:
+		var mi := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.5
+		sm.height = 1.0
+		sm.radial_segments = 8
+		sm.rings = 4
+		mi.mesh = sm
+		mi.scale = Vector3(rng.randf_range(4.0, 7.0), 0.7, rng.randf_range(2.5, 4.0))
+		mi.position.y = -0.1
+		mi.material_override = flat_mat(Color(0.6, 0.55, 0.42), false)
+		root.add_child(mi)
+	elif "Rock" in rel:
+		for i in range(2 + rng.randi() % 3):
+			var r := box(Vector3(rng.randf_range(0.5, 1.2), 0.35, rng.randf_range(0.5, 1.2)), Color(0.45, 0.45, 0.48))
+			r.position = Vector3(rng.randf_range(-1.5, 1.5), 0.15, rng.randf_range(-1.5, 1.5))
+			r.rotation.y = rng.randf() * TAU
+			root.add_child(r)
+	else:
+		for i in range(3 + rng.randi() % 3):
+			var b := box(Vector3(0.9, 0.7, 0.9), Color(0.22, 0.4, 0.2).lightened(rng.randf() * 0.1))
+			b.position = Vector3(rng.randf_range(-1.4, 1.4), 0.35, rng.randf_range(-1.4, 1.4))
+			b.rotation.y = rng.randf() * TAU
+			root.add_child(b)
+
+## Ruined house: broken walls, rubble and a fallen roof piece, inside its footprint.
+static func _ruin(root: Node3D, fp: Vector2i, yaw: float) -> void:
+	var w := fp.x * 2.0 - 0.8
+	var d := fp.y * 2.0 - 0.8
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(yaw * 100.0) + fp.x * 13 + fp.y
+	var wall := Color(0.62, 0.58, 0.5)
+	var floor_slab := box(Vector3(w, 0.2, d), Color(0.5, 0.47, 0.42))
+	floor_slab.position.y = 0.1
+	root.add_child(floor_slab)
+	# walls of different heights, one side collapsed
+	var heights := [rng.randf_range(2.0, 3.2), rng.randf_range(0.6, 1.4), rng.randf_range(1.6, 2.8), rng.randf_range(0.4, 1.0)]
+	var sides := [Vector3(0, 0, -d * 0.5 + 0.15), Vector3(w * 0.5 - 0.15, 0, 0), Vector3(0, 0, d * 0.5 - 0.15), Vector3(-w * 0.5 + 0.15, 0, 0)]
+	for i in range(4):
+		var h: float = heights[i]
+		var sz := Vector3(w, h, 0.3) if i % 2 == 0 else Vector3(0.3, h, d)
+		var wl := box(sz, wall.darkened(rng.randf() * 0.15))
+		wl.position = sides[i] + Vector3(0, h * 0.5 + 0.2, 0)
+		root.add_child(wl)
+		if h > 1.8:
+			var win := box(Vector3(0.9, 0.9, 0.34) if i % 2 == 0 else Vector3(0.34, 0.9, 0.9), Color(0.1, 0.1, 0.12))
+			win.position = sides[i] + Vector3(0, 1.4, 0)
+			root.add_child(win)
+	for i in range(5):
+		var r := box(Vector3(rng.randf_range(0.4, 0.9), 0.4, rng.randf_range(0.4, 0.9)), wall.darkened(0.25))
+		r.position = Vector3(rng.randf_range(-w * 0.4, w * 0.4), 0.4, rng.randf_range(-d * 0.4, d * 0.4))
+		r.rotation.y = rng.randf() * TAU
+		root.add_child(r)
+	var roof := box(Vector3(w * 0.6, 0.15, d * 0.5), Color(0.35, 0.25, 0.18))
+	roof.position = Vector3(w * 0.1, 0.8, d * 0.1)
+	roof.rotation = Vector3(0.35, 0.3, 0.2)
+	root.add_child(roof)
+
 ## Subtle team tint over every mesh of a unit so ownership reads at a glance.
 static func tint_unit(model: Node3D, owner: int) -> void:
 	if owner < 0:
@@ -370,6 +433,12 @@ static func make_prop(rel: String, fp: Vector2i, yaw: float, kind: String) -> No
 		return root
 	if kind == "tree":
 		_tree(root, yaw, rel)
+		return root
+	if kind == "deco":
+		_deco(root, yaw, rel)
+		return root
+	if kind == "ruin" and fp != Vector2i.ZERO:
+		_ruin(root, fp, yaw)
 		return root
 	var ps := prefab(rel)
 	if ps != null:

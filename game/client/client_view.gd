@@ -257,6 +257,12 @@ func on_events(evs: Array) -> void:
 				Audio.I.ui("alert", -8.0)
 				while alerts.size() > 8:
 					alerts.pop_front()
+			"load", "unload":
+				var tp: Puppet = puppets.get(int(d[0]))
+				if tp != null:
+					Audio.I.sfx("metal_hit", tp.cur_pos, -8.0, 0.1, 0.2)
+					if k == "load":
+						tp.flash_cargo()
 			"produced":
 				var fac: Puppet = puppets.get(int(d[0]))
 				if fac != null:
@@ -364,7 +370,9 @@ func on_msg(text: String) -> void:
 	if hud:
 		hud.add_message(text)
 	Audio.I.eva_for_message(text)
-	if "Insufficient funds" in text or "Cannot build" in text or "Requires" in text or "Airfield full" in text or "Limit reached" in text:
+	if "Insufficient funds" in text:
+		hud.flash_cash()
+	elif "Cannot build" in text or "Requires" in text or "Airfield full" in text or "Limit reached" in text:
 		Audio.I.ui("ui_error", -6.0)
 	if "Low power" in text:
 		Audio.I.ui("power_down", -2.0)

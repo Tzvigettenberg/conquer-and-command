@@ -63,6 +63,9 @@ var walk_t := 0.0
 var extras_key := ""              # which upgrade / plan add-ons are shown
 var extras_node: Node3D = null
 var rotors: Array[Node3D] = []
+var gear_nodes: Array = []
+var burners: Array = []
+var missiles: Array = []
 var wheels: Array[Node3D] = []
 var tilt: Node3D = null          # body pivot for banking / pitching
 var sel_ring: MeshInstance3D
@@ -137,6 +140,13 @@ func _build_visual(mine: bool) -> void:
 			n.set_meta("axis", "slow")
 		elif "Wheel" in nm and not ("Turret" in nm or "Gear" in nm or "Cover" in nm or "Steering" in nm):
 			wheels.append(n)
+		elif nm == "Gear":
+			gear_nodes.append(n)
+		elif nm.begins_with("Afterburner"):
+			burners.append(n)
+		elif nm.begins_with("Missile"):
+			missiles.append(n)
+	missiles.sort_custom(func(a: Node, b: Node) -> bool: return a.name < b.name)
 	if is_building:
 		var fp: Vector2 = Data.footprint_size(type)
 		var col := Color(0.32, 0.31, 0.3)
@@ -349,6 +359,18 @@ func _build_scaffold() -> void:
 	site_label.no_depth_test = true
 	site_label.position = Vector3(0, h + 2.4, 0)
 	scaffold.add_child(site_label)
+
+func flash_cargo() -> void:
+	var l := Label3D.new()
+	l.text = "+1"
+	l.font_size = 48
+	l.pixel_size = 0.02
+	l.modulate = Color(0.5, 0.9, 1.0)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.position = Vector3(0, 3.0, 0)
+	add_child(l)
+	get_tree().create_timer(0.8).timeout.connect(l.queue_free)
 
 ## Factory door: slides up, lights flash, closes again after a while.
 func open_door(seconds: float) -> void:
@@ -563,6 +585,22 @@ func _process_unit(dt: float, now: float) -> void:
 					r.rotate_y(dt * 1.5)
 				_:
 					r.rotate_y(dt * 40.0)
+	# jets: gear up in flight, afterburner with speed, missiles vanish as ammo is spent
+	if cat == "air":
+		for g in gear_nodes:
+			g.visible = cur_pos.y < 1.5
+		for b in burners:
+			var on := speed > 6.0
+			b.visible = on
+			if on:
+				b.scale = Vector3(1.0, 1.0, 0.6 + minf(speed / 25.0, 1.0) + 0.15 * sin(now * 60.0 + id))
+		if not missiles.is_empty() and def.get("jet", false):
+			var clip: int = aux
+			for i in range(missiles.size()):
+				missiles[i].visible = i < clip
+		elif not missiles.is_empty():
+			for i in range(missiles.size()):
+				missiles[i].visible = aux2 > i * 5   # each rocket shown stands for 5 in the pod
 	# wheels spin with ground speed
 	if not wheels.is_empty() and cat != "air":
 		var wr := 0.4

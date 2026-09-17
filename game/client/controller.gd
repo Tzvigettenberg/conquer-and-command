@@ -350,6 +350,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 			KEY_X:
 				if not _own_units_selected().is_empty():
 					force_mode()
+			KEY_U:
+				unload()
 			KEY_H:
 				_jump_home()
 			KEY_N:
@@ -470,6 +472,15 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
 			return
+		if target.team == view.my_index and not target.is_building and target.def.has("cargo") and not selected.has(target.id):
+			# load infantry (and vehicles into a Chinook)
+			var riders := _filter_ids(ids, func(p: Puppet) -> bool:
+				return p.id != target.id and not p.is_building and p.cat != "air" and (p.cat == "inf" or target.def.get("cargo_veh", false)))
+			if not riders.is_empty():
+				view.send({"t": "load", "ids": riders, "tid": target.id})
+				view.fx.floating_text(target.cur_pos, "LOAD", Color(0.5, 0.9, 1.0))
+				_voice_for(riders, "move")
+				return
 		if target.team >= 0 and view.is_ally(target.team) and target.is_building:
 			var builders := _filter_ids(ids, func(p: Puppet) -> bool: return p.def.get("builder", false))
 			var others := _filter_ids(ids, func(p: Puppet) -> bool: return not p.def.get("builder", false))
@@ -478,6 +489,8 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 				_voice_for(builders, "repair")
 			if not others.is_empty():
 				view.send({"t": "move", "ids": others, "x": g.x, "y": g.y, "q": queue})
+				if target.def.has("heal") and target.type == "war_factory":
+					view.fx.floating_text(target.cur_pos, "REPAIR", Color(0.5, 1.0, 0.5))
 			return
 		if target.is_building and (target.team < 0 and target.def.get("capturable", false)):
 			var rangers := _filter_ids(ids, func(p: Puppet) -> bool: return p.type == "ranger")
@@ -789,6 +802,12 @@ func guard() -> void:
 			var p: Puppet = view.puppets.get(id)
 			if p != null:
 				view.fx.floating_text(p.cur_pos, "GUARD", Color(0.4, 0.9, 1.0))
+
+func unload() -> void:
+	var ids := _filter_ids(_own_units_selected(), func(p: Puppet) -> bool: return p.def.has("cargo"))
+	if not ids.is_empty():
+		view.send({"t": "unload", "ids": ids})
+		Audio.I.ui("ui_click", -6.0)
 
 func produce(bid: int, type: String) -> void:
 	view.send({"t": "produce", "id": bid, "type": type})

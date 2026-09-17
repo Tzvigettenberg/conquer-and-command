@@ -34,6 +34,7 @@ const QUEUE_PX := 50
 var powers_box: VBoxContainer
 var powers_panel: PanelContainer
 var sw_buttons: Dictionary = {}
+var cash_flash_t := 0.0
 var power_buttons: Dictionary = {}
 var promo_panel: PanelContainer
 var promo_backdrop: ColorRect
@@ -417,6 +418,11 @@ func _process(dt: float) -> void:
 	var st: Dictionary = view.pstate
 	if not st.is_empty():
 		cash_label.text = "$ %d" % int(st.get("cash", 0))
+		if cash_flash_t > 0.0:
+			cash_flash_t -= dt
+			cash_label.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2) if fmod(cash_flash_t * 6.0, 1.0) < 0.5 else Color(1.0, 0.9, 0.4))
+			if cash_flash_t <= 0.0:
+				cash_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
 		var pp := int(st.get("pp", 0))
 		var pu := int(st.get("pu", 0))
 		power_label.text = "POWER %d / %d" % [pp, pu]
@@ -639,6 +645,17 @@ func refresh_selection() -> void:
 			lines.append("Ammo: %d" % p.aux)
 		if p.type == "chinook" and (p.flags & 32) != 0:
 			lines.append("Carrying %d boxes" % p.aux)
+		if p.def.has("cargo"):
+			var cg: Array = view.pstate.get("cargo", {}).get(p.id, [])
+			var used := 0
+			var names := {}
+			for ct in cg:
+				used += 1 if Data.UNITS[ct].get("cat", "") == "inf" else 3
+				names[ct] = names.get(ct, 0) + 1
+			var parts := []
+			for ct in names:
+				parts.append("%d× %s" % [names[ct], Data.UNITS[ct]["name"]])
+			lines.append("Cargo %d/%d%s" % [used, int(p.def["cargo"]), ("  ·  " + ", ".join(parts)) if not parts.is_empty() else "  (right-click with units selected to load)"])
 		if p.is_building and p.aux > 100:
 			lines.append("BEING CAPTURED %d%%" % (p.aux - 100))
 		lines.append("[color=#aab]%s[/color]" % d.get("desc", ""))
@@ -668,7 +685,7 @@ func refresh_selection() -> void:
 			if uwhy == "" and ud.get("jet", false) and view.airfield_full(single.id):
 				uwhy = "Airfield full"
 			actions.append({"label": "%s\n$%d" % [ud["name"], ud["cost"]], "icon": ut, "tip": "%s\n%s\nBuild time %ds" % [ud["name"], ud.get("desc", ""), int(ud["time"])],
-				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and uwhy == "", "why": uwhy})
+				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and uwhy == "", "why": uwhy, "cost": int(ud["cost"])})
 		for uid in d.get("upgrades", []):
 			var ud: Dictionary = Data.UPGRADES[uid]
 			var done: bool = view.has_upgrade(uid, single.id)
@@ -679,7 +696,7 @@ func refresh_selection() -> void:
 			elif researching:
 				lbl = "researching"
 			actions.append({"label": "%s\n%s" % [ud["name"], lbl], "icon": uid, "tip": "%s\n%s" % [ud["name"], ud["desc"]],
-				"cb": func() -> void: ctl.upgrade(single.id, uid), "enabled": not done and not researching and view.can_afford(ud["cost"])})
+				"cb": func() -> void: ctl.upgrade(single.id, uid), "enabled": not done and not researching and view.can_afford(ud["cost"]), "cost": 0 if (done or researching) else int(ud["cost"])})
 		if d.get("plans", false):
 			var pb: Array = view.pstate.get("plan_bld", {}).get(single.id, ["", 1.0])
 			for pk in Data.PLANS:
@@ -709,11 +726,17 @@ func refresh_selection() -> void:
 					continue
 				var why: String = view.building_prereq_text(bt)
 				actions.append({"label": "%s\n$%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"])],
-					"cb": func() -> void: ctl.begin_place(bt), "enabled": why == "" and view.can_afford(bd["cost"]), "why": why})
+					"cb": func() -> void: ctl.begin_place(bt), "enabled": why == "" and view.can_afford(bd["cost"]), "why": why, "cost": int(bd["cost"])})
 		else:
 			actions.append({"label": "Attack-move (A)", "tip": "Move and engage anything on the way", "cb": func() -> void: ctl.amove_mode(), "enabled": true})
 			actions.append({"label": "Force attack (X)", "tip": "Fire at a position or at anything, including neutral or own structures (Ctrl+right-click)", "cb": func() -> void: ctl.force_mode(), "enabled": true})
 			actions.append({"label": "Stop (S)", "tip": "Halt", "cb": func() -> void: ctl.stop(), "enabled": true})
+			var has_cargo := false
+			for p in sel:
+				if p.def.has("cargo") and not view.pstate.get("cargo", {}).get(p.id, []).is_empty():
+					has_cargo = true
+			if has_cargo:
+				actions.append({"label": "Unload (U)", "tip": "Let the passengers out (a Chinook lands first)", "cb": func() -> void: ctl.unload(), "enabled": true})
 			actions.append({"label": "Guard area (G)", "tip": "Click a spot to guard - hold and drag to size the area. Press G twice to guard right here. Aircraft loiter overhead and go home to rearm.", "cb": func() -> void: ctl.guard_mode(), "enabled": true})
 			var has_ranger := false
 			for p in sel:
@@ -729,10 +752,16 @@ func refresh_selection() -> void:
 		b.text = a["label"]
 		b.icon = view.icons.get_icon(a["icon"]) if a.has("icon") else null
 		var why: String = a.get("why", "")
+		var cost := int(a.get("cost", 0))
+		var short := cost > 0 and not view.can_afford(cost)
+		if why == "" and short:
+			why = "Need $%d more" % (cost - int(view.pstate.get("cash", 0)))
 		b.tooltip_text = a["tip"] + (("\n" + why) if why != "" else "")
 		b.disabled = not a["enabled"]
 		grid_why[i].visible = why != ""
 		grid_why[i].text = why
+		# can't have it: greyed-out card, red reason; can: full colour
+		b.self_modulate = Color(0.55, 0.55, 0.6) if b.disabled else Color.WHITE
 		if why != "":
 			b.text = a["label"] + "\n "
 			b.add_theme_color_override("font_disabled_color", Color(0.8, 0.6, 0.55))
@@ -747,6 +776,11 @@ func _on_grid(i: int) -> void:
 	if cb != null:
 		Audio.I.ui("ui_click", -8.0)
 		cb.call()
+
+## Cash readout blinks red when something is refused for money.
+func flash_cash() -> void:
+	cash_flash_t = 1.2
+	Audio.I.ui("ui_error", -6.0)
 
 func _update_queue() -> void:
 	var sel: Array = ctl.selected_puppets()

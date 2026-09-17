@@ -157,7 +157,9 @@ static func _tank(root: Node3D, tc: Color, l: float, heavy: bool) -> void:
 	box(root, Vector3(w * 0.64, 0.1, l * 0.5), Vector3(0, 1.3, -0.2), BODY_DARK)
 	if heavy:
 		for sx in [-1.0, 1.0]:
-			box(root, Vector3(0.1, 0.5, l * 0.8), Vector3(sx * w * 0.55, 0.95, 0), BODY_DARK)  # side skirts
+			# armour skirts hang over the tracks
+			box(root, Vector3(w * 0.3, 0.42, l * 0.9), Vector3(sx * w * 0.4, 0.92, 0), BODY_DARK)
+			box(root, Vector3(w * 0.32, 0.08, l * 0.92), Vector3(sx * w * 0.4, 1.15, 0), BODY)
 	var turret := Node3D.new()
 	turret.name = "Turret"
 	turret.position = Vector3(0, 1.3, -0.15)
@@ -246,7 +248,17 @@ static func _comanche(root: Node3D, tc: Color, l: float) -> void:
 	cyl(root, 0.12, 0.12, 0.5, Vector3(0, 2.2, l * 0.02), METAL, Vector3.ZERO, 6)
 	_rotor(root, "RotorMain", Vector3(0, 2.45, l * 0.02), l * 0.42, 2)
 	_rotor(root, "RotorTail", Vector3(w * 0.25, 1.9, -l * 0.62), 0.45, 3, true)
-	box(root, Vector3(0.1, 0.1, 0.7), Vector3(0, 1.05, l * 0.32), DARK)   # chin gun
+	var turret := Node3D.new()
+	turret.name = "Turret"
+	turret.position = Vector3(0, 1.0, l * 0.3)
+	root.add_child(turret)
+	cyl(turret, 0.2, 0.2, 0.25, Vector3.ZERO, METAL, Vector3.ZERO, 8)
+	box(turret, Vector3(0.1, 0.1, 0.8), Vector3(0, -0.05, 0.4), DARK)   # chin gun follows the target
+	root.set_meta("turret", turret)
+	for i in range(4):
+		var sx := -1.0 if i % 2 == 0 else 1.0
+		var m := cyl(root, 0.07, 0.07, 0.6, Vector3(sx * (w * 0.5 + l * 0.13) + (0.12 if i < 2 else -0.12) * sx, 1.2 + (0.12 if i < 2 else -0.12), l * 0.05 + 0.5), Color(0.85, 0.85, 0.8), Vector3(PI * 0.5, 0, 0), 6)
+		m.name = "Missile%d" % i
 
 static func _chinook(root: Node3D, tc: Color, l: float) -> void:
 	var w := l * 0.2
@@ -266,42 +278,80 @@ static func _chinook(root: Node3D, tc: Color, l: float) -> void:
 
 static func _jet(root: Node3D, tc: Color, l: float, kind: String) -> void:
 	var dark := kind == "stealth"
-	var body := Color(0.2, 0.2, 0.22) if dark else Color(0.55, 0.57, 0.6)
-	var body2 := Color(0.14, 0.14, 0.16) if dark else Color(0.42, 0.44, 0.48)
-	var w := l * 0.12
-	# fuselage + nose
-	box(root, Vector3(w, w * 0.9, l * 0.55), Vector3(0, 1.0, 0), body)
-	prism(root, Vector3(w, w * 0.8, l * 0.28), Vector3(0, 0.98, l * 0.41), body2, Vector3(-PI * 0.5, 0, 0))
-	box(root, Vector3(w * 0.7, w * 0.45, l * 0.16), Vector3(0, 1.0 + w * 0.55, l * 0.12), GLASS if not dark else Color(0.25, 0.3, 0.35))
-	var span := l * 0.75 if kind != "aurora" else l * 0.6
+	var body := Color(0.2, 0.2, 0.22) if dark else Color(0.58, 0.6, 0.63)
+	var body2 := Color(0.14, 0.14, 0.16) if dark else Color(0.44, 0.46, 0.5)
+	var w := l * 0.11
+	var y := 1.05
+	# fuselage: main tube, spine, nose cone, canopy, intakes
+	box(root, Vector3(w, w * 0.8, l * 0.5), Vector3(0, y, l * 0.02), body)
+	box(root, Vector3(w * 0.7, w * 0.35, l * 0.42), Vector3(0, y + w * 0.5, -l * 0.08), body2)      # spine
+	prism(root, Vector3(w, w * 0.7, l * 0.3), Vector3(0, y - w * 0.05, l * 0.42), body2, Vector3(-PI * 0.5, 0, 0))   # nose
+	box(root, Vector3(w * 0.6, w * 0.45, l * 0.15), Vector3(0, y + w * 0.6, l * 0.16), GLASS if not dark else Color(0.28, 0.32, 0.38))  # canopy
+	prism(root, Vector3(w * 0.6, w * 0.4, l * 0.08), Vector3(0, y + w * 0.6, l * 0.27), GLASS if not dark else Color(0.28, 0.32, 0.38), Vector3(-PI * 0.5, 0, 0))
+	for sx in [-1.0, 1.0]:
+		box(root, Vector3(w * 0.4, w * 0.55, l * 0.22), Vector3(sx * w * 0.65, y - w * 0.1, l * 0.08), body2)   # intakes
+		box(root, Vector3(w * 0.3, w * 0.35, 0.08), Vector3(sx * w * 0.65, y - w * 0.1, l * 0.19), DARK)
+	var span := l * 0.78 if kind != "aurora" else l * 0.62
+	var eng_pos: Array = []
 	match kind:
 		"raptor":
-			# one wide wing slab (swept look from a narrower leading-edge slab), twin canted fins, two engines
-			box(root, Vector3(span, 0.08, l * 0.22), Vector3(0, 0.95, -l * 0.12), body)
-			box(root, Vector3(span * 0.6, 0.09, l * 0.16), Vector3(0, 0.95, l * 0.02), body)
-			box(root, Vector3(span * 0.9, 0.06, l * 0.08), Vector3(0, 0.95, -l * 0.3), body2)   # tailplane
+			# trapezoid wing (two slabs), tailplane, twin canted fins, two engines
+			box(root, Vector3(span, 0.09, l * 0.2), Vector3(0, y - w * 0.15, -l * 0.1), body)
+			box(root, Vector3(span * 0.62, 0.1, l * 0.16), Vector3(0, y - w * 0.15, l * 0.06), body)
+			box(root, Vector3(span * 0.95, 0.06, l * 0.1), Vector3(0, y - w * 0.15, -l * 0.31), body2)
 			for sx in [-1.0, 1.0]:
-				var fin := box(root, Vector3(0.06, l * 0.11, l * 0.14), Vector3(sx * w * 0.45, 1.0 + l * 0.07, -l * 0.26), tc)
-				fin.rotation.z = -sx * 0.35
-				cyl(root, w * 0.22, w * 0.26, l * 0.2, Vector3(sx * w * 0.28, 0.95, -l * 0.3), DARK, Vector3(PI * 0.5, 0, 0), 8).name = "Engine%d" % int(sx + 1)
+				box(root, Vector3(span * 0.3, 0.05, l * 0.05), Vector3(sx * span * 0.3, y - w * 0.12, -l * 0.22), tc)   # team stripe on the wings
+				var fin := box(root, Vector3(0.07, l * 0.12, l * 0.15), Vector3(sx * w * 0.5, y + l * 0.07, -l * 0.25), body2)
+				fin.rotation.z = -sx * 0.4
+				box(root, Vector3(0.09, l * 0.05, l * 0.06), Vector3(sx * w * 0.5, y + l * 0.1, -l * 0.28), tc).rotation.z = -sx * 0.4
+				eng_pos.append(Vector3(sx * w * 0.3, y - w * 0.05, -l * 0.32))
 		"stealth":
-			# faceted arrowhead: wide slab tapering to the nose, V-tail
-			box(root, Vector3(span, 0.08, l * 0.3), Vector3(0, 0.95, -l * 0.14), body)
-			box(root, Vector3(span * 0.55, 0.1, l * 0.24), Vector3(0, 0.95, l * 0.06), body)
-			box(root, Vector3(span * 0.25, 0.12, l * 0.2), Vector3(0, 0.95, l * 0.22), body2)
+			# faceted arrowhead with V-tail, weapons inside
+			box(root, Vector3(span, 0.1, l * 0.3), Vector3(0, y - w * 0.15, -l * 0.14), body)
+			box(root, Vector3(span * 0.62, 0.12, l * 0.24), Vector3(0, y - w * 0.15, l * 0.05), body)
+			box(root, Vector3(span * 0.3, 0.14, l * 0.2), Vector3(0, y - w * 0.15, l * 0.22), body2)
 			for sx in [-1.0, 1.0]:
-				var fin := box(root, Vector3(0.06, l * 0.1, l * 0.12), Vector3(sx * w * 0.5, 1.0 + l * 0.04, -l * 0.26), tc)
+				var fin := box(root, Vector3(0.07, l * 0.1, l * 0.13), Vector3(sx * w * 0.5, y + l * 0.04, -l * 0.26), body2)
 				fin.rotation.z = -sx * 0.7
+				box(root, Vector3(span * 0.25, 0.05, l * 0.04), Vector3(sx * span * 0.32, y - w * 0.11, -l * 0.26), tc)
+			eng_pos.append(Vector3(0, y, -l * 0.3))
 		"aurora":
-			# sleek dart: slim swept wing far back, single fin, big engine
-			box(root, Vector3(span, 0.06, l * 0.18), Vector3(0, 0.95, -l * 0.2), body)
-			box(root, Vector3(span * 0.5, 0.07, l * 0.14), Vector3(0, 0.95, -l * 0.06), body)
-			box(root, Vector3(0.06, l * 0.1, l * 0.14), Vector3(0, 1.0 + l * 0.06, -l * 0.28), tc)
-			cyl(root, w * 0.35, w * 0.4, l * 0.22, Vector3(0, 0.9, -l * 0.3), DARK, Vector3(PI * 0.5, 0, 0), 8).name = "Engine"
-	# landing gear (visible when parked; small)
-	for p in [Vector3(0, 0.45, l * 0.25), Vector3(-w * 0.35, 0.45, -l * 0.1), Vector3(w * 0.35, 0.45, -l * 0.1)]:
-		box(root, Vector3(0.06, 0.6, 0.06), p, METAL).name = "Gear"
-		cyl(root, 0.14, 0.14, 0.1, p - Vector3(0, 0.3, 0), RUBBER, Vector3(0, 0, PI * 0.5), 8).name = "GearWheel"
+			# sleek dart: slim swept wing far back, single fin, one big engine
+			box(root, Vector3(span, 0.07, l * 0.18), Vector3(0, y - w * 0.15, -l * 0.2), body)
+			box(root, Vector3(span * 0.5, 0.08, l * 0.14), Vector3(0, y - w * 0.15, -l * 0.06), body)
+			box(root, Vector3(0.07, l * 0.11, l * 0.14), Vector3(0, y + l * 0.06, -l * 0.28), tc)
+			eng_pos.append(Vector3(0, y, -l * 0.3))
+	# engines + afterburner flames (Puppet scales "Afterburner*" with speed)
+	for i in range(eng_pos.size()):
+		var ep: Vector3 = eng_pos[i]
+		var er := w * (0.24 if eng_pos.size() > 1 else 0.36)
+		cyl(root, er, er * 1.1, l * 0.2, ep, DARK, Vector3(PI * 0.5, 0, 0), 8).name = "Engine%d" % i
+		cyl(root, er * 0.7, er * 0.85, 0.1, ep + Vector3(0, 0, -l * 0.1), Color(0.9, 0.5, 0.2), Vector3(PI * 0.5, 0, 0), 8)
+		var flame := cyl(root, er * 0.15, er * 0.75, l * 0.22, ep + Vector3(0, 0, -l * 0.2), Color(1.0, 0.6, 0.2, 0.85), Vector3(PI * 0.5, 0, 0), 8)
+		flame.name = "Afterburner%d" % i
+		var fm := flame.material_override as StandardMaterial3D
+		fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		fm.emission_enabled = true
+		fm.emission = Color(1.0, 0.5, 0.15)
+		fm.emission_energy_multiplier = 2.5
+		flame.visible = false
+	# missiles under the wings: "Missile0..n" (Puppet hides them as ammo is spent)
+	var nmis := 4 if kind == "raptor" else (2 if kind == "stealth" else 1)
+	for i in range(nmis):
+		var sx := -1.0 if i % 2 == 0 else 1.0
+		var off := (1 + i / 2) * span * 0.18
+		var mp := Vector3(sx * off, y - w * 0.45, -l * 0.02) if kind != "aurora" else Vector3(0, y - w * 0.6, 0)
+		var m := cyl(root, 0.1, 0.1, l * 0.16 if kind != "aurora" else l * 0.22, mp, Color(0.85, 0.85, 0.8), Vector3(PI * 0.5, 0, 0), 6)
+		m.name = "Missile%d" % i
+		if kind == "aurora":
+			m.scale = Vector3(2.2, 1.0, 2.2)
+	# landing gear (retracts in flight): "Gear*"
+	for gp in [Vector3(0, 0.45, l * 0.25), Vector3(-w * 0.5, 0.45, -l * 0.1), Vector3(w * 0.5, 0.45, -l * 0.1)]:
+		var gear := Node3D.new()
+		gear.name = "Gear"
+		root.add_child(gear)
+		box(gear, Vector3(0.07, 0.7, 0.07), gp, METAL)
+		cyl(gear, 0.16, 0.16, 0.12, gp - Vector3(0, 0.35, 0), RUBBER, Vector3(0, 0, PI * 0.5), 8)
 
 # ---------------------------------------------------------------------------
 # Infantry: simple blocky soldier with swinging limbs

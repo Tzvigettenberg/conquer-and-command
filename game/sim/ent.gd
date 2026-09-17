@@ -112,6 +112,10 @@ func weapon_ids() -> Array:
 func has_weapons() -> bool:
 	return not weapon_ids().is_empty()
 
+## Transport slots this unit takes (Generals: infantry 1, vehicles 3).
+func slot_cost() -> int:
+	return 1 if cat() == "inf" else 3
+
 func can_move() -> bool:
 	return not is_building and speed > 0.0
 
@@ -148,4 +152,6 @@ var capture_tick := -1         # sim tick the capture progress was last advanced
 var pd_t := 0.0                # point-defence laser cooldown (avenger / paladin)
 var last_target_owner := -1    # owner of whatever we shot at last (shooters reveal themselves)
 var taxi := 0                  # jets: 0 parked in hangar, 1 taxiing to the runway
+var cargo: Array[int] = []     # transports: ids of the units inside
+var inside_id := -1            # riding in this transport (-1 = not)
 var orphan_t := 0.0
