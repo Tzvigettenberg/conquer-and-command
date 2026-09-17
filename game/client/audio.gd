@@ -254,7 +254,9 @@ func _eva_next() -> void:
 ## Map a server text message to an EVA line (server messages are plain strings).
 func eva_for_message(text: String) -> void:
 	var t := text.to_lower()
-	if "insufficient funds" in t:
+	if t.begins_with("unit lost"):
+		eva("unit_lost", 8.0)
+	elif "insufficient funds" in t:
 		eva("insufficient_funds", 3.0)
 	elif "cannot build" in t:
 		eva("cannot_build", 3.0)

@@ -25,6 +25,7 @@ var grid_actions: Array = []
 var powers_box: VBoxContainer
 var power_buttons: Dictionary = {}
 var promo_panel: PanelContainer
+var promo_backdrop: ColorRect
 var promo_list: VBoxContainer
 var minimap: Control
 var overlay: Control
@@ -120,13 +121,23 @@ func _build() -> void:
 	pl.modulate = Color(0.7, 0.75, 0.8)
 	powers_box.add_child(pl)
 
-	# ---- promotion panel ----
-	promo_panel = _panel(Color(0.08, 0.09, 0.12, 0.97))
+	# ---- promotion / tech tree modal ----
+	promo_backdrop = ColorRect.new()
+	promo_backdrop.color = Color(0, 0, 0, 0.55)
+	promo_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	promo_backdrop.visible = false
+	promo_backdrop.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.pressed:
+			promo_backdrop.visible = false
+			promo_panel.visible = false)
+	add_child(promo_backdrop)
+	promo_panel = _panel(Color(0.08, 0.09, 0.12, 0.98))
 	promo_panel.set_anchors_preset(Control.PRESET_CENTER)
 	promo_panel.visible = false
-	promo_panel.custom_minimum_size = Vector2(520, 0)
+	promo_panel.custom_minimum_size = Vector2(760, 0)
 	add_child(promo_panel)
 	promo_list = VBoxContainer.new()
+	promo_list.add_theme_constant_override("separation", 8)
 	promo_panel.add_child(promo_list)
 
 	# ---- messages ----
@@ -369,7 +380,7 @@ func refresh_selection() -> void:
 		for ut in d.get("produces", []):
 			var ud: Dictionary = Data.UNITS[ut]
 			actions.append({"label": "%s  $%d" % [ud["name"], ud["cost"]], "icon": ut, "tip": "%s\n%s\nBuild time %ds" % [ud["name"], ud.get("desc", ""), int(ud["time"])],
-				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and view.unit_prereq_text(ut) == "", "tip2": view.unit_prereq_text(ut)})
+				"cb": func() -> void: ctl.produce(single.id, ut), "enabled": view.can_afford(ud["cost"]) and view.unit_prereq_text(ut) == "", "why": view.unit_prereq_text(ut)})
 		for uid in d.get("upgrades", []):
 			var ud: Dictionary = Data.UPGRADES[uid]
 			var done: bool = view.has_upgrade(uid, single.id)
@@ -400,13 +411,13 @@ func refresh_selection() -> void:
 				if bd.get("neutral", false):
 					continue
 				var why: String = view.building_prereq_text(bt)
-				actions.append({"label": "%s  $%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds%s" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"]), ("\n" + why) if why != "" else ""],
-					"cb": func() -> void: ctl.begin_place(bt), "enabled": why == "" and view.can_afford(bd["cost"])})
+				actions.append({"label": "%s  $%d" % [bd["name"], bd["cost"]], "icon": bt, "tip": "%s\n%s\nPower %+d  ·  %ds" % [bd["name"], bd.get("desc", ""), bd.get("power", 0), int(bd["time"])],
+					"cb": func() -> void: ctl.begin_place(bt), "enabled": why == "" and view.can_afford(bd["cost"]), "why": why})
 		else:
 			actions.append({"label": "Attack-move (A)", "tip": "Move and engage anything on the way", "cb": func() -> void: ctl.amove_mode(), "enabled": true})
 			actions.append({"label": "Force attack (X)", "tip": "Fire at a position or at anything, including neutral or own structures (Ctrl+right-click)", "cb": func() -> void: ctl.force_mode(), "enabled": true})
 			actions.append({"label": "Stop (S)", "tip": "Halt", "cb": func() -> void: ctl.stop(), "enabled": true})
-			actions.append({"label": "Guard area (G)", "tip": "Guard a circular area: engage anything entering it and return afterwards. Aircraft loiter over it and go home to rearm.", "cb": func() -> void: ctl.guard_mode(), "enabled": true})
+			actions.append({"label": "Guard (G)", "tip": "Hold here and engage anything that comes close, returning afterwards. Aircraft loiter overhead and go home to rearm.", "cb": func() -> void: ctl.guard(), "enabled": true})
 			var has_ranger := false
 			for p in sel:
 				if p.type == "ranger":
@@ -420,8 +431,16 @@ func refresh_selection() -> void:
 		b.visible = true
 		b.text = a["label"]
 		b.icon = view.icons.get_icon(a["icon"]) if a.has("icon") else null
-		b.tooltip_text = a["tip"] + (("\n" + a["tip2"]) if a.has("tip2") and a["tip2"] != "" else "")
+		var why: String = a.get("why", "")
+		b.tooltip_text = a["tip"] + (("\n" + why) if why != "" else "")
 		b.disabled = not a["enabled"]
+		if why != "":
+			b.text = "%s\n%s" % [a["label"], why]
+			b.add_theme_color_override("font_disabled_color", Color(1.0, 0.35, 0.3))
+		elif not a["enabled"]:
+			b.add_theme_color_override("font_disabled_color", Color(0.95, 0.8, 0.3))
+		else:
+			b.remove_theme_color_override("font_disabled_color")
 		grid_actions[i] = a["cb"]
 
 func _on_grid(i: int) -> void:
@@ -508,41 +527,97 @@ func _update_powers(st: Dictionary) -> void:
 
 func _toggle_promo() -> void:
 	promo_panel.visible = not promo_panel.visible
+	promo_backdrop.visible = promo_panel.visible
 	if promo_panel.visible:
 		_fill_promo(view.pstate)
 
+## Tech-tree style promotion screen: one row per rank tier, cards with icons,
+## unlocked / available / locked states.
 func _fill_promo(st: Dictionary) -> void:
 	for c in promo_list.get_children():
 		c.queue_free()
-	var title := Label.new()
-	title.text = "GENERAL'S PROMOTION  —  rank %d, %d point(s)" % [int(st.get("rank", 1)), int(st.get("points", 0))]
-	title.add_theme_font_size_override("font_size", 18)
-	promo_list.add_child(title)
-	var owned: Dictionary = st.get("powers", {})
 	var rank := int(st.get("rank", 1))
 	var pts := int(st.get("points", 0))
-	for pid in Data.POWERS:
-		var pd: Dictionary = Data.POWERS[pid]
-		if pd.get("auto", false):
-			continue
-		var lvl := int(owned.get(pid, 0))
-		var maxl := int(pd.get("levels", 1))
-		var h := HBoxContainer.new()
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(200, 30)
-		b.text = "%s%s" % [pd["name"], (" (%d/%d)" % [lvl, maxl]) if maxl > 1 else ""]
-		b.disabled = rank < int(pd["rank"]) or pts <= 0 or lvl >= maxl
-		b.pressed.connect(func() -> void: ctl.buy_power(pid))
-		h.add_child(b)
-		var l := Label.new()
-		l.text = "Rank %d · %s%s" % [pd["rank"], pd["desc"], "  ✓" if lvl >= maxl else ""]
-		l.add_theme_font_size_override("font_size", 13)
-		l.modulate = Color(0.85, 0.85, 0.85) if rank >= int(pd["rank"]) else Color(0.5, 0.5, 0.5)
-		h.add_child(l)
-		promo_list.add_child(h)
+	var owned: Dictionary = st.get("powers", {})
+	var title := Label.new()
+	title.text = "GENERAL'S PROMOTION  —  rank %d %s  —  %d point%s to spend" % [rank, "★".repeat(rank), pts, "" if pts == 1 else "s"]
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
+	promo_list.add_child(title)
+	var xp_l := Label.new()
+	var nxt := int(st.get("next", -1))
+	xp_l.text = "%d xp%s  ·  earn experience by destroying enemy units and structures" % [int(st.get("xp", 0)), ("  (next rank at %d)" % nxt) if nxt > 0 else "  (max rank)"]
+	xp_l.add_theme_font_size_override("font_size", 12)
+	xp_l.modulate = Color(0.75, 0.75, 0.75)
+	promo_list.add_child(xp_l)
+	for tier in [1, 3, 5]:
+		var hdr := Label.new()
+		hdr.text = "RANK %d%s" % [tier, "  ✓" if rank >= tier else "  (locked)"]
+		hdr.add_theme_font_size_override("font_size", 13)
+		hdr.add_theme_color_override("font_color", Color(0.5, 0.9, 0.6) if rank >= tier else Color(0.55, 0.55, 0.6))
+		promo_list.add_child(hdr)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		promo_list.add_child(row)
+		for pid in Data.POWERS:
+			var pd: Dictionary = Data.POWERS[pid]
+			if int(pd["rank"]) != tier:
+				continue
+			var lvl := int(owned.get(pid, 0))
+			var maxl := int(pd.get("levels", 1))
+			var unlocked := lvl >= maxl
+			var can: bool = rank >= tier and pts > 0 and not unlocked and not pd.get("auto", false)
+			var card := _panel(Color(0.14, 0.17, 0.22, 1.0) if unlocked else (Color(0.12, 0.13, 0.16, 1.0) if rank >= tier else Color(0.09, 0.09, 0.1, 1.0)))
+			card.custom_minimum_size = Vector2(176, 0)
+			var cv := VBoxContainer.new()
+			card.add_child(cv)
+			var ic := TextureRect.new()
+			ic.texture = view.icons.get_icon(pid)
+			ic.custom_minimum_size = Vector2(64, 64)
+			ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			ic.modulate = Color.WHITE if rank >= tier else Color(0.45, 0.45, 0.45)
+			cv.add_child(ic)
+			var nm := Label.new()
+			nm.text = pd["name"] + ((" %d/%d" % [lvl, maxl]) if maxl > 1 else "")
+			nm.add_theme_font_size_override("font_size", 13)
+			nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cv.add_child(nm)
+			var ds := Label.new()
+			ds.text = pd["desc"]
+			ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			ds.add_theme_font_size_override("font_size", 11)
+			ds.modulate = Color(0.75, 0.75, 0.75)
+			ds.custom_minimum_size = Vector2(160, 40)
+			cv.add_child(ds)
+			var st_l := Label.new()
+			st_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			st_l.add_theme_font_size_override("font_size", 12)
+			if pd.get("auto", false):
+				st_l.text = "Granted at rank 5" if not unlocked else "UNLOCKED ✓"
+				st_l.add_theme_color_override("font_color", Color(0.5, 0.9, 0.6) if unlocked else Color(0.7, 0.7, 0.5))
+				cv.add_child(st_l)
+			elif unlocked:
+				st_l.text = "UNLOCKED ✓"
+				st_l.add_theme_color_override("font_color", Color(0.5, 0.9, 0.6))
+				cv.add_child(st_l)
+			elif can:
+				var b := Button.new()
+				b.text = "Unlock (1 pt)" if lvl == 0 else "Upgrade (1 pt)"
+				b.pressed.connect(func() -> void:
+					Audio.I.ui("ui_click", -6.0)
+					ctl.buy_power(pid))
+				cv.add_child(b)
+			else:
+				st_l.text = "Needs rank %d" % tier if rank < tier else "No points left"
+				st_l.add_theme_color_override("font_color", Color(0.9, 0.45, 0.4))
+				cv.add_child(st_l)
+			row.add_child(card)
 	var close := Button.new()
 	close.text = "Close"
-	close.pressed.connect(func() -> void: promo_panel.visible = false)
+	close.pressed.connect(func() -> void:
+		promo_panel.visible = false
+		promo_backdrop.visible = false)
 	promo_list.add_child(close)
 
 # ---------------------------------------------------------------------------
@@ -637,7 +712,8 @@ func _draw_overlay() -> void:
 		var p: Puppet = pu
 		if p.ghost and not p.is_building:
 			continue
-		var show := p.selected or p.hovered or (p.hp_frac < 0.999 and (p.team == view.my_index or p.selected)) or (p.is_building and not p.complete)
+		var has_ammo: bool = p.team == view.my_index and ((p.cat == "air" and p.def.get("jet", false)) or p.type == "comanche")
+		var show: bool = p.selected or p.hovered or (p.hp_frac < 0.999 and (p.team == view.my_index or p.selected)) or (p.is_building and not p.complete) or has_ammo
 		if not show:
 			continue
 		var top := p.cur_pos + Vector3(0, float(p.def.get("height", 3.0)) if p.is_building else float(p.def.get("length", 2.0)) * 0.5 + 1.0, 0)
@@ -662,6 +738,21 @@ func _draw_overlay() -> void:
 			overlay.draw_rect(Rect2(r.position + Vector2(0, 6), Vector2(w * (p.aux - 100) / 100.0, 3)), Color(1.0, 0.4, 0.9))
 		if p.level > 0 and not p.is_building:
 			overlay.draw_string(ThemeDB.fallback_font, sp + Vector2(w * 0.5 + 3, 0), "★".repeat(p.level), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 0.9, 0.3))
+		# ammo pips: jets (aux = missiles left), Comanche rocket pods (aux2)
+		var pips := -1
+		var pip_max := 0
+		if p.cat == "air" and p.def.get("jet", false):
+			pips = p.aux
+			pip_max = int(Data.WEAPONS[p.def["weapons"][0]].get("clip", 0))
+		elif p.type == "comanche" and view.has_upgrade("rocket_pods"):
+			pips = p.aux2
+			pip_max = int(Data.WEAPONS["comanche_rockets"].get("clip", 0))
+		if pips >= 0 and pip_max > 0 and p.team == view.my_index:
+			var shown := mini(pip_max, 20)
+			var pw := (w - 2.0) / shown
+			for k in range(shown):
+				var filled := k < int(round(float(pips) / pip_max * shown))
+				overlay.draw_rect(Rect2(r.position + Vector2(1 + k * pw, 10), Vector2(maxf(pw - 1.0, 1.0), 3)), Color(0.3, 0.8, 1.0) if filled else Color(0.15, 0.15, 0.2, 0.8))
 	# guard areas of selected units
 	var guard: Dictionary = view.pstate.get("guard", {})
 	for p in ctl.selected_puppets():

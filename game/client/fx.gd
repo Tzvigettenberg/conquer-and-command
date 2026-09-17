@@ -30,6 +30,11 @@ func _process(dt: float) -> void:
 				n.position = p
 				if look.length() > 0.01:
 					n.look_at(p + look, Vector3.UP)
+				if it.get("style", "") == "missile" or it.get("style", "") == "cruise":
+					it["puff_t"] = float(it.get("puff_t", 0.0)) + dt
+					if it["puff_t"] > 0.035:
+						it["puff_t"] = 0.0
+						_puff(p, 0.28 if it["style"] == "missile" else 0.5, Color(0.85, 0.85, 0.85, 0.55), 0.9)
 			"flash":
 				n.scale = Vector3.ONE * (1.0 + a * 1.5)
 				_fade(n, 1.0 - a)
@@ -57,6 +62,38 @@ func _process(dt: float) -> void:
 			"track":
 				if a > 0.6:
 					_fade(n, (1.0 - a) / 0.4 * 0.55)
+			"puff":
+				n.scale = Vector3.ONE * (1.0 + a * it.get("grow", 2.0))
+				_fade(n, (1.0 - a) * it.get("alpha", 0.5))
+				n.position.y += dt * 0.4
+			"crash_jet":
+				var v: Vector3 = it["vel"]
+				v.y -= 9.0 * dt
+				it["vel"] = v
+				n.position += v * dt
+				n.rotate_object_local(Vector3.FORWARD, dt * 1.5)
+				n.rotation.x = lerpf(n.rotation.x, -0.9, dt * 1.2)
+				if fmod(it["t"], 0.08) < dt:
+					_puff(n.position, 0.9, Color(0.1, 0.1, 0.1, 0.6), 1.4)
+				if n.position.y <= 0.3:
+					explosion(Vector3(n.position.x, 0, n.position.z), 2.2)
+					Audio.I.sfx("explosion_medium", n.position, 2.0)
+					it["t"] = it["life"]
+			"crash_heli":
+				var v: Vector3 = it["vel"]
+				v.y -= 6.0 * dt
+				v.x *= 0.99
+				v.z *= 0.99
+				it["vel"] = v
+				n.position += v * dt
+				n.rotate_y(dt * 9.0)
+				n.rotation.z = lerpf(n.rotation.z, 0.5, dt)
+				if fmod(it["t"], 0.08) < dt:
+					_puff(n.position, 0.9, Color(0.1, 0.1, 0.1, 0.6), 1.4)
+				if n.position.y <= 0.3:
+					explosion(Vector3(n.position.x, 0, n.position.z), 2.0)
+					Audio.I.sfx("explosion_medium", n.position, 2.0)
+					it["t"] = it["life"]
 			"text":
 				n.position.y += dt * 2.0
 				if n is Label3D:
@@ -88,6 +125,44 @@ func _fade(n: Node3D, alpha: float) -> void:
 func _on_finish(it: Dictionary) -> void:
 	if it["kind"] == "proj" and it.get("impact", false):
 		impact(it["to"], it["style"])
+	elif it["kind"] == "crash_jet" or it["kind"] == "crash_heli":
+		var n: Node3D = it["node"]
+		var w := Visuals.make_wreck(it["type"])
+		w.position = Vector3(n.position.x, 0, n.position.z)
+		w.rotation.y = n.rotation.y
+		w.rotation.z = randf_range(-0.4, 0.4)
+		add_child(w)
+		wrecks.append({"node": w, "t": 0.0, "life": 25.0})
+
+func _puff(pos: Vector3, size: float, color: Color, life: float, grow := 2.0) -> void:
+	var sm := Visuals.sphere(size, color)
+	sm.material_override = _own_mat(color)
+	sm.position = pos
+	_add(sm, "puff", life, {"grow": grow, "alpha": color.a})
+
+## Wingtip vapour trails: a short thin segment per wingtip that fades and widens.
+func contrail(a: Vector3, b: Vector3) -> void:
+	for p in [a, b]:
+		var sm := Visuals.sphere(0.22, Color(1, 1, 1, 0.45))
+		sm.material_override = _own_mat(Color(1, 1, 1, 0.45))
+		sm.position = p
+		_add(sm, "puff", 1.6, {"grow": 3.0, "alpha": 0.45})
+
+## Aircraft death: jets nose over along their heading, helicopters spin down. Explodes on impact.
+func crash(type: String, pos: Vector3, yaw: float, model: Node3D, speed_hint := 20.0) -> void:
+	if model == null:
+		explosion(pos, 2.0)
+		return
+	add_child(model)
+	model.position = pos
+	model.rotation.y = yaw
+	var def := Data.def(type)
+	var fwd := Vector3(sin(yaw), 0, cos(yaw))
+	if def.get("jet", false):
+		_add(model, "crash_jet", 12.0, {"vel": fwd * maxf(speed_hint, 14.0) + Vector3(0, 2.0, 0), "type": type})
+	else:
+		_add(model, "crash_heli", 12.0, {"vel": fwd * 3.0 + Vector3(0, 1.0, 0), "type": type})
+	explosion(pos, 0.8)
 
 func _own_mat(color: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -115,11 +190,11 @@ func shot(from: Vector3, to: Vector3, wid: String) -> void:
 		"bullet":
 			var tr := MeshInstance3D.new()
 			var bm := BoxMesh.new()
-			bm.size = Vector3(0.08, 0.08, minf(3.0, d * 0.5))
+			bm.size = Vector3(0.18, 0.18, minf(7.0, d * 0.6))
 			tr.mesh = bm
-			tr.material_override = _own_mat(Color(1.0, 0.9, 0.5, 1.0))
+			tr.material_override = _own_mat(Color(1.0, 0.85, 0.4, 1.0))
 			tr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			_add(tr, "proj", clampf(d / 200.0, 0.06, 0.25), {"from": from, "to": to, "style": style, "impact": true})
+			_add(tr, "proj", clampf(d / 160.0, 0.1, 0.35), {"from": from, "to": to, "style": style, "impact": true})
 		"beam":
 			var b := _beam_mesh(from, to, Color(0.4, 0.9, 1.0, 0.9), 0.12)
 			_add(b, "beam", 0.12)
@@ -280,6 +355,19 @@ func strike(kind: String, pos: Vector3, heading: float, level: int) -> void:
 				jet.look_at_from_position(from, to, Vector3.UP)
 				jet.rotate_y(PI)
 				_add(jet, "jet", 8.0, {"from": from, "to": to})
+				# gun run at ~2.4 s (jet ~64 m short of the target), missiles at ~3.6 s
+				for k in range(8):
+					var delay := 2.4 + k * 0.1
+					_later(delay, func() -> void:
+						var jp: Vector3 = from.lerp(to, delay / 8.0)
+						var gp := pos + side + dir * (-20.0 + k * 5.0)
+						shot(jp, gp, "a10_gun"))
+				_later(2.4, func() -> void: Audio.I.sfx("gau8", pos + Vector3(0, 20, 0), 4.0))
+				for k in range(2):
+					var delay := 3.4 + k * 0.25
+					_later(delay, func() -> void:
+						var jp: Vector3 = from.lerp(to, delay / 8.0)
+						shot(jp, pos + side + dir * (k * 4.0), "a10_missile"))
 		"paradrop":
 			var plane := Visuals.make_model("chinook", -1)
 			plane.scale = Vector3.ONE * 1.5
@@ -328,6 +416,9 @@ func track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void:
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		n.add_child(m)
 	_add(n, "track", 30.0)
+
+func _later(delay: float, cb: Callable) -> void:
+	get_tree().create_timer(delay).timeout.connect(cb)
 
 func placed(pos: Vector3, fp: Vector2) -> void:
 	var ring := Visuals.box(Vector3(fp.x, 0.1, fp.y), Color(0.3, 1.0, 0.4, 0.5), true)

@@ -69,7 +69,8 @@ const WEAPONS := {
 	"aurora_bomb": {"dmg": 400.0, "type": "AURORA_BOMB", "range": 30.0, "cd": 0.5, "clip": 1, "reload": -1.0, "speed": 60.0, "radius": 4.0, "aa": false, "ag": true, "style": "bomb"},
 	"patriot": {"dmg": 30.0, "type": "EXPLOSION", "range": 45.0, "cd": 0.25, "clip": 4, "reload": 2.0, "speed": 100.0, "radius": 1.0, "aa": true, "ag": true, "style": "missile", "needs_power": true},
 	"firebase_gun": {"dmg": 75.0, "type": "EXPLOSION", "range": 55.0, "min_range": 10.0, "cd": 2.0, "speed": 60.0, "radius": 2.0, "aa": false, "ag": true, "style": "shell"},
-	"a10_gun": {"dmg": 150.0, "type": "EXPLOSION", "range": 0.0, "cd": 1.0, "speed": 0.0, "radius": 6.0, "aa": false, "ag": true, "style": "bomb"},
+	"a10_gun": {"dmg": 45.0, "type": "COMANCHE_VULCAN", "range": 0.0, "cd": 1.0, "speed": 0.0, "radius": 3.0, "aa": false, "ag": true, "style": "bullet"},
+	"a10_missile": {"dmg": 150.0, "type": "EXPLOSION", "range": 0.0, "cd": 1.0, "speed": 0.0, "radius": 6.0, "aa": false, "ag": true, "style": "missile"},
 	"fab": {"dmg": 600.0, "type": "EXPLOSION", "range": 0.0, "cd": 1.0, "speed": 0.0, "radius": 30.0, "aa": false, "ag": true, "style": "bomb"},
 	"particle": {"dmg": 120.0, "type": "PARTICLE_BEAM", "range": 0.0, "cd": 0.25, "speed": 0.0, "radius": 6.0, "aa": false, "ag": true, "style": "beam"},
 }
@@ -206,8 +207,8 @@ const POWERS := {
 	"fuel_air_bomb": {"name": "Fuel Air Bomb", "rank": 5, "kind": "ability", "cd": 300.0, "radius": 30.0, "auto": true, "desc": "Massive thermobaric strike."},
 }
 
-const TEAM_COLORS := [Color(0.25, 0.55, 1.0), Color(1.0, 0.25, 0.2)]
-const TEAM_NAMES := ["Blue", "Red"]
+const TEAM_COLORS := [Color(0.25, 0.55, 1.0), Color(1.0, 0.25, 0.2), Color(0.3, 0.9, 0.35), Color(1.0, 0.85, 0.2)]
+const TEAM_NAMES := ["Blue", "Red", "Green", "Yellow"]
 
 static func def(type: String) -> Dictionary:
 	if UNITS.has(type):

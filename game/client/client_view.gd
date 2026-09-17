@@ -140,6 +140,8 @@ func on_despawn(id: int, reason: String) -> void:
 		Audio.I.death(p.type, p.cur_pos)
 		if p.cat == "inf":
 			fx.death(p.type, p.cur_pos, p.cur_yaw, p.detach_model())
+		elif p.cat == "air" and p.cur_pos.y > 1.0:
+			fx.crash(p.type, p.cur_pos, p.cur_yaw, p.detach_model(), Vector3(p.vel.x, 0, p.vel.z).length())
 		else:
 			fx.death(p.type, p.cur_pos, p.cur_yaw)
 	elif reason == "sold" and p.team == my_index:
@@ -167,10 +169,11 @@ func on_state(bytes: PackedByteArray) -> void:
 		var hpf := buf.get_u8() / 255.0
 		var flags := buf.get_u8()
 		var aux := buf.get_u8()
+		var aux2 := buf.get_u8()
 		var p: Puppet = puppets.get(id)
 		if p == null:
 			continue
-		p.apply_state(Vector2(x, y), alt, yaw, tyaw, hpf, flags, aux, now)
+		p.apply_state(Vector2(x, y), alt, yaw, tyaw, hpf, flags, aux, aux2, now)
 	# hide units that stopped being replicated (left our vision)
 	for p in puppets.values():
 		if not p.is_building and not p.ghost and p.is_stale(now):
@@ -251,6 +254,10 @@ func on_events(evs: Array) -> void:
 func _process(_dt: float) -> void:
 	if camera != null and camera.cam != null:
 		Audio.I.listener_pos = camera.cam.global_position
+
+func contrail(a: Vector3, b: Vector3) -> void:
+	if fx.items.size() < 1400:
+		fx.contrail(a, b)
 
 func leave_track(pos: Vector3, yaw: float, half_w: float, tracked: bool) -> void:
 	if fx.items.size() < 900:

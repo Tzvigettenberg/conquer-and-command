@@ -246,10 +246,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			KEY_S:
 				stop()
 			KEY_G:
-				if mode == "guard":
-					guard()
-				elif not _own_units_selected().is_empty():
-					guard_mode()
+				guard()
 			KEY_A:
 				if not _own_units_selected().is_empty():
 					amove_mode()
@@ -352,6 +349,16 @@ func _context_command(pos: Vector2, queue: bool) -> void:
 		return
 	if target != null:
 		if target.team != view.my_index and target.team >= 0:
+			if target.cat == "air" and target.cur_pos.y > 0.5:
+				var aa := _filter_ids(ids, func(p: Puppet) -> bool:
+					for w in p.def.get("weapons", []):
+						if Data.WEAPONS[w]["aa"]:
+							return true
+					return false)
+				if aa.is_empty():
+					view.on_msg("Selected units cannot attack aircraft")
+					Audio.I.ui("ui_error", -6.0)
+					return
 			view.send({"t": "attack", "ids": ids, "tid": target.id, "q": queue})
 			view.fx.floating_text(target.cur_pos, "✕", Color(1, 0.3, 0.3))
 			_voice_for(ids, "attack")
@@ -466,6 +473,10 @@ func _mode_click(pos: Vector2) -> void:
 		"place":
 			var fp: Vector2i = Data.BUILDINGS[place_type]["fp"]
 			var snapped := PathGrid.snap_center(g, fp, place_yaw)
+			if not view.placement_ok(place_type, snapped, place_yaw):
+				Audio.I.ui("ui_error", -6.0)
+				view.on_msg("Cannot build there")
+				return   # stay in placement mode
 			var dozer := _first_builder()
 			if dozer >= 0:
 				view.send({"t": "build", "id": dozer, "type": place_type, "x": snapped.x, "y": snapped.y, "yaw": place_yaw})
@@ -546,10 +557,11 @@ func begin_place(type: String) -> void:
 	_update_ghost()
 	_refresh_sig()
 
-func _set_ghost_alpha(n: Node, a: float) -> void:
+func _set_ghost_alpha(n: Node, a: float, ok := true) -> void:
+	var col := Color(0.35, 0.75, 0.45, a) if ok else Color(0.8, 0.3, 0.25, a)
 	for mi in n.find_children("*", "MeshInstance3D", true, false):
 		var m := StandardMaterial3D.new()
-		m.albedo_color = Color(0.6, 0.9, 1.0, a)
+		m.albedo_color = col
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		(mi as MeshInstance3D).material_override = m
@@ -576,7 +588,8 @@ func _update_ghost() -> void:
 	ghost.position = Vector3(snapped.x, 0, snapped.y)
 	ghost.rotation.y = place_yaw
 	var ok: bool = view.placement_ok(place_type, snapped, place_yaw)
-	ghost_mesh.material_override = Visuals.flat_mat(Color(0.3, 1.0, 0.4, 0.4) if ok else Color(1.0, 0.25, 0.2, 0.5))
+	ghost_mesh.material_override = Visuals.flat_mat(Color(0.1, 0.6, 0.2, 0.55) if ok else Color(0.7, 0.1, 0.05, 0.6))
+	_set_ghost_alpha(ghost.get_node("GhostModel"), 0.55, ok)
 
 func amove_mode() -> void:
 	mode = "amove"
@@ -626,6 +639,11 @@ func guard() -> void:
 	var ids := _own_units_selected()
 	if not ids.is_empty():
 		view.send({"t": "guard", "ids": ids})
+		_voice_for(ids, "move")
+		for id in ids:
+			var p: Puppet = view.puppets.get(id)
+			if p != null:
+				view.fx.floating_text(p.cur_pos, "GUARD", Color(0.4, 0.9, 1.0))
 
 func produce(bid: int, type: String) -> void:
 	view.send({"t": "produce", "id": bid, "type": type})

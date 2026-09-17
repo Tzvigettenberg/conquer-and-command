@@ -14,6 +14,8 @@ const CAPTURE_TIME := 20.0
 const GHOST_TIMEOUT_TICKS := 20
 const GUARD_RADIUS := 24.0
 const ORPHAN_DRAIN := 0.035      # fraction of max hp lost per second by jets with no airfield
+const TURRET_RATE := 150.0       # deg/s turret traverse
+const RETALIATE_LEASH := 40.0
 
 var session: Node
 var map: Dictionary
@@ -38,19 +40,22 @@ var winner := -1
 var solo := false
 var debug := false
 var bots: Array = []             # Bot instances (server-side AI players)
+var options: Dictionary = {}
 
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
-func start(_session: Node, peers: Array, names: Array) -> void:
+func start(_session: Node, peers: Array, names: Array, opts: Dictionary = {}) -> void:
 	session = _session
-	map = MapGen.build()
+	options = opts
+	map = MapGen.build(str(opts.get("map", "desert")), peers.size())
 	map_size = map["size"]
 	grid.setup(map_size)
 	solo = peers.size() == 1
+	var start_cash := float(opts.get("cash", Data.STARTING_CASH))
 	for i in range(peers.size()):
 		players.append({
-			"peer": peers[i], "name": names[i], "cash": float(Data.STARTING_CASH), "xp": 0.0, "rank": 1, "points": 1,
+			"peer": peers[i], "name": names[i], "cash": start_cash, "xp": 0.0, "rank": 1, "points": 1, "lost_msg_t": -100.0,
 			"powers": {}, "cds": {}, "upgrades": {}, "defeated": false, "pp": 0, "pu": 0, "low": false,
 			"sw_steer": Vector2(-1, -1), "attack_msg_t": -100.0, "income_mult": 1.0,
 		})
@@ -80,7 +85,7 @@ func start(_session: Node, peers: Array, names: Array) -> void:
 	for i in range(players.size()):
 		if peers[i] == -1:
 			var b := Bot.new()
-			b.setup(self, i)
+			b.setup(self, i, str(opts.get("ai", "medium")))
 			bots.append(b)
 		else:
 			session.s_map(players[i]["peer"], map, i)
@@ -159,6 +164,11 @@ func destroy(e: Ent, reason := "killed", killer: Ent = null) -> void:
 			_recompute_power(e.owner)
 			if reason == "killed" and e.complete:
 				session.s_msg(players[e.owner]["peer"], "%s lost" % e.def["name"])
+		elif reason == "killed":
+			var pl: Dictionary = players[e.owner]
+			if time - float(pl["lost_msg_t"]) > 2.5:
+				pl["lost_msg_t"] = time
+				session.s_msg(pl["peer"], "Unit lost: %s" % e.def["name"])
 		# units targeting it are handled lazily in _do_attack
 
 func _flush_dead() -> void:
@@ -254,6 +264,8 @@ func prereqs_met(p: int, type: String) -> String:
 			return "Requires General's promotion: %s" % Data.POWERS[d["needs_power"]]["name"]
 	if d.has("limit") and count_type(p, type) >= int(d["limit"]):
 		return "Limit reached"
+	if d.has("superweapon") and not bool(options.get("superweapons", true)):
+		return "Superweapons are disabled in this match"
 	return ""
 
 # ---------------------------------------------------------------------------
@@ -334,6 +346,15 @@ func _tick_unit(e: Ent, dt: float) -> void:
 		_tick_jet(e, dt)
 		e.last_pos = e.pos
 		return
+	if not e.is_air() and grid.is_solid_pos(e.pos):
+		# somehow inside an obstacle (spawned there, pushed there): walk out to the nearest free cell
+		var free := grid.center_of(grid.nearest_free(grid.cell_of(e.pos)))
+		e.pos = e.pos.move_toward(free, maxf(e.speed, 2.0) * dt)
+	if e.def.get("turret", false) and e.state != "attack" and e.state != "attack_ground":
+		# turret settles back to the hull heading
+		var turn := deg_to_rad(90.0) * dt
+		var diff := wrapf(e.yaw - e.turret_yaw, -PI, PI)
+		e.turret_yaw = wrapf(e.turret_yaw + clampf(diff, -turn, turn), -PI, PI)
 	match e.state:
 		"idle":
 			if e.has_weapons():
@@ -386,6 +407,13 @@ func _next_order(e: Ent) -> void:
 	if not e.queue.is_empty():
 		var c: Dictionary = e.queue.pop_front()
 		_apply_unit_cmd(e, c)
+
+## Traverse the turret toward a heading at TURRET_RATE.
+func _aim_turret(e: Ent, want: float, dt: float) -> bool:
+	var turn := deg_to_rad(TURRET_RATE) * dt
+	var diff := wrapf(want - e.turret_yaw, -PI, PI)
+	e.turret_yaw = wrapf(e.turret_yaw + clampf(diff, -turn, turn), -PI, PI)
+	return absf(wrapf(want - e.turret_yaw, -PI, PI)) < 0.12
 
 func _fwd(yaw: float) -> Vector2:
 	return Vector2(sin(yaw), cos(yaw))
@@ -617,10 +645,13 @@ func _do_attack(e: Ent, dt: float) -> void:
 	var min_rng: float = wd.get("min_range", 0.0)
 	var d := edge_dist(e.pos, t)
 	var want := atan2(t.pos.x - e.pos.x, t.pos.y - e.pos.y)
+	if e.def.get("turret", false):
+		if not _aim_turret(e, want, dt) and d <= rng:
+			return   # still traversing
 	if d <= rng and d >= min_rng - t.radius:
 		# in range: aim and fire
 		if e.def.get("turret", false):
-			e.turret_yaw = want
+			pass
 		elif not e.is_building:
 			var turn := deg_to_rad(float(e.def.get("turn", 180.0))) * dt * 2.0
 			var diff := wrapf(want - e.yaw, -PI, PI)
@@ -636,7 +667,7 @@ func _do_attack(e: Ent, dt: float) -> void:
 	if e.is_building or not e.can_move():
 		return
 	# leash: units that engaged on their own don't wander far from their post
-	var leash := 26.0
+	var leash := RETALIATE_LEASH
 	if not e.resume.is_empty() and e.resume["state"] == "guard":
 		leash = e.guard_radius + 6.0
 	if _was_auto(e) and e.pos.distance_to(e.guard_pos) > leash:
@@ -673,9 +704,12 @@ func _do_attack_ground(e: Ent, dt: float) -> void:
 	var min_rng: float = wd.get("min_range", 0.0)
 	var d := e.pos.distance_to(e.goal)
 	var want := atan2(e.goal.x - e.pos.x, e.goal.y - e.pos.y)
+	if e.def.get("turret", false):
+		if not _aim_turret(e, want, dt) and d <= rng:
+			return
 	if d <= rng and d >= min_rng:
 		if e.def.get("turret", false):
-			e.turret_yaw = want
+			pass
 		elif not e.is_building:
 			var turn := deg_to_rad(float(e.def.get("turn", 180.0))) * dt * 2.0
 			var diff := wrapf(want - e.yaw, -PI, PI)
@@ -797,10 +831,16 @@ func _damage(t: Ent, amount: float, dtype: String, attacker: Ent) -> void:
 			pl["attack_msg_t"] = time
 			session.s_msg(pl["peer"], "%s under attack!" % ("Base" if t.is_building else "Units"))
 			events.append({"k": "alert", "p": t.pos, "d": [t.pos.x, t.pos.y], "o": t.owner, "only": t.owner})
-		# passive units: retaliate / flee
-		if not t.is_building and t.state == "idle" and t.has_weapons() and attacker.alive and _pick_weapon(t, attacker) >= 0:
+		# units that are being shot from outside their reach go and find the shooter
+		if not t.is_building and (t.state == "idle" or t.state == "guard") and t.has_weapons() and attacker.alive and _pick_weapon(t, attacker) >= 0 and not t.is_jet():
+			if t.state == "guard":
+				t.resume = {"state": "guard", "goal": t.guard_pos}
+			else:
+				t.guard_pos = t.pos
 			t.state = "attack"
 			t.target_id = attacker.id
+			t.path = PackedVector2Array()
+			t.repath_t = 0.0
 	if t.hp <= 0.0:
 		destroy(t, "killed", attacker)
 
@@ -1329,11 +1369,15 @@ func _tick_strikes() -> void:
 		var p: Vector2 = s["p"]
 		match s["k"]:
 			"a10":
+				# gun run first (a line of 30mm hits), then two missiles per jet on the target
 				var dir := Vector2.from_angle(s["heading"])
 				for i in range(int(s["level"])):
-					for j in range(-2, 3):
-						var hp_ := p + dir * (j * 7.0) + dir.orthogonal() * ((i - 1) * 6.0)
-						shots.append({"t": time + 0.15 * (j + 2), "wid": "a10_gun", "tid": -1, "pos": hp_, "dmg": 150.0, "aid": -1, "owner": s["owner"]})
+					var side := dir.orthogonal() * ((i - 1) * 6.0)
+					for j in range(-4, 3):
+						var hp_ := p + dir * (j * 5.0) + side
+						shots.append({"t": time + 0.1 * (j + 4), "wid": "a10_gun", "tid": -1, "pos": hp_, "dmg": 45.0, "aid": -1, "owner": s["owner"]})
+					for k in range(2):
+						shots.append({"t": time + 1.1 + k * 0.25, "wid": "a10_missile", "tid": -1, "pos": p + side + dir * (k * 4.0), "dmg": 150.0, "aid": -1, "owner": s["owner"]})
 			"fab":
 				shots.append({"t": time, "wid": "fab", "tid": -1, "pos": p, "dmg": 600.0, "aid": -1, "owner": s["owner"]})
 			"paradrop":
@@ -1472,6 +1516,12 @@ func _send_snapshots() -> void:
 			elif e.carry > 0:
 				aux = e.carry
 			buf.put_u8(aux)
+			var aux2 := 0
+			if e.is_building:
+				aux2 = e.capture_by + 1 if e.capture_by >= 0 and e.capture_t > 0.0 else 0
+			elif e.clip.size() > 1:
+				aux2 = e.clip[1]
+			buf.put_u8(aux2)
 			n += 1
 		var end := buf.get_position()
 		buf.seek(count_pos)
@@ -1899,7 +1949,7 @@ func _cmd_power(p: int, c: Dictionary) -> void:
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, 0.0], "o": p, "all": true})
 		"a10":
 			var heading := randf() * TAU
-			strikes.append({"k": "a10", "p": pos, "t": time + 4.0, "owner": p, "level": int(pl["powers"][pid]), "heading": heading})
+			strikes.append({"k": "a10", "p": pos, "t": time + 3.2, "owner": p, "level": int(pl["powers"][pid]), "heading": heading})
 			events.append({"k": "strike", "p": pos, "d": [pid, pos.x, pos.y, heading, int(pl["powers"][pid])], "o": p, "all": true})
 		"emergency_repair":
 			for o: Ent in query(pos, float(pd["radius"])):
@@ -1927,3 +1977,36 @@ func _cmd_superweapon(p: int, c: Dictionary) -> void:
 	beams.append({"owner": p, "p": pos, "until": time + 7.0, "next": 0.0})
 	for o in range(players.size()):
 		session.s_msg(players[o]["peer"], "Particle Cannon fired" if o == p else "Warning: enemy Particle Cannon fired!")
+
+# ---------------------------------------------------------------------------
+# Headless probe (--simtest): drive a tank across a ridge and verify it never
+# enters a solid cell.
+# ---------------------------------------------------------------------------
+func probe_ridge() -> void:
+	bots.clear()
+	var tank := spawn("crusader", 0, Vector2(100, 40))
+	var goal := Vector2(190, 140)
+	cmd(0, {"t": "move", "ids": [tank.id], "x": goal.x, "y": goal.y})
+	print("[Probe] path: ", tank.path)
+	var violations := 0
+	for i in range(1500):
+		step(TICK)
+		if grid.is_solid_pos(tank.pos):
+			violations += 1
+			if violations < 5:
+				print("[Probe] IN SOLID at tick %d pos %s" % [i, tank.pos])
+		if i % 100 == 0:
+			print("[Probe] t=%d pos=%s state=%s path_i=%d/%d" % [i, tank.pos.round(), tank.state, tank.path_i, tank.path.size()])
+		if tank.state == "idle" and i > 20:
+			print("[Probe] arrived at tick %d pos %s" % [i, tank.pos.round()])
+			break
+	print("[Probe] solid violations: ", violations)
+	var solid := 0
+	var total := 0
+	for pr in map["props"]:
+		if pr.get("kind", "") == "mountain":
+			for c in PathGrid.footprint_cells(pr["p"], pr["fp"]):
+				total += 1
+				if grid.is_solid(c):
+					solid += 1
+	print("[Probe] mountain cells solid: %d / %d" % [solid, total])

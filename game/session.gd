@@ -123,8 +123,8 @@ func srv_hello(name: String, version: String) -> void:
 	get_parent().on_client_hello(multiplayer.get_remote_sender_id(), name, version)
 
 @rpc("authority", "call_remote", "reliable")
-func cl_lobby(players: Array, text: String) -> void:
-	get_parent().on_lobby(players, text)
+func cl_lobby(players: Array, opts: Dictionary) -> void:
+	get_parent().on_lobby(players, opts)
 
 @rpc("authority", "call_remote", "reliable")
 func cl_kick(reason: String) -> void:

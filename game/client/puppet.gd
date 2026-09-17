@@ -39,6 +39,12 @@ var hovered := false
 var boxes := 0
 var ghost := false
 var aabb := AABB()
+var aux2 := 0
+var anims: Array = []
+var tyaw_changed_t := 0.0
+var capture_mat: StandardMaterial3D = null
+var capture_loop: AudioStreamPlayer3D = null
+var trail_t := 0.0
 
 var model: Node3D
 var turret: Node3D = null
@@ -94,6 +100,10 @@ func _build_visual(mine: bool) -> void:
 	aabb = Visuals.model_aabb(model)
 	if model.has_meta("turret"):
 		turret = model.get_meta("turret")
+	if model.has_meta("anim"):
+		anims = model.get_meta("anim")
+	if not is_building and cat != "inf":
+		Visuals.tint_unit(model, team)
 	for n in model.find_children("*", "MeshInstance3D", true, false):
 		var nm: String = n.name
 		if "Rotor" in nm or "Blade" in nm or "Propeller" in nm:
@@ -112,21 +122,6 @@ func _build_visual(mine: bool) -> void:
 		pad = Visuals.box(Vector3(fp.x, 0.12, fp.y), col)
 		pad.position.y = 0.06
 		add_child(pad)
-		if def.get("runway", false):
-			var rw := Visuals.box(Vector3(fp.x * 0.9, 0.05, 5.0), Color(0.2, 0.2, 0.2))
-			rw.position = Vector3(0, 0.14, -5.0)
-			add_child(rw)
-			for i in range(4):
-				var m := Visuals.box(Vector3(4.0, 0.02, 4.0), Color(0.5, 0.5, 0.1, 0.6), true)
-				m.position = Vector3(-7.5 + i * 5.0, 0.18, -5.0)
-				add_child(m)
-		if team >= 0:
-			var flag := Visuals.box(Vector3(0.15, 3.0, 0.15), Color(0.3, 0.3, 0.3))
-			flag.position = Vector3(fp.x * 0.5 - 0.6, 1.5, fp.y * 0.5 - 0.6)
-			add_child(flag)
-			var banner := Visuals.box(Vector3(1.2, 0.7, 0.05), Data.TEAM_COLORS[team], true)
-			banner.position = Vector3(fp.x * 0.5 - 0.0, 2.6, fp.y * 0.5 - 0.6)
-			add_child(banner)
 		if type == "supply_dock":
 			_build_crates()
 	else:
@@ -231,7 +226,10 @@ func _play(clip: String, blend := 0.15) -> void:
 	anim.play("f/" + clip, blend)
 	anim_state = clip
 
-func apply_state(pos: Vector2, alt: float, yaw: float, tyaw: float, hpf: float, fl: int, ax: int, now: float) -> void:
+func apply_state(pos: Vector2, alt: float, yaw: float, tyaw: float, hpf: float, fl: int, ax: int, ax2: int, now: float) -> void:
+	if absf(wrapf(tyaw - tyaw1, -PI, PI)) > 0.01:
+		tyaw_changed_t = now
+	aux2 = ax2
 	p0 = p1
 	yaw0 = yaw1
 	tyaw0 = tyaw1
@@ -276,7 +274,7 @@ func _process(dt: float) -> void:
 		var a := clampf((rt - t0) / span, 0.0, 1.25)
 		cur_pos = p0.lerp(p1, a)
 		cur_yaw = lerp_angle(yaw0, yaw1, minf(a, 1.0))
-		if turret != null:
+		if turret != null and not is_building:
 			turret.rotation.y = lerp_angle(tyaw0, tyaw1, minf(a, 1.0)) - cur_yaw
 	if dt > 0.0:
 		vel = vel.lerp((cur_pos - prev_pos) / dt, 0.3)
@@ -316,6 +314,59 @@ func _process_building(now: float) -> void:
 	elif (hp_frac >= 0.5 or not complete) and smoke != null:
 		smoke.queue_free()
 		smoke = null
+	_idle_anims(now, get_process_delta_time())
+	_capture_fx(now)
+
+## Idle life: radar spin, launcher sweep, pump-jack nod, beacon blink, glow pulse.
+func _idle_anims(now: float, dt: float) -> void:
+	for a in anims:
+		var n: Node3D = a["node"]
+		var sp: float = a["speed"]
+		match a["kind"]:
+			"spin":
+				n.rotate_y(dt * sp)
+			"sweep":
+				if n == turret:
+					# defensive turret: follow the sim aim while engaged, sweep lazily when idle
+					if now - tyaw_changed_t < 3.0 or (flags & 2) != 0:
+						n.rotation.y = lerp_angle(n.rotation.y, tyaw1 - cur_yaw, 0.2)
+					else:
+						n.rotation.y = lerp_angle(n.rotation.y, sin(now * sp + id) * 1.2, 0.02)
+				else:
+					n.rotation.y = sin(now * sp + id) * 0.9
+			"nod":
+				n.rotation.x = sin(now * sp + id) * 0.25
+			"pulse":
+				var k := 0.75 + 0.25 * sin(now * sp * 2.0)
+				n.scale = Vector3.ONE * k
+			"blink":
+				n.visible = fmod(now * sp, 1.0) < 0.5
+
+## Being captured: flash between our colour and the capturing player's colour, with a beeping loop.
+func _capture_fx(now: float) -> void:
+	var capturing := aux2 > 0 and complete
+	if capturing:
+		var cap_team := aux2 - 1
+		if capture_mat == null:
+			capture_mat = StandardMaterial3D.new()
+			capture_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			capture_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			for mi in model.find_children("*", "MeshInstance3D", true, false):
+				(mi as MeshInstance3D).material_overlay = capture_mat
+			capture_loop = Audio.I.make_loop("beep", -6.0)
+			if capture_loop != null:
+				add_child(capture_loop)
+		var c: Color = Data.TEAM_COLORS[cap_team] if cap_team < Data.TEAM_COLORS.size() else Color.WHITE
+		var k := 0.5 + 0.5 * sin(now * 8.0)
+		capture_mat.albedo_color = Color(c.r, c.g, c.b, 0.15 + 0.45 * k)
+	elif capture_mat != null:
+		for mi in model.find_children("*", "MeshInstance3D", true, false):
+			if (mi as MeshInstance3D).material_overlay == capture_mat:
+				(mi as MeshInstance3D).material_overlay = blackout_mat if blackout else null
+		capture_mat = null
+		if capture_loop != null:
+			capture_loop.queue_free()
+			capture_loop = null
 
 ## Unpowered structures go dark with a slow blue pulse.
 func _set_blackout(on: bool) -> void:
@@ -420,6 +471,16 @@ func _process_unit(dt: float, now: float) -> void:
 				view.leave_track(cur_pos, cur_yaw, radius * 0.7, def.get("crusher", false))
 	if cat == "air" and team_ring:
 		team_ring.position.y = -cur_pos.y + 0.03
+	# contrails from fast fixed-wing aircraft
+	if cat == "air" and def.get("jet", false) and airborne and speed > 12.0:
+		trail_t += dt
+		if trail_t > 0.05:
+			trail_t = 0.0
+			var view := get_parent()
+			if view != null and view.has_method("contrail"):
+				var right := Vector3(cos(cur_yaw), 0, -sin(cur_yaw))
+				var half := float(def.get("length", 9.0)) * 0.42
+				view.contrail(cur_pos + right * half, cur_pos - right * half)
 
 func is_stale(now: float) -> bool:
 	return not is_building and now - last_update > 0.7

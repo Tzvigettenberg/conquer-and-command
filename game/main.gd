@@ -4,7 +4,7 @@ extends Node3D
 
 const PORT := 7788
 const GAME_VERSION := "0.1.0"
-const MAX_PLAYERS := 2
+const MAX_PLAYERS := 4
 
 static var I: Main = null
 
@@ -17,7 +17,13 @@ var ip_edit: LineEdit
 var lobby_box: VBoxContainer
 var lobby_list: Label
 var start_btn: Button
-var bot_check: CheckButton
+var lobby_rows: VBoxContainer
+var opt_ai: OptionButton
+var opt_ai_level: OptionButton
+var opt_map: OptionButton
+var opt_cash: OptionButton
+var opt_sw: CheckButton
+var lobby_opts := {"ai": 1, "ai_level": "medium", "map": "desert", "cash": 10000, "superweapons": true}
 var menu_box: VBoxContainer
 var args: Dictionary = {}
 var lobby_players: Array = []      # server: [{peer, name}]
@@ -87,7 +93,7 @@ func _build_menu() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
 	var sub := Label.new()
-	sub.text = "1v1 RTS  ·  v%s" % GAME_VERSION
+	sub.text = "Generals-style RTS  ·  v%s" % GAME_VERSION
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.modulate = Color(0.7, 0.7, 0.7)
 	v.add_child(sub)
@@ -130,13 +136,57 @@ func _build_menu() -> void:
 	lobby_box.visible = false
 	v.add_child(lobby_box)
 	lobby_list = Label.new()
-	lobby_list.text = ""
+	lobby_list.text = "PLAYERS"
+	lobby_list.add_theme_font_size_override("font_size", 12)
+	lobby_list.modulate = Color(0.7, 0.75, 0.8)
 	lobby_box.add_child(lobby_list)
-	bot_check = CheckButton.new()
-	bot_check.text = "Add AI opponent (when no second player)"
-	bot_check.button_pressed = true
-	bot_check.toggled.connect(func(_on: bool) -> void: _refresh_lobby())
-	lobby_box.add_child(bot_check)
+	lobby_rows = VBoxContainer.new()
+	lobby_box.add_child(lobby_rows)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 6)
+	lobby_box.add_child(grid)
+	grid.add_child(_label("Map"))
+	opt_map = OptionButton.new()
+	for k in ["desert", "snow", "grass"]:
+		opt_map.add_item(MapGen.THEMES[k]["name"])
+		opt_map.set_item_metadata(opt_map.item_count - 1, k)
+	opt_map.item_selected.connect(func(_i: int) -> void: _opts_changed())
+	grid.add_child(opt_map)
+	grid.add_child(_label("AI opponents"))
+	opt_ai = OptionButton.new()
+	for i in range(4):
+		opt_ai.add_item(str(i))
+	opt_ai.select(1)
+	opt_ai.item_selected.connect(func(_i: int) -> void: _opts_changed())
+	grid.add_child(opt_ai)
+	grid.add_child(_label("AI difficulty"))
+	opt_ai_level = OptionButton.new()
+	for k in ["easy", "medium", "hard"]:
+		opt_ai_level.add_item(k.capitalize())
+		opt_ai_level.set_item_metadata(opt_ai_level.item_count - 1, k)
+	opt_ai_level.select(1)
+	opt_ai_level.item_selected.connect(func(_i: int) -> void: _opts_changed())
+	grid.add_child(opt_ai_level)
+	grid.add_child(_label("Starting cash"))
+	opt_cash = OptionButton.new()
+	for c in [5000, 10000, 20000, 50000]:
+		opt_cash.add_item("$%d" % c)
+		opt_cash.set_item_metadata(opt_cash.item_count - 1, c)
+	opt_cash.select(1)
+	opt_cash.item_selected.connect(func(_i: int) -> void: _opts_changed())
+	grid.add_child(opt_cash)
+	grid.add_child(_label("Superweapons"))
+	opt_sw = CheckButton.new()
+	opt_sw.button_pressed = true
+	opt_sw.toggled.connect(func(_on: bool) -> void: _opts_changed())
+	grid.add_child(opt_sw)
+	var invite := Label.new()
+	invite.text = "Invite: send friends your IP (port %d). Up to %d players + AI." % [PORT, MAX_PLAYERS]
+	invite.add_theme_font_size_override("font_size", 12)
+	invite.modulate = Color(0.6, 0.6, 0.6)
+	lobby_box.add_child(invite)
 	start_btn = Button.new()
 	start_btn.text = "Start game"
 	start_btn.pressed.connect(_on_start_pressed)
@@ -181,9 +231,9 @@ func _host() -> void:
 	multiplayer.multiplayer_peer = peer
 	lobby_players = [{"peer": 1, "name": my_name}]
 	_show_lobby(true)
-	_set_status("Hosting on port %d. Waiting for an opponent... (you can also start solo to practice)" % PORT)
+	_set_status("Hosting on port %d. Waiting for players... (or start with AI opponents)" % port)
 	_refresh_lobby()
-	if args.has("autostart") and (args.has("solo") or args.has("bot")):
+	if args.has("autostart") and (args.has("solo") or args.has("bot") or args.has("ai")):
 		_start_game()
 
 func _join() -> void:
@@ -216,28 +266,93 @@ func _show_lobby(is_host: bool) -> void:
 	menu_box.visible = false
 	lobby_box.visible = true
 	start_btn.visible = is_host
-	bot_check.visible = is_host
+	for c in [opt_map, opt_ai, opt_ai_level, opt_cash, opt_sw]:
+		(c as Control).mouse_filter = Control.MOUSE_FILTER_STOP if is_host else Control.MOUSE_FILTER_IGNORE
+		(c as Control).modulate = Color.WHITE if is_host else Color(0.7, 0.7, 0.7)
 	start_btn.text = "Start game"
 
+func _opts_changed() -> void:
+	lobby_opts = {
+		"ai": opt_ai.selected, "ai_level": opt_ai_level.get_item_metadata(opt_ai_level.selected),
+		"map": opt_map.get_item_metadata(opt_map.selected), "cash": opt_cash.get_item_metadata(opt_cash.selected),
+		"superweapons": opt_sw.button_pressed,
+	}
+	_refresh_lobby()
+
+func _apply_opts_ui() -> void:
+	for i in range(opt_map.item_count):
+		if opt_map.get_item_metadata(i) == lobby_opts["map"]:
+			opt_map.select(i)
+	opt_ai.select(clampi(int(lobby_opts["ai"]), 0, 3))
+	for i in range(opt_ai_level.item_count):
+		if opt_ai_level.get_item_metadata(i) == lobby_opts["ai_level"]:
+			opt_ai_level.select(i)
+	for i in range(opt_cash.item_count):
+		if int(opt_cash.get_item_metadata(i)) == int(lobby_opts["cash"]):
+			opt_cash.select(i)
+	opt_sw.button_pressed = bool(lobby_opts["superweapons"])
+
 func _refresh_lobby() -> void:
-	var text := "Players:\n"
-	for p in lobby_players:
-		text += "  · %s%s\n" % [p["name"], " (host)" if p["peer"] == 1 else ""]
-	if lobby_players.size() < 2:
-		text += "  · (waiting for opponent)\n"
-	lobby_list.text = text
-	if multiplayer.is_server():
-		start_btn.text = "Start game" if lobby_players.size() >= 2 else ("Start vs AI" if bot_check.button_pressed else "Start solo (sandbox)")
-		bot_check.visible = lobby_players.size() < 2
+	for c in lobby_rows.get_children():
+		c.queue_free()
+	var is_host := multiplayer.is_server()
+	var ai_n := clampi(int(lobby_opts["ai"]), 0, MAX_PLAYERS - lobby_players.size())
+	for i in range(lobby_players.size()):
+		var p: Dictionary = lobby_players[i]
+		var h := HBoxContainer.new()
+		var sw := ColorRect.new()
+		sw.custom_minimum_size = Vector2(14, 14)
+		sw.color = Data.TEAM_COLORS[i % Data.TEAM_COLORS.size()]
+		h.add_child(sw)
+		var l := Label.new()
+		l.text = "  %s%s" % [p["name"], "  (host)" if p["peer"] == 1 else ""]
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(l)
+		if is_host and p["peer"] != 1:
+			var kick := Button.new()
+			kick.text = "Kick"
+			kick.pressed.connect(func() -> void: _kick(p["peer"]))
+			h.add_child(kick)
+		lobby_rows.add_child(h)
+	for i in range(ai_n):
+		var h := HBoxContainer.new()
+		var sw := ColorRect.new()
+		sw.custom_minimum_size = Vector2(14, 14)
+		sw.color = Data.TEAM_COLORS[(lobby_players.size() + i) % Data.TEAM_COLORS.size()]
+		h.add_child(sw)
+		var l := Label.new()
+		l.text = "  AI General (%s)" % str(lobby_opts["ai_level"]).capitalize()
+		h.add_child(l)
+		lobby_rows.add_child(h)
+	if lobby_players.size() + ai_n < 2:
+		var l := Label.new()
+		l.text = "  (waiting for an opponent - or start solo to practice)"
+		l.modulate = Color(0.6, 0.6, 0.6)
+		lobby_rows.add_child(l)
+	if is_host:
+		start_btn.text = "Start game" if lobby_players.size() + ai_n >= 2 else "Start solo (sandbox)"
 		for p in lobby_players:
 			if p["peer"] != 1:
-				session.rpc_id(p["peer"], "cl_lobby", lobby_players, text)
+				session.rpc_id(p["peer"], "cl_lobby", lobby_players, lobby_opts)
 		if args.has("autostart") and lobby_players.size() >= 2 and not game_started:
 			_start_game()
 
-func on_lobby(players: Array, text: String) -> void:
+func _kick(peer: int) -> void:
+	session.rpc_id(peer, "cl_kick", "You were removed from the lobby by the host")
+	for i in range(lobby_players.size()):
+		if lobby_players[i]["peer"] == peer:
+			lobby_players.remove_at(i)
+			break
+	_refresh_lobby()
+	var mp := multiplayer.multiplayer_peer
+	if mp is ENetMultiplayerPeer:
+		get_tree().create_timer(0.5).timeout.connect(func() -> void: (mp as ENetMultiplayerPeer).disconnect_peer(peer))
+
+func on_lobby(players: Array, opts: Dictionary) -> void:
 	lobby_players = players
-	lobby_list.text = text
+	lobby_opts = opts
+	_apply_opts_ui()
+	_refresh_lobby()
 
 func on_kick(reason: String) -> void:
 	_set_status(reason)
@@ -258,6 +373,9 @@ func on_client_hello(peer: int, pname: String, version: String) -> void:
 	if game_started or lobby_players.size() >= MAX_PLAYERS:
 		session.rpc_id(peer, "cl_kick", "Game is full or already started")
 		return
+	if lobby_players.size() + int(lobby_opts["ai"]) >= MAX_PLAYERS:
+		lobby_opts["ai"] = MAX_PLAYERS - lobby_players.size() - 1
+		_apply_opts_ui()
 	lobby_players.append({"peer": peer, "name": pname})
 	_set_status("%s joined." % pname)
 	_refresh_lobby()
@@ -309,13 +427,28 @@ func _start_game() -> void:
 	for p in lobby_players:
 		peers.append(p["peer"])
 		names.append(p["name"])
-	if peers.size() == 1 and (bot_check.button_pressed or args.has("bot")) and not args.has("solo"):
+	var ai_n := clampi(int(lobby_opts["ai"]), 0, MAX_PLAYERS - peers.size())
+	if args.has("solo"):
+		ai_n = 0
+	elif args.has("bot"):
+		ai_n = maxi(ai_n, 1)
+	if args.has("ai"):
+		ai_n = clampi(int(args["ai"]), 0, MAX_PLAYERS - peers.size())
+	for i in range(ai_n):
 		peers.append(-1)
-		names.append("AI General")
+		names.append("AI General %d" % (i + 1) if ai_n > 1 else "AI General")
+	var opts := lobby_opts.duplicate()
+	if args.has("map"):
+		opts["map"] = args["map"]
+	if args.has("ai_level"):
+		opts["ai_level"] = args["ai_level"]
 	var w := World.new()
 	w.debug = args.has("debug")
 	session.world = w
-	w.start(session, peers, names)   # sends cl_map to everyone, including the host locally
+	w.start(session, peers, names, {"map": opts["map"], "cash": opts["cash"], "superweapons": opts["superweapons"], "ai": opts["ai_level"]})
+	if args.has("simtest"):
+		w.probe_ridge()
+		get_tree().quit()
 
 ## Called (via Session.cl_map) on every peer once the server has built the map.
 func begin_game(map: Dictionary, player_index: int) -> void:

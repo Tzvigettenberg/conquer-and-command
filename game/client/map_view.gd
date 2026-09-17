@@ -7,20 +7,21 @@ shader_type spatial;
 uniform float map_size = 400.0;
 uniform sampler2D noise_tex : filter_linear, repeat_enable;
 uniform sampler2D road_tex : filter_linear;
+uniform vec3 col_a = vec3(0.42, 0.36, 0.25);
+uniform vec3 col_b = vec3(0.30, 0.25, 0.17);
+uniform vec3 col_c = vec3(0.36, 0.36, 0.24);
+uniform vec3 road_col = vec3(0.30, 0.26, 0.20);
 void fragment() {
 	vec2 wp = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xz;
 	vec2 uv = wp / map_size;
 	float n1 = texture(noise_tex, wp * 0.004).r;
 	float n2 = texture(noise_tex, wp * 0.05).r;
 	float n3 = texture(noise_tex, wp * 0.25).r;
-	vec3 sand = vec3(0.52, 0.45, 0.31);
-	vec3 dark = vec3(0.38, 0.32, 0.22);
-	vec3 dry = vec3(0.46, 0.45, 0.31);
-	vec3 col = mix(sand, dark, smoothstep(0.35, 0.7, n1));
-	col = mix(col, dry, smoothstep(0.55, 0.9, n2) * 0.25);
-	col *= 0.88 + 0.2 * n3;
+	vec3 col = mix(col_a, col_b, smoothstep(0.35, 0.7, n1));
+	col = mix(col, col_c, smoothstep(0.55, 0.9, n2) * 0.3);
+	col *= 0.85 + 0.25 * n3;
 	float road = texture(road_tex, uv).r;
-	col = mix(col, vec3(0.42, 0.36, 0.28), road * 0.85);
+	col = mix(col, road_col, road * 0.85);
 	ALBEDO = col;
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.05;
@@ -74,23 +75,26 @@ func _build_lighting() -> void:
 	var e := Environment.new()
 	var sky := Sky.new()
 	var mat := ProceduralSkyMaterial.new()
-	mat.sky_top_color = Color(0.35, 0.55, 0.85)
-	mat.sky_horizon_color = Color(0.8, 0.8, 0.75)
-	mat.ground_bottom_color = Color(0.5, 0.45, 0.35)
-	mat.ground_horizon_color = Color(0.75, 0.7, 0.6)
+	mat.sky_top_color = Color(0.3, 0.5, 0.8)
+	mat.sky_horizon_color = Color(0.7, 0.72, 0.7)
+	mat.ground_bottom_color = Color(0.3, 0.27, 0.22)
+	mat.ground_horizon_color = Color(0.5, 0.47, 0.42)
+	if map.get("theme", "desert") == "snow":
+		mat.sky_top_color = Color(0.45, 0.55, 0.7)
+		mat.sky_horizon_color = Color(0.8, 0.82, 0.85)
 	sky.sky_material = mat
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_energy = 0.35
+	e.ambient_light_energy = 0.3
 	e.tonemap_mode = Environment.TONE_MAPPER_ACES
-	e.tonemap_exposure = 0.85
+	e.tonemap_exposure = 0.8
 	e.ssao_enabled = false
 	env.environment = e
 	add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, 35, 0)
-	sun.light_energy = 0.85
+	sun.light_energy = 0.95
 	sun.light_color = Color(1.0, 0.96, 0.88)
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
@@ -124,6 +128,18 @@ func _build_terrain() -> void:
 	mat.shader = sh
 	mat.set_shader_parameter("map_size", size)
 	mat.set_shader_parameter("noise_tex", _noise_texture())
+	var theme: String = map.get("theme", "desert")
+	match theme:
+		"snow":
+			mat.set_shader_parameter("col_a", Vector3(0.78, 0.80, 0.84))
+			mat.set_shader_parameter("col_b", Vector3(0.55, 0.60, 0.68))
+			mat.set_shader_parameter("col_c", Vector3(0.70, 0.72, 0.70))
+			mat.set_shader_parameter("road_col", Vector3(0.40, 0.38, 0.36))
+		"grass":
+			mat.set_shader_parameter("col_a", Vector3(0.30, 0.42, 0.18))
+			mat.set_shader_parameter("col_b", Vector3(0.20, 0.30, 0.13))
+			mat.set_shader_parameter("col_c", Vector3(0.40, 0.40, 0.20))
+			mat.set_shader_parameter("road_col", Vector3(0.36, 0.30, 0.22))
 	# roads texture
 	road_img = Image.create(256, 256, false, Image.FORMAT_R8)
 	road_img.fill(Color.BLACK)

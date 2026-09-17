@@ -23,20 +23,47 @@ var difficulty := 1.0     # income / aggression multiplier
 
 const BUILD_ORDER := ["power_plant", "barracks", "supply_center", "war_factory", "power_plant", "patriot", "supply_center", "war_factory", "airfield", "power_plant", "strategy_center", "patriot", "patriot", "firebase", "power_plant", "supply_drop_zone", "particle_cannon", "power_plant"]
 
-func setup(_w: World, _p: int) -> void:
+var level := "medium"
+var powers_after := 240.0
+var bonus_t := 0.0
+var unit_cap := 40
+
+func setup(_w: World, _p: int, _level := "medium") -> void:
 	w = _w
 	p = _p
+	level = _level
 	rng.seed = 100 + p
-	wave_t = 150.0
+	match level:
+		"easy":
+			wave_t = 300.0
+			wave_size = 8
+			powers_after = 480.0
+			unit_cap = 18
+		"hard":
+			wave_t = 120.0
+			wave_size = 6
+			powers_after = 150.0
+			unit_cap = 60
+		_:
+			wave_t = 180.0
+			wave_size = 6
+			powers_after = 240.0
+			unit_cap = 40
 
 func think(dt: float) -> void:
 	t += dt
 	think_t -= dt
 	if think_t > 0.0:
 		return
-	think_t = 1.0
+	think_t = 1.0 if level != "easy" else 2.0
 	if w.players[p]["defeated"]:
 		return
+	if level == "hard":
+		# hard AI gets a supply subsidy, Generals "Hard" style
+		bonus_t += think_t
+		if bonus_t >= 10.0:
+			bonus_t = 0.0
+			w.players[p]["cash"] += 150.0
 	if w.debug and int(t) % 10 == 0:
 		var counts := {}
 		for e: Ent in w.ents.values():
@@ -89,7 +116,20 @@ func _scan_enemy() -> void:
 		if e.alive and e.owner >= 0 and e.owner != p and e.is_building and v.visible(e.pos):
 			known_enemy = e.pos
 	if known_enemy.x < 0 and t > 30.0:
-		known_enemy = w.map["starts"][1 - p] if w.players.size() > 1 else Vector2(200, 200)
+		known_enemy = _nearest_enemy_start()
+
+func _nearest_enemy_start() -> Vector2:
+	var base := _base_pos()
+	var best := Vector2(200, 200)
+	var bd := 1e18
+	for i in range(w.players.size()):
+		if i == p or w.players[i]["defeated"]:
+			continue
+		var s: Vector2 = w.map["starts"][i]
+		if s.distance_squared_to(base) < bd:
+			bd = s.distance_squared_to(base)
+			best = s
+	return best
 
 # ---------------------------------------------------------------------------
 func _economy() -> void:
@@ -213,14 +253,14 @@ func _production() -> void:
 	var army := _own_units().size()
 	var reserve := 600.0 if _count_built("war_factory") > 0 else 0.0
 	for b: Ent in _own("barracks"):
-		if b.prod.size() < 2 and cash > reserve + 300 and army < 40:
+		if b.prod.size() < 2 and cash > reserve + 300 and army < unit_cap:
 			var pick := "ranger" if rng.randf() < 0.55 else "missile_defender"
 			if _count_built("strategy_center") > 0 and rng.randf() < 0.15:
 				pick = "pathfinder" if w.players[p]["powers"].has("pathfinder") else pick
 			w.cmd(p, {"t": "produce", "id": b.id, "type": pick})
 			cash -= float(Data.UNITS[pick]["cost"])
 	for b: Ent in _own("war_factory"):
-		if b.prod.size() < 2 and cash > 900 and army < 40:
+		if b.prod.size() < 2 and cash > 900 and army < unit_cap:
 			var roll := rng.randf()
 			var pick := "crusader"
 			if w.players[p]["powers"].has("paladin") and roll < 0.35:
@@ -272,6 +312,8 @@ func _research() -> void:
 
 func _powers() -> void:
 	var pl: Dictionary = w.players[p]
+	if t < powers_after:
+		return
 	if int(pl["points"]) > 0:
 		for pid in ["a10", "paladin", "spy_satellite", "emergency_repair", "paradrop", "pathfinder", "stealth_fighter"]:
 			var pd: Dictionary = Data.POWERS[pid]
@@ -400,7 +442,7 @@ func _army() -> void:
 						known_enemy = e.pos
 						break
 				if known_enemy.x < 0:
-					known_enemy = w.map["starts"][1 - p]
+					known_enemy = _nearest_enemy_start()
 		else:
 			# keep re-issuing attack-move so units that finished fighting push on
 			var ids := []

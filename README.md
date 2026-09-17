@@ -25,7 +25,7 @@ Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0
 | Right-click | move / attack / repair (dozer) / gather (Chinook) / capture derrick (Ranger + upgrade) — Shift queues |
 | Ctrl+right-click or X | force attack: fire at a spot, a neutral structure or one of your own |
 | A + click | attack-move |
-| G + click | guard an area (ring shown while placing; G twice = guard here). Aircraft loiter over it and fly home to rearm, then come back. |
+| G | guard here: hold, engage anything that comes near, return afterwards (aircraft loiter overhead, rearm and come back) |
 | S | stop |
 | Placing a building | click to place; hold the left button and drag to rotate it freely before releasing (like Generals) |
 | N | select the next Dozer · B / F / I / C / Y: Barracks / War Factory / Airfield / Command Center / Supply Center |
@@ -36,15 +36,28 @@ Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0
 | Right-click with a factory selected | set its rally point |
 | F1 | +$10,000 (solo / debug only) |
 
-## Menu
-Host → "Start vs AI" fights the built-in AI general (build order, waves, defence, powers, superweapon).
-Untick "Add AI opponent" for an empty sandbox. A second player joining replaces the AI.
+## Lobby
+Host a game and set it up before starting: **map** (Desert Divide / Frozen Front / Green Valley),
+**AI opponents** (0-3) and **difficulty** (Easy: slow, small waves, no powers for 8 min · Medium ·
+Hard: bigger waves, earlier powers, +$150 every 10 s), **starting cash**, **superweapons** on/off,
+**kick** buttons next to joined players. Up to 4 players + AI; players start in the four corners.
+Everyone starts at rank 1 with one promotion point (as in Generals) — that's how an AI can have an
+A-10 strike early; on Easy/Medium it now waits several minutes before using any power.
 
 ## Audio
 `audio/sfx` — 50 CC0 / CC-BY effects from Freesound (`audio/sfx/CREDITS.md`, re-fetch with `tools/fetch_sfx.py`).
 `audio/voice` — 234 lines: 15 unit voices + EVA, generated with ElevenLabs (`tools/gen_voices.py`, radio filter via ffmpeg).
 `audio/music` — 12 Kevin MacLeod tracks, CC BY 4.0 (`audio/music/CREDITS.md`; attribution required if you ship).
 Mixer buses: Master / SFX / Voice / Music (see `Audio.set_volumes`).
+
+## What's in (M3)
+- All structures are new procedural low-poly models sized to their footprints and painted with the owner's colour: Command Center (radar dish), Reactor (dome + steaming stacks), Barracks, Supply Center (H pad + crane), War Factory (hangar door, roof fan), Airfield (real runway with lights, tower, four pads), Strategy Center (dish + antenna farm), Drop Zone (beacon), Patriot (rotating 4-tube launcher), Firebase (sandbag ring + traversing howitzer), Particle Cannon (spinning focus rings), Oil Derrick (nodding pump-jack), Supply Dock (crate stacks). Every model has an idle animation. Dozers got a blade.
+- Units carry a team-colour tint; tank turrets traverse at a realistic rate and settle back forward; units shot from beyond their reach go and find the shooter.
+- Missiles leave smoke trails, jets leave contrails, machine-gun and sniper fire shows tracers; jets nose-dive and helicopters spin in when killed, then explode on the ground.
+- A-10 strike is a gun run followed by missiles, with tracers from the jets.
+- Ammo pips over aircraft and Comanches; unit-lost EVA calls; capture flashes the capturing player's colour with a beeping loop.
+- Tech-tree style promotion screen (icons, unlocked / available / locked, closes on click-away); build buttons print the missing requirement in red; an invalid spot no longer closes placement; ghost buildings are readable.
+- Three map themes, 4-player corner layouts, lobby options, AI difficulty.
 
 ## What's in (M2)
 - Aircraft: jets taxi and take off along the runway, fly with a turn radius, make attack passes, loiter in circles when guarding or homeless, land on their pad to rearm. Sell or lose the Airfield and they look for another one, else circle and slowly break up.

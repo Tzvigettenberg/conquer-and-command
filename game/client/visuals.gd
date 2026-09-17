@@ -88,13 +88,17 @@ static func strip_physics(root: Node) -> void:
 			n.set_physics_process(false)
 
 ## Build the visual for a sim entity type. Returns a Node3D whose origin is the
+## Build the visual for a sim entity type. Returns a Node3D whose origin is the
 ## entity's ground position, facing +Z.
 static func make_model(type: String, owner: int) -> Node3D:
 	var def := Data.def(type)
+	var is_bld := Data.is_building(type)
+	if is_bld:
+		# structures are procedural (sized to the footprint, painted with team colour)
+		return Buildings.make(type, owner)
 	var root := Node3D.new()
 	root.name = "Model"
 	var ps := prefab(def.get("model", ""))
-	var is_bld := Data.is_building(type)
 	if ps != null:
 		var inst := ps.instantiate()
 		strip_physics(inst)
@@ -105,13 +109,7 @@ static func make_model(type: String, owner: int) -> Node3D:
 		var aabb := local_aabb(inst)
 		var size := aabb.size
 		var s := 1.0
-		if is_bld:
-			var fp: Vector2 = Data.footprint_size(type)
-			var sx := (fp.x * 0.92) / maxf(size.x, 0.01)
-			var sz := (fp.y * 0.92) / maxf(size.z, 0.01)
-			var sy := float(def.get("height", 8.0)) / maxf(size.y, 0.01)
-			s = minf(minf(sx, sz), sy * 1.4)
-		elif def.get("cat", "") == "inf":
+		if def.get("cat", "") == "inf":
 			s = float(def.get("length", 1.8)) / maxf(size.y, 0.01)   # infantry: fit by height
 		else:
 			var l := float(def.get("length", 4.0))
@@ -122,7 +120,23 @@ static func make_model(type: String, owner: int) -> Node3D:
 		_setup_turret(root, inst)
 	else:
 		root.add_child(_fallback(type, owner))
+	if def.get("builder", false):
+		Buildings.dozer_kit(root, owner, float(def.get("length", 4.4)))
 	return root
+
+## Subtle team tint over every mesh of a unit so ownership reads at a glance.
+static func tint_unit(model: Node3D, owner: int) -> void:
+	if owner < 0:
+		return
+	var c: Color = Data.TEAM_COLORS[owner]
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(c.r, c.g, c.b, 0.22)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.cull_mode = BaseMaterial3D.CULL_BACK
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		if (mi as MeshInstance3D).material_overlay == null:
+			(mi as MeshInstance3D).material_overlay = m
 
 static func _fallback(type: String, owner: int) -> Node3D:
 	var def := Data.def(type)
@@ -233,13 +247,13 @@ static func make_prop(rel: String, fp: Vector2i, yaw: float, kind: String) -> No
 			if kind == "tree":
 				s = clampf(s * 1.6, 0.6, 2.5)
 			elif kind == "rock":
-				s = s * 1.1
+				s = s * 1.0
 			elif kind == "mountain":
-				s = s * 1.2
+				s = s * 1.0
 		var holder := Node3D.new()
-		holder.scale = Vector3.ONE * s
+		holder.scale = Vector3(s, s * (0.65 if kind == "mountain" else 1.0), s)
 		var c := aabb.get_center()
-		holder.position = Vector3(-c.x * s, -aabb.position.y * s, -c.z * s)
+		holder.position = Vector3(-c.x * s, -aabb.position.y * s * (0.65 if kind == "mountain" else 1.0), -c.z * s)
 		holder.add_child(pivot)
 		root.add_child(holder)
 	elif fp != Vector2i.ZERO:
