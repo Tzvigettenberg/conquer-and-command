@@ -108,7 +108,7 @@ static func _dozer(root: Node3D, tc: Color, l: float) -> void:
 	for sx in [-1.0, 1.0]:
 		box(root, Vector3(0.14, 0.14, l * 0.45), Vector3(sx * w * 0.42, 0.9, l * 0.3), METAL)
 	var blade := box(root, Vector3(w * 1.15, 0.9, 0.18), Vector3(0, 0.6, l * 0.52), Color(0.85, 0.7, 0.2))
-	blade.name = "Blade"
+	blade.name = "DozerShovel"
 	box(root, Vector3(w * 1.15, 0.12, 0.2), Vector3(0, 1.1, l * 0.5), METAL)
 
 static func _humvee(root: Node3D, tc: Color, l: float) -> void:
@@ -206,7 +206,7 @@ static func _avenger(root: Node3D, tc: Color, l: float) -> void:
 	box(turret, Vector3(0.9, 0.5, 0.9), Vector3(0, 0.25, 0), METAL)
 	for sx in [-1.0, 1.0]:
 		var d := cyl(turret, 0.45, 0.15, 0.3, Vector3(sx * 0.55, 0.55, 0.2), Color(0.8, 0.85, 0.9), Vector3(-PI * 0.35, 0, 0), 12)
-		d.name = "Dish%d" % int(sx + 1)
+		d.name = "Emitter%d" % int(sx + 1)
 		var em := Buildings.sphere(turret, 0.12, Vector3(sx * 0.55, 0.6, 0.35), Color(0.4, 0.8, 1.0))
 		em.name = "Laser%d" % int(sx + 1)
 	root.set_meta("turret", turret)

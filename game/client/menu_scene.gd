@@ -26,14 +26,17 @@ func _ready() -> void:
 		b.rotation.y = it[2]
 		add_child(b)
 		_animate_building(b)
-	# tank column on the road toward the middle
-	var road_a := Vector3(base.x + 10, 0, base.y + 12)
-	var road_b := Vector3(base.x + 120, 0, base.y + 120)
-	for i in range(5):
+	# tank column: along the lane between the barracks / war factory and the airfield,
+	# then out toward the middle of the map (keeps clear of every structure above)
+	var path: Array = [Vector3(base.x - 46, 0, base.y + 33), Vector3(base.x + 48, 0, base.y + 33), Vector3(base.x + 70, 0, base.y + 60), Vector3(base.x + 140, 0, base.y + 125)]
+	var total := 0.0
+	for i in range(path.size() - 1):
+		total += path[i].distance_to(path[i + 1])
+	for i in range(6):
 		var typ := "crusader" if i % 3 != 2 else "humvee"
 		var u := Visuals.make_model(typ, 0)
 		add_child(u)
-		movers.append({"node": u, "kind": "road", "a": road_a, "b": road_b, "off": i * 0.09, "side": (i % 2) * 3.0 - 1.5, "wheels": u.find_children("Wheel*", "Node3D", true, false)})
+		movers.append({"node": u, "kind": "road", "path": path, "total": total, "off": i * 9.0, "side": (i % 2) * 3.4 - 1.7, "wheels": u.find_children("Wheel*", "Node3D", true, false)})
 	# helicopter on patrol
 	var heli := Visuals.make_model("comanche", 0)
 	add_child(heli)
@@ -45,7 +48,7 @@ func _ready() -> void:
 	# infantry squad idling by the barracks
 	for i in range(4):
 		var s := Visuals.make_model("ranger" if i < 3 else "missile_defender", 0)
-		s.position = Vector3(base.x - 2 + i * 1.6, 0, base.y + 34)
+		s.position = Vector3(base.x - 16 + i * 1.6, 0, base.y + 26)
 		s.rotation.y = randf_range(-0.4, 0.4)
 		add_child(s)
 	cam = Camera3D.new()
@@ -75,14 +78,21 @@ func _process(dt: float) -> void:
 		var n: Node3D = mv["node"]
 		match mv["kind"]:
 			"road":
-				var k := fmod(t * 0.02 + float(mv["off"]), 1.0)
-				var a: Vector3 = mv["a"]
-				var b: Vector3 = mv["b"]
+				var path: Array = mv["path"]
+				var dist := fmod(t * 4.5 + float(mv["off"]), float(mv["total"]))
+				var a: Vector3 = path[0]
+				var b: Vector3 = path[1]
+				for i in range(path.size() - 1):
+					var seg: float = path[i].distance_to(path[i + 1])
+					if dist <= seg:
+						a = path[i]
+						b = path[i + 1]
+						break
+					dist -= seg
 				var dir := (b - a).normalized()
 				var side := Vector3(-dir.z, 0, dir.x) * float(mv["side"])
-				var p := a.lerp(b, k) + side
-				n.position = p
-				n.rotation.y = atan2(dir.x, dir.z)
+				n.position = a + dir * dist + side
+				n.rotation.y = lerp_angle(n.rotation.y, atan2(dir.x, dir.z), 0.1)
 				for w in mv["wheels"]:
 					(w as Node3D).rotate_x(dt * 6.0)
 			"orbit":
@@ -92,8 +102,9 @@ func _process(dt: float) -> void:
 				var p := cc + Vector3(cos(t * sp) * r, sin(t * 0.7) * 2.0, sin(t * sp) * r)
 				var nxt := cc + Vector3(cos(t * sp + 0.05) * r, 0, sin(t * sp + 0.05) * r)
 				n.position = p
-				n.look_at(Vector3(nxt.x, p.y, nxt.z), Vector3.UP)
-				n.rotation.z = -0.35 if r > 50.0 else -0.12
+				var d := Vector3(nxt.x, p.y, nxt.z) - p
+				n.rotation = Vector3(0, atan2(d.x, d.z), 0)   # models face +Z
+				n.rotate_object_local(Vector3(0, 0, 1), 0.35 if r > 50.0 else 0.12)   # bank into the turn
 				for ro in mv["rotors"]:
 					var rn: Node3D = ro
 					if "Tail" in rn.name:
