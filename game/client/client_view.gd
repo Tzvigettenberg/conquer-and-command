@@ -68,10 +68,7 @@ func setup(m: Dictionary, index: int, lobby: Array, _args: Dictionary) -> void:
 	add_child(hud)
 	hud.setup(self, ctl)
 	icons.ready_changed.connect(func() -> void: hud.refresh_selection())
-	_warm_animations()
 	Audio.I.eva("welcome", 0.0)
-	if Visuals.missing_assets:
-		on_msg("Synty assets not found - using placeholder shapes")
 	if observer:
 		map_view.reveal_all()
 		map_view.disable_fog()
@@ -131,20 +128,6 @@ func _screenshots(dir: String) -> void:
 		img.save_png(path)
 		print("[Shot] saved ", path)
 		n += 1
-
-func _warm_animations() -> void:
-	# Build the retargeted animation library once up front so the first infantry
-	# spawn doesn't hitch.
-	var ps := Visuals.prefab(Data.UNITS["ranger"]["model"])
-	if ps == null:
-		return
-	var inst := ps.instantiate()
-	Visuals.strip_physics(inst)
-	add_child(inst)
-	var skels := inst.find_children("*", "Skeleton3D", true, false)
-	if not skels.is_empty():
-		AnimRetarget.build_libraries(skels[0])
-	inst.queue_free()
 
 func send(c: Dictionary) -> void:
 	if observer:
