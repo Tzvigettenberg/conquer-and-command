@@ -118,6 +118,17 @@ friend ──list────► games list        ──connect─► the same 
 * `tools/server/setup_vps.sh` installs Godot and a systemd unit per port; `tools/server/deploy.sh`
   rsyncs the project (with its import cache, so the server runs exactly what was tested) and
   restarts them. About 200 MB of RAM per match server.
+
+**The live servers**: two of them, on a $6/month DigitalOcean droplet in Frankfurt
+(`209.38.220.107`, UDP 7801-7802), separate from the Incremental PvE box. They come back on reboot,
+restart if they crash, and recycle nightly at 05:30. The deploy key, the DigitalOcean token and the
+server address are in `~/.frontline/keys.env` on Tzvi's PC, never in this repo.
+
+```
+bash tools/server/deploy.sh root@209.38.220.107     # push a new build and restart
+ssh -i ~/.frontline/id_cc root@209.38.220.107 "tail -f /var/log/cc-match-7801.log"
+curl https://cc-rooms.zerobudget.workers.dev/health  # {servers, free, rooms}
+```
 * **Skirmish vs AI** still runs entirely in the player's own process, and the menu's "same network"
   box still does a direct connection for two PCs in one house with no internet.
 
