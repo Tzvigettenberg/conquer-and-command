@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Conquer & Command: Zero Budget - a free Command & Conquer Generals: Zero Hour-style RTS for Windows. USA, China and the GLA, skirmish and multiplayer.">
+<meta name="theme-color" content="#0b0d10">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Conquer & Command: Zero Budget">
+<meta property="og:description" content="Conquer & Command: Zero Budget - a free Command & Conquer Generals: Zero Hour-style RTS for Windows. USA, China and the GLA, skirmish and multiplayer.">
+<meta property="og:url" content="https://tzvigettenberg.github.io/conquer-and-command/">
+<meta property="og:image" content="https://tzvigettenberg.github.io/conquer-and-command/img/poster.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%8E%96</text></svg>">
+<style>
+  :root { color-scheme: dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>Conquer & Command: Zero Budget</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #0b0d10;
+    --panel: #14181d;
+    --panel-2: #1b2026;
+    --edge: #3a3123;
+    --brass: #b8913f;
+    --brass-dim: #6e5a2f;
+    --amber: #ffc759;
+    --text: #e6e2d6;
+    --dim: #9a978c;
+    --usa: #4aa3ff;
+    --china: #ff5a4a;
+    --gla: #d9c34a;
+    --gutter: clamp(16px, 4vw, 40px);
+    color-scheme: dark;
+  }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: "Barlow", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+  h2 {
+    font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: clamp(28px, 4vw, 40px);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  h3 {
+    font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+  p { margin: 0; }
+  a { color: var(--amber); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+
+  /* ---------- hero ---------- */
+  .hero {
+    position: relative;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    isolation: isolate;
+    padding: 90px var(--gutter) 100px;
+    box-sizing: border-box;
+  }
+  /* the home page is the hero and nothing else - one screen, no scrolling */
+  body[data-page="home"] .hero { min-height: 100vh; min-height: 100svh; }
+  body[data-page="home"] footer { display: none; }
+  .hero video, .hero .poster {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; z-index: -2;
+    filter: saturate(0.85) brightness(0.8);
+  }
+  .hero .poster { display: none; }
+  @media (max-width: 760px) {
+    .hero video { display: none; }
+    .hero .poster { display: block; }
+  }
+  .hero .shade {
+    position: absolute; inset: 0; z-index: -1;
+    background:
+      radial-gradient(ellipse at 50% 55%, rgba(5, 7, 10, 0.15) 0%, rgba(5, 7, 10, 0.72) 70%),
+      linear-gradient(to bottom, rgba(5, 7, 10, 0.55), rgba(5, 7, 10, 0.1) 30%, rgba(5, 7, 10, 0.2) 70%, var(--ground));
+  }
+  .bar {
+    position: absolute; left: 0; right: 0; min-height: 46px;
+    background: rgba(6, 6, 8, 0.88); z-index: 1;
+  }
+  .bar.top { top: 0; border-bottom: 2px solid var(--brass-dim); }
+  .bar.bottom { bottom: 0; border-top: 2px solid var(--brass-dim); }
+  .bar .inner {
+    max-width: 1100px; margin: 0 auto; min-height: 46px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 4px var(--gutter);
+    box-sizing: border-box;
+    font-family: "Barlow Condensed", sans-serif; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--dim);
+  }
+  .bar .inner nav { display: flex; gap: 22px; }
+  .bar .inner a { color: var(--dim); text-decoration: none; }
+  .bar .inner a:hover { color: var(--amber); }
+  .bar .inner nav a.on { color: var(--amber); border-bottom: 2px solid var(--brass); }
+  .narrow { display: none; }
+  /* on a phone the nav has the bar to itself - it is the only way around the site */
+  @media (max-width: 780px) {
+    .bar.top .inner > span { display: none; }
+    .bar.top .inner { justify-content: center; }
+    .bar.bottom .inner { justify-content: center; font-size: 12px; }
+    .wide { display: none; }
+    .narrow { display: inline; }
+  }
+  /* one page at a time: the hero is the home page, how to play is its own page */
+  main > section { display: none; }
+  main > section.on { display: block; }
+  body:not([data-page="home"]) .hero { padding: 70px var(--gutter) 40px; }
+  body:not([data-page="home"]) .hero .tagline,
+  body:not([data-page="home"]) .hero .cta,
+  body:not([data-page="home"]) .hero .eyebrow { display: none; }
+  body:not([data-page="home"]) h1.title { font-size: clamp(28px, 5vw, 48px); }
+  body:not([data-page="home"]) .subtitle { font-size: 16px; margin-top: 8px; }
+  /* a short window (a laptop, a phone on its side) still gets the whole home page in one screen */
+  @media (min-width: 781px) and (max-height: 820px) {
+    body[data-page="home"] .hero { padding: 64px var(--gutter) 70px; }
+    body[data-page="home"] h1.title { font-size: clamp(38px, 6.4vw, 68px); }
+    body[data-page="home"] .subtitle { font-size: clamp(16px, 2.2vw, 23px); margin-top: 12px; letter-spacing: 0.28em; }
+    body[data-page="home"] .tagline { margin-top: 18px; font-size: 17px; }
+    body[data-page="home"] .cta { margin-top: 24px; gap: 11px; }
+    body[data-page="home"] .btn { font-size: 23px; padding: 13px 28px; }
+  }
+  @media (max-width: 760px) {
+    .hero { padding: 62px var(--gutter) 66px; }
+    body:not([data-page="home"]) .hero { padding: 56px var(--gutter) 26px; }
+    .bar, .bar .inner { min-height: 38px; }
+  }
+  .back { margin-top: 30px; }
+  .back a { font-family: "Barlow Condensed", sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); text-decoration: none; }
+  .back a:hover { color: var(--amber); }
+
+  .hero .content { text-align: center; z-index: 1; max-width: 900px; }
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 15px;
+    letter-spacing: 0.28em; text-transform: uppercase; color: var(--brass);
+  }
+  h1.title {
+    font-family: "Black Ops One", "Impact", "Arial Black", sans-serif;
+    font-weight: 400;
+    font-size: clamp(40px, 8.5vw, 92px);
+    line-height: 0.98;
+    letter-spacing: 0.01em;
+    color: var(--amber);
+    text-shadow: 0 3px 0 #3a2a08, 0 8px 28px rgba(0, 0, 0, 0.85);
+    margin-top: 10px;
+  }
+  .subtitle {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 5px 18px;
+    border-top: 2px solid var(--brass); border-bottom: 2px solid var(--brass);
+    font-family: "Barlow Condensed", sans-serif; font-weight: 700;
+    font-size: clamp(20px, 3.2vw, 32px); letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--text);
+  }
+  .tagline { margin-top: 26px; font-size: clamp(16px, 2vw, 20px); color: #d7d3c6; max-width: 640px; margin-inline: auto; text-shadow: 0 1px 8px rgba(0,0,0,0.9); }
+
+  .cta { margin-top: 34px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .btn {
+    position: relative; display: inline-flex; align-items: center; gap: 14px;
+    padding: 16px 34px;
+    background: linear-gradient(to bottom, #f0c15a, #c8942f);
+    color: #1a1204; text-decoration: none;
+    font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 26px; letter-spacing: 0.1em; text-transform: uppercase;
+    border: 1px solid #ffe2a0; border-bottom: 3px solid #6e4e14;
+    transform: skewX(-8deg);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: transform 120ms ease, filter 120ms ease;
+  }
+  .btn > * { transform: skewX(8deg); }
+  .btn:hover { filter: brightness(1.08); transform: skewX(-8deg) translateY(-1px); }
+  .btn:active { transform: skewX(-8deg) translateY(1px); border-bottom-width: 1px; }
+  .btn svg { width: 26px; height: 26px; }
+  .meta {
+    font-family: "Barlow Condensed", sans-serif; font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--dim); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px;
+  }
+  .meta b { color: var(--text); font-weight: 600; }
+  .alt { font-size: 15px; color: var(--dim); }
+  .alt a { color: var(--dim); text-decoration-color: var(--brass-dim); }
+  .alt a:hover { color: var(--amber); }
+  .fine { font-size: 12.5px; color: #76736b; max-width: 56ch; margin-inline: auto; text-shadow: 0 1px 6px rgba(0,0,0,0.9); }
+
+  /* ---------- sections ---------- */
+  .wrap { max-width: 1100px; margin: 0 auto; padding-inline: var(--gutter); }
+  section { padding-block: 64px; }
+  .sec-head { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  .sec-head.later { margin-top: 62px; }
+  .sec-head .rule { flex: 1; height: 1px; background: var(--brass-dim); }
+  .sec-head .num { font-family: "Barlow Condensed", sans-serif; color: var(--brass); letter-spacing: 0.2em; font-size: 14px; }
+  .lede { font-size: 19px; color: #cfcbbf; max-width: 70ch; }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: step; }
+  @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+  .step { background: var(--panel-2); border: 1px solid #262b31; padding: 20px 22px 22px; }
+  .step::before {
+    counter-increment: step; content: "0" counter(step);
+    display: block; font-family: "Black Ops One", "Impact", sans-serif; font-size: 30px; color: var(--brass); line-height: 1; margin-bottom: 10px;
+  }
+  .step h3 { margin-bottom: 8px; color: var(--text); }
+  .step p { font-size: 15.5px; color: #cfcbbf; }
+  code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.9em; background: #0d1014; border: 1px solid #262b31; padding: 1px 6px; color: var(--amber); }
+  .note { margin-top: 20px; font-size: 15px; color: var(--dim); max-width: 78ch; }
+
+  .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 26px; }
+  @media (max-width: 640px) { .gallery { grid-template-columns: 1fr; } }
+  .shot { position: relative; margin: 0; border: 1px solid #262b31; background: #000; aspect-ratio: 16 / 9; max-width: 100%; overflow: hidden; }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .shot figcaption {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 12px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent);
+    font-family: "Barlow Condensed", sans-serif; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text);
+  }
+
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px 26px; }
+  .key { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid #1f2329; font-size: 15px; color: #cfcbbf; }
+  @media (max-width: 480px) { .keys { grid-template-columns: 1fr; } .key { grid-template-columns: 1fr; gap: 4px; } }
+  .key kbd {
+    font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: 0.06em;
+    color: var(--amber); background: #0d1014; border: 1px solid #2f3540; border-bottom-width: 2px; padding: 2px 7px; white-space: nowrap; justify-self: start;
+  }
+
+  footer { border-top: 1px solid #1f2329; padding-block: 34px 60px; font-size: 14px; color: var(--dim); }
+  footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 30px; }
+  footer p { max-width: 62ch; }
+
+  /* ---------- phone ----------
+     last in the file on purpose: these override the rules above, and a media query does not
+     raise specificity, so anything written after them would win instead. */
+  @media (max-width: 760px) {
+    .tagline { margin-top: 20px; }
+    .cta { margin-top: 26px; gap: 12px; }
+    .btn { font-size: 20px; padding: 14px 18px; width: 100%; max-width: 318px; box-sizing: border-box; justify-content: center; gap: 10px; white-space: nowrap; }
+    .btn svg { width: 22px; height: 22px; }
+    .meta { font-size: 14px; }
+    .alt, .fine { font-size: 14px; }
+    .fine { font-size: 12px; }
+    section { padding-block: 40px; }
+    .sec-head { margin-bottom: 20px; }
+    .sec-head.later { margin-top: 44px; }
+    .lede { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <img class="poster" src="img/poster.jpg" alt="" aria-hidden="true">
+  <video autoplay muted loop playsinline preload="metadata" poster="img/poster.jpg" aria-hidden="true">
+    <source src="media/shell.webm" type="video/webm">
+    <source src="media/shell.mp4" type="video/mp4">
+  </video>
+  <div class="shade"></div>
+  <div class="bar top"><div class="inner">
+    <span>Conquer &amp; Command · Zero Budget</span>
+    <nav><a href="#home">Home</a><a href="#play">How to play</a></nav>
+  </div></div>
+
+  <div class="content">
+    <p class="eyebrow">A free Zero Hour-style RTS · Windows</p>
+    <h1 class="title">Conquer &amp; Command</h1>
+    <div class="subtitle">Zero Budget</div>
+    <p class="tagline">USA, China and the GLA. Base building, generals' powers, superweapons and garrisons — built from scratch for LAN and internet games with your friends.</p>
+    <div class="cta">
+      <a class="btn" id="download" href="download/ConquerAndCommand_ZeroBudget_win64.zip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m6 11 6 6 6-6"/><path d="M4 20h16"/></svg>
+        <span>Download for Windows</span>
+      </a>
+      <div class="meta"><span>Version <b id="ver">0.4.0</b></span><span>Updated <b id="date">18 Sep 2026</b></span><span><b>81 MB</b> zip · 64-bit</span></div>
+      <p class="alt">Always the newest build. <a href="https://github.com/Tzvigettenberg/conquer-and-command">Source code and release notes</a></p>
+      <p class="fine">A fan-made, non-commercial project built in Godot. Not affiliated with or endorsed by Electronic Arts.</p>
+    </div>
+  </div>
+
+  <div class="bar bottom"><div class="inner">
+    <span class="wide">Unzip · run ConquerAndCommand.exe · everyone on the same version</span>
+    <span class="narrow">Unzip and run ConquerAndCommand.exe</span>
+    <span>v<span id="ver2">0.4.0</span></span>
+  </div></div>
+</header>
+
+<main>
+  <section id="play">
+    <div class="wrap">
+      <div class="sec-head"><span class="num">HOW TO PLAY</span><span class="rule"></span></div>
+      <div class="steps">
+        <div class="step">
+          <h3>Everyone downloads the same build</h3>
+          <p>Unzip and run <code>ConquerAndCommand.exe</code>. Windows may warn about an unknown publisher the first time — More info → Run anyway. Everyone needs the same version, so grab the newest zip whenever there's an update.</p>
+        </div>
+        <div class="step">
+          <h3>One person creates a game</h3>
+          <p>Type a name for it, add a password if you only want your own crowd in it, and press <strong>Create game</strong>. Matches run on our server, so there is nothing to set up: no port forwarding, no addresses, no router settings. It works the same whether your friend is next door or on the other side of the world.</p>
+        </div>
+        <div class="step">
+          <h3>Friends pick it from the list and go</h3>
+          <p>Your game appears in everyone's <strong>Open games</strong> list — one click and they are in your lobby. You pick the map (2 to 6 spawn slots), factions, teams, starting cash and superweapons, and everyone sees every change as you make it. Fill spare slots with AI generals, or press <strong>Observe</strong> to watch instead of playing. When everyone's in, <strong>Start</strong>.</p>
+        </div>
+      </div>
+      <p class="note">Playing alone? <strong>Skirmish vs AI</strong> runs entirely on your own PC — no connection needed — and you can set every slot to an AI and just watch them fight.</p>
+      <div class="gallery">
+        <figure class="shot"><img src="img/lobby.jpg" alt="The lobby: player slots, AI generals, map preview and game options" loading="lazy"><figcaption>The lobby — slots, factions, teams, maps</figcaption></figure>
+        <figure class="shot"><img src="img/battle.jpg" alt="Observer view of a base with a live scoreboard" loading="lazy"><figcaption>Observer mode — full map, live scoreboard</figcaption></figure>
+      </div>
+
+      <div class="sec-head later"><span class="num">CONTROLS</span><span class="rule"></span></div>
+      <p class="lede" style="margin-bottom:22px">The Generals layout, so your hands already know it.</p>
+      <div class="keys">
+        <div class="key"><kbd>Left-drag</kbd><span>Select — double-click grabs every unit of that type on screen, Shift adds</span></div>
+        <div class="key"><kbd>Right-click</kbd><span>Move, attack, repair, gather, capture, board — Shift queues</span></div>
+        <div class="key"><kbd>A + click</kbd><span>Attack-move — works on the minimap too</span></div>
+        <div class="key"><kbd>Q / W / E</kbd><span>Select all combat units / aircraft / same type on screen (tap twice for the whole map)</span></div>
+        <div class="key"><kbd>G</kbd><span>Guard an area — drag to size the circle</span></div>
+        <div class="key"><kbd>S · X</kbd><span>Stop · scatter (or force-fire with a target)</span></div>
+        <div class="key"><kbd>N · Ctrl+Up</kbd><span>Next Dozer / Worker · next builder</span></div>
+        <div class="key"><kbd>B F I C Y</kbd><span>Jump to Barracks / War Factory / Airfield / Command Center / Supply Center</span></div>
+        <div class="key"><kbd>Ctrl+1…9</kbd><span>Control groups — press twice to jump there</span></div>
+        <div class="key"><kbd>H · Space</kbd><span>Home base · last attack alert</span></div>
+        <div class="key"><kbd>[ ] · wheel</kbd><span>Rotate · zoom (middle-drag tilts, numpad 5 resets)</span></div>
+        <div class="key"><kbd>Enter</kbd><span>Chat with everyone (Backspace: allies only) · Ctrl+B drops a beacon</span></div>
+      </div>
+    </div>
+    <div class="wrap back"><a href="#home">&larr; Back to the download</a></div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>A fan-made, non-commercial project built in Godot. Not affiliated with or endorsed by Electronic Arts; <em>Command &amp; Conquer</em> is a trademark of EA.</p>
+    <p>Windows 10/11, 64-bit. No installer, nothing written outside its own folder. Settings are kept in your AppData folder.</p>
+  </div>
+</footer>
+<script>
+  (function () {
+    var pages = ["home", "play"];
+    var alias = { controls: "play", friends: "play", factions: "play", shots: "home", changes: "home" };
+    function show() {
+      var raw = (location.hash || "#home").slice(1);
+      var id = raw;
+      if (alias[id]) id = alias[id];
+      if (pages.indexOf(id) < 0) id = "home";
+      document.body.setAttribute("data-page", id);
+      pages.forEach(function (p) {
+        var el = document.getElementById(p);
+        if (el) el.classList.toggle("on", p === id);
+      });
+      document.querySelectorAll("nav a").forEach(function (a) {
+        a.classList.toggle("on", a.getAttribute("href") === "#" + id);
+      });
+      var v = document.querySelector(".hero video");
+      if (v) { if (id === "home") { v.play && v.play().catch(function(){}); } else { v.pause && v.pause(); } }
+      if (id !== "home") window.scrollTo(0, 0);
+      // an old #controls link still lands on the controls, now further down the how-to-play page
+      if (raw === "controls") {
+        var k = document.querySelector(".sec-head.later");
+        if (k) k.scrollIntoView({ block: "start" });
+      }
+    }
+    window.addEventListener("hashchange", show);
+    show();
+  })();
+</script>
+</body>
+</html>
