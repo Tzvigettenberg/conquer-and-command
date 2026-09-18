@@ -30,6 +30,12 @@ VERSION=$(grep -oP 'GAME_VERSION\s*:=\s*"\K[^"]+' "$REPO/game/main.gd")
 echo "==> shipping v$VERSION"
 
 # ---- 1. export the Windows build from an imported copy of the project ----
+# a website-only change does not need a new exe, as long as this version was already built
+if [ "$DO_SERVERS" = 0 ] && [ -f "$REPO/build/ConquerAndCommand_ZeroBudget_v${VERSION}_win64.zip" ]; then
+  echo "==> reusing the v$VERSION build"
+  SKIP_BUILD=1
+fi
+if [ "${SKIP_BUILD:-0}" = 0 ]; then
 echo "==> building"
 mkdir -p "$PROJ" "$HOME/gd/build"
 rsync -a --delete --exclude .git --exclude build --exclude mixamo --exclude Assets \
@@ -66,6 +72,7 @@ mv -f "$REPO"/build/ConquerAndCommand_ZeroBudget_v*_win64.zip "$REPO/build/_old/
 cp ConquerAndCommand.exe "$REPO/build/ConquerAndCommand.exe.new" && mv -f "$REPO/build/ConquerAndCommand.exe.new" "$REPO/build/ConquerAndCommand.exe"
 cp "$ZIP" README.txt "$REPO/build/"
 echo "    $ZIP  $(( $(stat -c%s "$ZIP") / 1000000 )) MB"
+fi
 
 # ---- 2. the website and the download ----
 if [ "$DO_SITE" = 1 ]; then
@@ -86,9 +93,11 @@ fi
 
 # ---- 4. prove players and servers agree ----
 echo "==> checking"
+if [ "$DO_SERVERS" = 1 ]; then
 SRV_VER=$(ssh -i "$KEY" -o StrictHostKeyChecking=no "root@$SERVER" "grep -oP 'GAME_VERSION\\s*:=\\s*\"\\K[^\"]+' /opt/conquer-and-command/game/main.gd")
 echo "    servers run v$SRV_VER"
 [ "$SRV_VER" = "$VERSION" ] || { echo "MISMATCH: site has v$VERSION, servers have v$SRV_VER"; exit 1; }
+fi
 for i in 1 2 3 4 5 6; do
   HEALTH=$(curl -s -m 10 "$LIST_URL/health" || true)
   case "$HEALTH" in *'"free":2'*) break ;; esac
