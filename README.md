@@ -6,28 +6,29 @@ the host runs the simulation, both players send orders, and each client only
 receives what its own units can see (real fog of war, not client-side hiding).
 
 ## Run it
-1. Godot 4.7.2 (the exe you already have from Incremental PvE).
+1. Godot 4.7.2.
 2. Project Manager → Import → this folder → `project.godot` → Import & Edit.
-3. FIRST OPEN IS SLOW: Godot imports the Synty pack (~7,000 files). Let it finish.
-4. F5 to play. **Host game** to host (port 7788), **Join game** with the host's IP.
-   Hosting alone lets you **Start solo (sandbox)** to practice — F1 gives +$10,000 there.
+3. F5 to play.
 
-Testing with a friend over the internet: the host forwards UDP port 7788 (or you both
-use a VPN like Tailscale/ZeroTier, or the same LAN). Same build on both sides — the
-host rejects mismatched versions.
+**Playing with friends** needs nothing set up: one player types a name and presses *Create game*,
+the others see it under *Open games* and click it. Matches run on our own servers (see "Playing
+together" below), so there is no port forwarding and no address to share. Everyone has to be on the
+same `GAME_VERSION`.
 
-Two copies on one PC for a quick check: run one, Host; run another, Join 127.0.0.1.
+**Skirmish vs AI** runs entirely in your own process, offline. Two PCs in one house with no internet
+can still connect directly: one starts a skirmish, the other opens *Same network (advanced)* and
+types their address.
 
 ### Shareable build (no Godot needed)
-`build/ConquerAndCommand.exe` is a single-file Windows build (everything embedded, ~230 MB; `build/ConquerAndCommand_ZeroBudget_v0.2.0_win64.zip` ~90 MB). Send the zip to a
-friend, they double-click it. Rebuild after code changes with the editor (Project → Export → Windows Desktop,
-templates installed once via Editor → Manage Export Templates) or headless:
+`build/ConquerAndCommand.exe` is a single-file Windows build; `build/ConquerAndCommand_ZeroBudget_v*_win64.zip`
+is what the website serves. Rebuild after code changes:
 ```
 godot --headless --path . --export-release "Windows Desktop" build/ConquerAndCommand.exe
 ```
-Both sides must run the same version (`GAME_VERSION` in `game/main.gd`); the host rejects mismatches.
-Internet play: the host forwards **UDP 7788** on their router and shares their public IP, or everybody joins a
-free mesh VPN (Tailscale / ZeroTier / Radmin) and uses the VPN IP - no router setup at all.
+Shipping is one command - `bash tools/ship.sh` - which exports the build, puts it behind the
+Download button and pushes the same build to the match servers, then checks that players and
+servers ended up on the same version. Never ship one without the other: a server on a different
+`GAME_VERSION` turns every player away.
 
 ## Controls
 | | |
@@ -125,7 +126,9 @@ restart if they crash, and recycle nightly at 05:30. The deploy key, the Digital
 server address are in `~/.frontline/keys.env` on Tzvi's PC, never in this repo.
 
 ```
-bash tools/server/deploy.sh root@209.38.220.107     # push a new build and restart
+bash tools/ship.sh                                  # build + website + servers, the normal way
+bash tools/ship.sh --servers                        # servers only
+bash tools/server/deploy.sh root@209.38.220.107     # the server half on its own
 ssh -i ~/.frontline/id_cc root@209.38.220.107 "tail -f /var/log/cc-match-7801.log"
 curl https://cc-rooms.zerobudget.workers.dev/health  # {servers, free, rooms}
 ```
